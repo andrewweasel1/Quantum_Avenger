@@ -46,6 +46,8 @@ Before beginning any implementation in `/new_pipeline/`, you MUST use your files
 - Read `/reference_code/feature_compiler.py` before authoring new Polars/CuPy vectorized operations.
 - Read `/reference_code/tournament.py` before implementing the Deflated Sharpe Ratio (DSR) or out-of-core PyArrow iterators.
 - Read `/reference_code/live_trader.py` before building the Numba JIT risk veto gates.
+- Read `/docs/PHASE_1_SPECIFICATION.md` through `/docs/PHASE_7_SPECIFICATION.md` and `/docs/FULL_SYSTEM_INTEGRATION_GUIDE.md` to align implementation with the project architecture and phase contracts.
+- Use `/docs/ROADMAP_2026.md` as the top-level execution plan for roadmap sequencing and milestone delivery.
 
 # Project Guidelines
 You must read the following files in the `/docs/` directory to understand the project architecture and roadmap before executing commands:
