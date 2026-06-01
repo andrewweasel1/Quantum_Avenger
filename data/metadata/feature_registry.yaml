@@ -1,0 +1,30 @@
+atr_14:
+  description: 14-day average true range for volatility scaling.
+  dtype: float
+  name: atr_14
+  source: price
+  window: 14d
+average_volume_20:
+  description: 20-day moving average volume.
+  dtype: float
+  name: average_volume_20
+  source: volume
+  window: 20d
+persist_feature:
+  description: Persisted test feature.
+  dtype: float
+  name: persist_feature
+  source: test
+  window: 1d
+returns:
+  description: Daily price return computed from close prices.
+  dtype: float
+  name: returns
+  source: price
+  window: 1d
+volatility_20:
+  description: 20-day rolling standard deviation of returns.
+  dtype: float
+  name: volatility_20
+  source: price
+  window: 20d
