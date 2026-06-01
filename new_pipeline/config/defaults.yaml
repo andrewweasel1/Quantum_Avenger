@@ -1,0 +1,40 @@
+data:
+  raw_vault_dir: "./data/raw"
+  processed_vault_dir: "./data/processed"
+  parquet_blocksize: "128MiB"
+  row_group_size: 100000
+  validation_mode: "strict"
+
+features:
+  cache_enabled: true
+  gpu_enabled: false
+  batch_size: 1024
+
+models:
+  prod_models_dir: "./models/prod"
+  candidate_models_dir: "./models/candidates"
+  model_version: "v0.1"
+
+execution:
+  max_risk_per_trade: 0.02
+  atr_stop_multiplier: 2.0
+  confidence_threshold: 0.65
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  log_file: "./logs/system.log"
+  max_bytes: 10485760
+
+fusion:
+  enabled: false
+  ollama_endpoint: "http://localhost:11434"
+  llm_model_name: "qwen-3"
+  sentiment_timeout: 5.0
+  semaphore_limit: 20
+
+system:
+  run_mode: "backtest"
+  dask_enabled: false
+  num_workers: 1
+  memory_limit: "8GB"
