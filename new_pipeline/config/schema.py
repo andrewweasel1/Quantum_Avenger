@@ -13,6 +13,7 @@ class FeatureConfig(BaseModel):
     cache_enabled: bool
     gpu_enabled: bool
     batch_size: int
+    metadata_dir: str
 
 
 class ModelConfig(BaseModel):

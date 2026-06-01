@@ -9,6 +9,7 @@ features:
   cache_enabled: true
   gpu_enabled: false
   batch_size: 1024
+  metadata_dir: "./data/metadata"
 
 models:
   prod_models_dir: "./models/prod"

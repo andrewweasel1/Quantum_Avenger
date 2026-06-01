@@ -13,17 +13,15 @@ def configure_logging() -> logging.Logger:
     logger = logging.getLogger("quantum_avenger")
     logger.setLevel(getattr(logging, config.logging.level.upper(), logging.INFO))
 
-    formatter = logging.Formatter(config.logging.format)
-    handler = RotatingFileHandler(
-        filename=log_file_path,
-        maxBytes=config.logging.max_bytes,
-        backupCount=5,
-        encoding="utf-8",
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
     if not logger.handlers:
+        formatter = logging.Formatter(config.logging.format)
+        handler = RotatingFileHandler(
+            filename=log_file_path,
+            maxBytes=config.logging.max_bytes,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        handler.setFormatter(formatter)
         logger.addHandler(handler)
 
     return logger

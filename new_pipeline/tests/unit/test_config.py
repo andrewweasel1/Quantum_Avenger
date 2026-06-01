@@ -4,7 +4,7 @@ from new_pipeline.config import get_config, reload_config
 
 
 def test_config_loads_defaults():
-    config = get_config()
+    config = reload_config()
     assert config.data.raw_vault_dir == "./data/raw"
     assert config.execution.max_risk_per_trade == 0.02
     assert config.logging.level == "INFO"
