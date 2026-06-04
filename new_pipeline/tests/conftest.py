@@ -16,3 +16,16 @@ def _reset_config_singleton():
     base._CONFIG_INSTANCE = None
     yield
     base._CONFIG_INSTANCE = None
+
+
+@pytest.fixture(autouse=True)
+def _isolate_feature_registry(tmp_path):
+    """Redirect the feature-registry singleton to a throwaway path so no test
+    mutates the tracked data/metadata/feature_registry.yaml artifact."""
+    from new_pipeline.features.registry import feature_registry
+
+    original_path = feature_registry._metadata_path
+    feature_registry._metadata_path = tmp_path / "feature_registry.yaml"
+    feature_registry.clear()
+    yield
+    feature_registry._metadata_path = original_path
