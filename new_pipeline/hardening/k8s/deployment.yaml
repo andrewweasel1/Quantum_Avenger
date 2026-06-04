@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantum-avenger-app
+  labels: {app: quantum-avenger, component: app}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: quantum-avenger, component: app}
+  template:
+    metadata:
+      labels: {app: quantum-avenger, component: app}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: app
+          image: quantum-avenger-app:latest
+          args: ["health"]
+          envFrom:
+            - configMapRef: {name: quantum-avenger-config}
+          resources:
+            requests: {cpu: "250m", memory: "512Mi"}
+            limits: {cpu: "1", memory: "2Gi"}
+          livenessProbe:
+            exec:
+              command: ["python", "-m", "new_pipeline.scripts.check_health"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantum-avenger-dashboard
+  labels: {app: quantum-avenger, component: dashboard}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: quantum-avenger, component: dashboard}
+  template:
+    metadata:
+      labels: {app: quantum-avenger, component: dashboard}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: dashboard
+          image: quantum-avenger-dashboard:latest
+          ports:
+            - containerPort: 8501
+          envFrom:
+            - configMapRef: {name: quantum-avenger-config}
+          resources:
+            requests: {cpu: "250m", memory: "512Mi"}
+            limits: {cpu: "1", memory: "1Gi"}
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            initialDelaySeconds: 20
+            periodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantum-avenger-mcp
+  labels: {app: quantum-avenger, component: mcp}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: quantum-avenger, component: mcp}
+  template:
+    metadata:
+      labels: {app: quantum-avenger, component: mcp}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: mcp
+          image: quantum-avenger-mcp:latest
+          envFrom:
+            - configMapRef: {name: quantum-avenger-config}
+          resources:
+            requests: {cpu: "100m", memory: "256Mi"}
+            limits: {cpu: "500m", memory: "512Mi"}

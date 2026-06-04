@@ -1,0 +1,22 @@
+# Quantum Avenger — MCP deterministic-tool server image (Phase 7).
+#   docker build -f new_pipeline/hardening/docker/Dockerfile.mcp -t quantum-avenger-mcp .
+# Runs the offline tool-inventory entrypoint; the live FastMCP stdio server is
+# wired in at the live cutover (see new_pipeline/execution/mcp_tools.py).
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY new_pipeline/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY new_pipeline ./new_pipeline
+
+RUN useradd --create-home --uid 10001 quant && chown -R quant /app
+USER quant
+
+ENTRYPOINT ["python", "-m", "new_pipeline.scripts.serve_mcp"]

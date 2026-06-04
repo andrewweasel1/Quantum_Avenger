@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quantum-avenger-config
+data:
+  QA_ENV: "production"
+  QA_SYSTEM__NUM_WORKERS: "4"
+# Secrets (Alpaca / Ollama credentials) are NOT stored here. Provide them via a
+# Kubernetes Secret consumed with envFrom.secretRef and the QA_ env-var override
+# convention, e.g. QA_FUSION__OLLAMA_ENDPOINT, QA_ALPACA__API_KEY.

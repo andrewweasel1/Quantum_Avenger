@@ -1,0 +1,29 @@
+# Local prod-like stack. Run from this directory: docker compose up --build
+# (build context is the repo root so the images can COPY new_pipeline/).
+services:
+  app:
+    build:
+      context: ../../..
+      dockerfile: new_pipeline/hardening/docker/Dockerfile.app
+    image: quantum-avenger-app
+    environment:
+      QA_ENV: production
+    command: ["health"]
+
+  dashboard:
+    build:
+      context: ../../..
+      dockerfile: new_pipeline/hardening/docker/Dockerfile.dashboard
+    image: quantum-avenger-dashboard
+    environment:
+      QA_ENV: production
+    ports:
+      - "8501:8501"
+
+  mcp:
+    build:
+      context: ../../..
+      dockerfile: new_pipeline/hardening/docker/Dockerfile.mcp
+    image: quantum-avenger-mcp
+    environment:
+      QA_ENV: production

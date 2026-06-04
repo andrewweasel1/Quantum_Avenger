@@ -1,0 +1,12 @@
+.git/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+new_pipeline/tests/
+reference_code/
+docs/
+*.md
+logs/
+data/raw/
+data/processed/
