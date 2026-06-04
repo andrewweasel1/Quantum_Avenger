@@ -1,0 +1,7 @@
+# GPU-only dependencies for the production CUDA runtime.
+# NOT installed by the SessionStart hook (these require a CUDA toolkit/driver
+# and will not install on the CPU-only sandbox or CI). Install on a GPU box:
+#   pip install -r new_pipeline/requirements-gpu.txt
+# numba (CPU + CUDA dispatch) is already in requirements.txt; cupy is the GPU
+# array library used by the feature kernels.
+cupy-cuda12x>=13.0

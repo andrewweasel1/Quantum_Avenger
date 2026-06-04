@@ -14,6 +14,10 @@ class FeatureConfig(BaseModel):
     gpu_enabled: bool
     batch_size: int
     metadata_dir: str
+    slippage_constant: float = 0.5
+    regime_percentile: float = 0.8
+    bps_scaler: float = 10000.0
+    max_slippage_bps: float = 50.0
 
 
 class ModelConfig(BaseModel):
@@ -26,6 +30,7 @@ class ExecutionConfig(BaseModel):
     max_risk_per_trade: float
     atr_stop_multiplier: float
     confidence_threshold: float
+    max_adv_coverage: float = 0.25
 
 
 class LoggingConfig(BaseModel):
