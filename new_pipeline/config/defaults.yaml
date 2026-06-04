@@ -95,3 +95,11 @@ rag:
   top_k: 5
   chunk_size: 512
   chunk_overlap: 100
+
+dashboard:
+  veto_ledger_path: "./data/ledger/veto_ledger.parquet"
+  trade_log_path: "./data/ledger/trade_log.parquet"
+  refresh_seconds: 5
+  max_drawdown_alert: 0.15
+  min_sharpe_alert: 0.0
+  max_veto_rate_alert: 0.5

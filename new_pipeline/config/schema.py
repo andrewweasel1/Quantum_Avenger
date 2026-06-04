@@ -93,6 +93,15 @@ class RAGConfig(BaseModel):
     chunk_overlap: int = 100
 
 
+class DashboardConfig(BaseModel):
+    veto_ledger_path: str = "./data/ledger/veto_ledger.parquet"
+    trade_log_path: str = "./data/ledger/trade_log.parquet"
+    refresh_seconds: int = 5
+    max_drawdown_alert: float = 0.15
+    min_sharpe_alert: float = 0.0
+    max_veto_rate_alert: float = 0.5
+
+
 class SystemConfig(BaseModel):
     run_mode: str
     dask_enabled: bool
@@ -113,3 +122,4 @@ class AppConfig(BaseModel):
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
+    dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
