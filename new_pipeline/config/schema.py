@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DataConfig(BaseModel):
@@ -33,6 +33,8 @@ class LoggingConfig(BaseModel):
     format: str
     log_file: str
     max_bytes: int
+    json_logs: bool = False
+    trace_enabled: bool = True
 
 
 class FusionConfig(BaseModel):
@@ -41,6 +43,12 @@ class FusionConfig(BaseModel):
     llm_model_name: str
     sentiment_timeout: float
     semaphore_limit: int
+
+
+class GPUConfig(BaseModel):
+    cuda_enabled: bool = False
+    device: str = "cpu"
+    fallback_to_cpu: bool = True
 
 
 class SystemConfig(BaseModel):
@@ -58,3 +66,4 @@ class AppConfig(BaseModel):
     logging: LoggingConfig
     fusion: FusionConfig
     system: SystemConfig
+    gpu: GPUConfig = Field(default_factory=GPUConfig)

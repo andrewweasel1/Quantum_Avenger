@@ -1,3 +1,3 @@
-from .base import get_config, reload_config
+from .base import build_config, get_config, reload_config
 
-__all__ = ["get_config", "reload_config"]
+__all__ = ["build_config", "get_config", "reload_config"]

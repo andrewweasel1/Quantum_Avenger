@@ -1,0 +1,19 @@
+# Testing overlay — isolated vault paths, quiet logs, deterministic and offline.
+# Layered over defaults.yaml, then any QA_-prefixed env vars win.
+data:
+  raw_vault_dir: "./data/test/raw"
+  processed_vault_dir: "./data/test/processed"
+logging:
+  level: "WARNING"
+  json_logs: false
+features:
+  gpu_enabled: false
+  cache_enabled: false
+gpu:
+  cuda_enabled: false
+  device: "cpu"
+fusion:
+  enabled: false
+system:
+  run_mode: "backtest"
+  dask_enabled: false

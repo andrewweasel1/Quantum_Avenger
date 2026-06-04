@@ -1,0 +1,14 @@
+# Development overlay — verbose logging, everything local and offline.
+# Layered over defaults.yaml, then any QA_-prefixed env vars win.
+logging:
+  level: "DEBUG"
+  json_logs: false
+features:
+  gpu_enabled: false
+gpu:
+  cuda_enabled: false
+  device: "cpu"
+fusion:
+  enabled: false
+system:
+  run_mode: "backtest"

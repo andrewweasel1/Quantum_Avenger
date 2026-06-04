@@ -25,3 +25,12 @@ ignore = [
     # JSON/YAML serialization; StrEnum would change str() output semantics.
     "UP042",
 ]
+
+[tool.coverage.run]
+source = ["new_pipeline"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+# A hard ">= 85%" gate is enforced in CI during Phase 7; left unset here so the
+# suite stays green while later-phase modules are still being built.

@@ -1,6 +1,6 @@
-from .base import get_config
+from .base import build_config
+from .schema import AppConfig
 
 
-def production_config():
-    config = get_config()
-    return config
+def production_config() -> AppConfig:
+    return build_config(env="production")
