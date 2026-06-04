@@ -14,16 +14,29 @@ import polars as pl
 
 from new_pipeline.core.exceptions import SchemaValidationError
 from new_pipeline.features.base import FeatureEngine
+from new_pipeline.features.gpu_kernels import rolling_duvol, rolling_ncskew
 from new_pipeline.features.registry import FeatureMetadata, feature_registry
 
 ATR_PERIOD = 14
 ADV_WINDOW = 20
 VOL_WINDOW = 20
 AMIHUD_WINDOW = 20
+CRASH_WINDOW = 60
 TRADING_DAYS = 252
 REGIME_QUANTILE = 0.8
 
-FEATURE_NAMES = ("returns", "atr", "adv_20", "volatility", "spread_pct", "amihud", "regime")
+FEATURE_NAMES = (
+    "returns",
+    "atr",
+    "adv_20",
+    "volatility",
+    "spread_pct",
+    "amihud",
+    "regime",
+    "ncskew",
+    "duvol",
+    "sentiment_score",
+)
 _REQUIRED_COLUMNS = ("date", "ticker", "open", "high", "low", "close", "volume")
 
 
@@ -39,6 +52,15 @@ def _feature_metadata() -> dict[str, FeatureMetadata]:
         "amihud": FeatureMetadata("amihud", "Amihud illiquidity.", "volume", f"{AMIHUD_WINDOW}d"),
         "regime": FeatureMetadata(
             "regime", "High-volatility regime flag.", "price", f"{VOL_WINDOW}d", "int"
+        ),
+        "ncskew": FeatureMetadata(
+            "ncskew", "Rolling NCSKEW crash-risk skewness.", "price", f"{CRASH_WINDOW}d"
+        ),
+        "duvol": FeatureMetadata(
+            "duvol", "Rolling down-to-up volatility.", "price", f"{CRASH_WINDOW}d"
+        ),
+        "sentiment_score": FeatureMetadata(
+            "sentiment_score", "LLM sentiment (neutral default until fusion runs).", "fusion", "1d"
         ),
     }
 
@@ -73,6 +95,12 @@ def add_features(frame: pl.DataFrame) -> pl.DataFrame:
         (pl.col("volatility") > pl.col("volatility").quantile(REGIME_QUANTILE))
         .cast(pl.Int8)
         .alias("regime"),
+    )
+    returns_np = out["returns"].fill_null(0.0).to_numpy()
+    out = out.with_columns(
+        pl.Series("ncskew", rolling_ncskew(returns_np, CRASH_WINDOW)),
+        pl.Series("duvol", rolling_duvol(returns_np, CRASH_WINDOW)),
+        pl.lit(0.0).alias("sentiment_score"),
     )
     return out.drop("_tr", "_mid")
 

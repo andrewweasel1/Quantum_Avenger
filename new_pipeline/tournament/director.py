@@ -1,0 +1,136 @@
+"""Per-sector tournament director — the Phase 3 end-to-end orchestration.
+
+For each sector in the processed feature frame it (optionally) prunes features
+with Clustered Feature Selection, runs the CPCV grid search, trains an
+early-stopped candidate, and writes the candidate booster + feature manifest +
+returns matrix under the candidates directory. Restores the legacy
+``execute_gauntlet`` loop the modular rebuild had dropped.
+"""
+
+import json
+from pathlib import Path
+
+import numpy as np
+import polars as pl
+
+from new_pipeline.config import get_config
+from new_pipeline.core.seeding import active_seed
+from new_pipeline.tournament.feature_selection import select_orthogonal_features
+from new_pipeline.tournament.grid_search import run_grid_search
+from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
+from new_pipeline.tournament.trainer import predict_proba, save_candidate, train_booster
+
+_PRICE_COLUMNS = ("close", "low", "atr")
+_MIN_ROWS = 40
+
+
+def _slug(sector: str) -> str:
+    return sector.lower().replace(" ", "_").replace("/", "_")
+
+
+def _sharpe_score_fn(labels, prices, cfg):
+    """A score_fn(feature_matrix) -> Sharpe used for CFS permutation importance."""
+    rounds = min(40, cfg.tournament.num_boost_round)
+
+    def score(matrix):
+        booster = train_booster(
+            matrix,
+            labels,
+            num_boost_round=rounds,
+            penalty_fp=cfg.tournament.penalty_fp,
+            penalty_fn=cfg.tournament.penalty_fn,
+        )
+        proba = predict_proba(booster, matrix)
+        signals = (proba > cfg.execution.confidence_threshold).astype(np.int64)
+        returns = simulate_t1_returns(
+            signals,
+            prices["close"],
+            prices["low"],
+            prices["atr"],
+            cfg.execution.atr_stop_multiplier,
+            cfg.execution.max_risk_per_trade,
+        )
+        return sharpe_ratio(returns)
+
+    return score
+
+
+def run_sector_tournament(frame: pl.DataFrame, feature_cols, output_dir, use_cfs: bool = True):
+    """Run the tournament per sector; returns a {sector: result} summary dict."""
+    cfg = get_config()
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    required = [*feature_cols, "target_label", *_PRICE_COLUMNS]
+
+    results: dict[str, dict] = {}
+    for _, group in frame.group_by("sector", maintain_order=True):
+        # Polars treats NaN as distinct from null; coerce so rolling/label NaNs drop.
+        clean = group.with_columns(pl.col(required).fill_nan(None)).drop_nulls(subset=required)
+        if clean.height < _MIN_ROWS:
+            continue
+        sector = clean["sector"][0]
+        labels = clean["target_label"].to_numpy().astype(np.float64)
+        prices = {col: clean[col].to_numpy().astype(np.float64) for col in _PRICE_COLUMNS}
+        matrix = clean.select(feature_cols).to_numpy()
+
+        selected = list(feature_cols)
+        if use_cfs and matrix.shape[1] > 1:
+            selected = select_orthogonal_features(
+                matrix,
+                list(feature_cols),
+                _sharpe_score_fn(labels, prices, cfg),
+                distance_threshold=cfg.tournament.cfs_distance_threshold,
+                min_importance=cfg.tournament.cfs_min_importance,
+                seed=active_seed(),
+            )
+        selected_matrix = clean.select(selected).to_numpy()
+
+        search = run_grid_search(selected_matrix, labels, prices)
+        booster = _train_candidate(selected_matrix, labels, cfg)
+
+        results[sector] = _persist(output, sector, booster, selected, search)
+    return results
+
+
+def _train_candidate(matrix, labels, cfg):
+    split = int(len(labels) * 0.8)
+    eval_features = matrix[split:] if len(labels) - split >= 10 else None
+    eval_labels = labels[split:] if eval_features is not None else None
+    return train_booster(
+        matrix[:split] if eval_features is not None else matrix,
+        labels[:split] if eval_features is not None else labels,
+        num_boost_round=cfg.tournament.num_boost_round,
+        penalty_fp=cfg.tournament.penalty_fp,
+        penalty_fn=cfg.tournament.penalty_fn,
+        eval_features=eval_features,
+        eval_labels=eval_labels,
+        early_stopping_rounds=cfg.tournament.early_stopping_rounds,
+    )
+
+
+def _persist(output: Path, sector: str, booster, selected, search) -> dict:
+    slug = _slug(sector)
+    candidate_path = output / f"{slug}_candidate.json"
+    features_path = output / f"{slug}_candidate_features.json"
+    returns_path = output / f"{slug}_returns_matrix.parquet"
+
+    save_candidate(booster, candidate_path)
+    features_path.write_text(
+        json.dumps(
+            {"features": selected, "metadata": {"sector": sector, "params": search.best_params}},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    matrix = search.returns_matrix
+    pl.DataFrame(
+        matrix.T, schema=[f"trial_{i}" for i in range(matrix.shape[0])]
+    ).write_parquet(returns_path)
+
+    return {
+        "selected_features": selected,
+        "best_params": search.best_params,
+        "best_sharpe": search.best_sharpe,
+        "trial_sharpes": search.trial_sharpes,
+        "candidate_path": str(candidate_path),
+    }

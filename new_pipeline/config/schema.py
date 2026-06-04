@@ -18,6 +18,9 @@ class FeatureConfig(BaseModel):
     regime_percentile: float = 0.8
     bps_scaler: float = 10000.0
     max_slippage_bps: float = 50.0
+    crash_window: int = 60
+    label_horizon: int = 1
+    label_cost_bps: float = 10.0
 
 
 class ModelConfig(BaseModel):
@@ -68,9 +71,12 @@ class TournamentConfig(BaseModel):
     penalty_fp: float = 5.0
     penalty_fn: float = 1.0
     num_boost_round: int = 100
+    early_stopping_rounds: int = 25
     cache_host_ratio: float = 0.75
     tree_method: str = "hist"
     device: str = "cpu"
+    cfs_distance_threshold: float = 0.5
+    cfs_min_importance: float = 0.0
     sectors: list[str] = Field(default_factory=list)
 
 
@@ -100,6 +106,7 @@ class DashboardConfig(BaseModel):
     max_drawdown_alert: float = 0.15
     min_sharpe_alert: float = 0.0
     max_veto_rate_alert: float = 0.5
+    auth_enabled: bool = False
 
 
 class SystemConfig(BaseModel):

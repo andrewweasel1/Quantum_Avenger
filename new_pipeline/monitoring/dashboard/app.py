@@ -2,12 +2,15 @@
 
 Run: ``streamlit run new_pipeline/monitoring/dashboard/app.py``
 Reads the veto ledger + trade log via RealtimeDataManager (offline, no network).
+When ``dashboard.auth_enabled`` is set, a login gate guards the app
+(credentials from DASHBOARD_USER / DASHBOARD_PASS).
 """
 
 import streamlit as st
 
 from new_pipeline.config import get_config
 from new_pipeline.monitoring.dashboard.alerts import check_alerts
+from new_pipeline.monitoring.dashboard.auth import require_login
 from new_pipeline.monitoring.dashboard.realtime import RealtimeDataManager
 
 
@@ -19,6 +22,8 @@ def build_manager() -> RealtimeDataManager:
 def main() -> None:
     cfg = get_config().dashboard
     st.set_page_config(page_title="Quantum Avenger", layout="wide", page_icon="🛡️")
+    if cfg.auth_enabled and not require_login(st):
+        return
     st.title("🛡️ Quantum Avenger — Monitoring")
 
     manager = build_manager()

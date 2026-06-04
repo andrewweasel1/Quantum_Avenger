@@ -6,14 +6,16 @@ with no GPU (CI / this sandbox). Host dispatchers use the GPU when it is
 available and requested, otherwise the CPU path.
 
 Metrics: per-bar spread, Amihud illiquidity, and the crash-risk pair NCSKEW
-(negative coefficient of skewness) and DUVOL (down-to-up volatility). The
-elementwise pair ship with ``@cuda.jit`` kernels; the reduction pair are CPU
-implementations (GPU reductions are a follow-up to be validated on a GPU box).
+(negative coefficient of skewness) and DUVOL (down-to-up volatility) — provided
+both as whole-series scalars and as vectorized rolling-window series. The
+elementwise pair ship with ``@cuda.jit`` kernels; the reductions are vectorized
+NumPy (GPU reductions are a follow-up to be validated on a GPU box).
 """
 
 import math
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 
 try:
     from numba import cuda
@@ -83,6 +85,48 @@ def duvol(returns: np.ndarray) -> float:
     if down_var <= 0.0 or up_var <= 0.0:
         return 0.0
     return math.log(((up.size - 1) * down_var) / ((down.size - 1) * up_var))
+
+
+# --- Rolling crash-risk (vectorized; leading window-1 bars are NaN) --------
+def rolling_ncskew(returns: np.ndarray, window: int) -> np.ndarray:
+    values = np.asarray(returns, dtype=np.float64)
+    n = values.size
+    out = np.full(n, np.nan)
+    if n < window or window < 3:
+        return out
+    windows = sliding_window_view(values, window)
+    centered = windows - windows.mean(axis=1, keepdims=True)
+    sum_sq = (centered**2).sum(axis=1)
+    sum_cube = (centered**3).sum(axis=1)
+    numerator = window * (window - 1) ** 1.5 * sum_cube
+    denominator = (window - 1) * (window - 2) * np.power(sum_sq, 1.5)
+    skew = np.divide(-numerator, denominator, out=np.zeros_like(sum_sq), where=sum_sq > 0.0)
+    out[window - 1 :] = skew
+    return out
+
+
+def rolling_duvol(returns: np.ndarray, window: int) -> np.ndarray:
+    values = np.asarray(returns, dtype=np.float64)
+    n = values.size
+    out = np.full(n, np.nan)
+    if n < window or window < 4:
+        return out
+    windows = sliding_window_view(values, window)
+    centered = windows - windows.mean(axis=1, keepdims=True)
+    is_down = centered < 0.0
+    down_count = is_down.sum(axis=1)
+    up_count = window - down_count
+    down_sum = (np.where(is_down, centered, 0.0) ** 2).sum(axis=1)
+    up_sum = (np.where(~is_down, centered, 0.0) ** 2).sum(axis=1)
+    valid = (down_count >= 2) & (up_count >= 2) & (down_sum > 0.0) & (up_sum > 0.0)
+    ratio = np.divide(
+        (up_count - 1) * down_sum,
+        (down_count - 1) * up_sum,
+        out=np.ones_like(down_sum),
+        where=valid,
+    )
+    out[window - 1 :] = np.where(valid, np.log(ratio), 0.0)
+    return out
 
 
 # --- CUDA kernels (compiled lazily; exercised on a GPU box) ----------------
