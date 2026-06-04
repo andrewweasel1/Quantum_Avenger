@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from new_pipeline.features.base import FeatureEngine
-from new_pipeline.features.registry import FeatureMetadata, feature_registry
 from new_pipeline.config import get_config
 from new_pipeline.core.exceptions import IngestionError
 from new_pipeline.data.vaults import VaultManager
+from new_pipeline.features.base import FeatureEngine
+from new_pipeline.features.registry import FeatureMetadata, feature_registry
 
 
 class PandasFeatureCompiler(FeatureEngine):
@@ -84,7 +84,13 @@ class PandasFeatureCompiler(FeatureEngine):
         high_low = df["high"] - df["low"]
         high_close = (df["high"] - df["close"].shift(1)).abs()
         low_close = (df["low"] - df["close"].shift(1)).abs()
-        df["atr_14"] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean().fillna(0.0)
+        df["atr_14"] = (
+            pd.concat([high_low, high_close, low_close], axis=1)
+            .max(axis=1)
+            .rolling(14)
+            .mean()
+            .fillna(0.0)
+        )
 
         df["volatility_20"] = df["returns"].rolling(window=20).std().fillna(0.0)
         df["average_volume_20"] = df["volume"].rolling(window=20).mean().fillna(0.0)

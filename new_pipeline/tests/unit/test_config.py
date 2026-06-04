@@ -1,6 +1,5 @@
-import os
 
-from new_pipeline.config import get_config, reload_config
+from new_pipeline.config import reload_config
 
 
 def test_config_loads_defaults():

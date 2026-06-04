@@ -6,7 +6,9 @@ class RiskManager:
     max_risk_per_trade: float
     atr_multiplier: float
 
-    def compute_position_size(self, account_balance: float, entry_price: float, atr: float) -> float:
+    def compute_position_size(
+        self, account_balance: float, entry_price: float, atr: float
+    ) -> float:
         if atr <= 0 or entry_price <= 0:
             return 0.0
 

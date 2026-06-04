@@ -1,5 +1,5 @@
-from new_pipeline.features.registry import FeatureMetadata, feature_registry
 from new_pipeline.features.compiler import PandasFeatureCompiler
+from new_pipeline.features.registry import FeatureMetadata, feature_registry
 
 
 def test_feature_registry_can_register_and_query():
@@ -21,7 +21,7 @@ def test_feature_registry_can_register_and_query():
 
 def test_feature_compiler_registers_feature_metadata():
     feature_registry.clear()
-    compiler = PandasFeatureCompiler()
+    PandasFeatureCompiler()
 
     assert "returns" in feature_registry.list_features()
     assert feature_registry.get("atr_14")["window"] == "14d"

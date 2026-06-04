@@ -1,4 +1,4 @@
-from new_pipeline.core.exceptions import QuantumAvengerError, ConfigurationError
+from new_pipeline.core.exceptions import ConfigurationError, QuantumAvengerError
 
 
 def test_custom_exception_hierarchy():

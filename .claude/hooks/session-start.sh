@@ -21,6 +21,11 @@ cd "$PROJECT_DIR"
 # state is snapshotted after this hook, and pip reuses its wheel cache on reruns.
 python3 -m pip install -r new_pipeline/requirements.txt
 
+# Development tooling (ruff and friends) so linters work in the session.
+if [ -f new_pipeline/requirements-dev.txt ]; then
+  python3 -m pip install -r new_pipeline/requirements-dev.txt
+fi
+
 # Make the repo root importable so `import new_pipeline...` resolves the same
 # way `python -m pytest new_pipeline/tests` expects, regardless of cwd.
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then

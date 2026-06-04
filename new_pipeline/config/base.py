@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, RootModel
 
 from .schema import AppConfig
 
@@ -14,7 +13,7 @@ _CONFIG_INSTANCE: AppConfig | None = None
 
 
 def load_defaults() -> dict[str, Any]:
-    with open(_DEFAULTS_PATH, "r", encoding="utf-8") as handle:
+    with open(_DEFAULTS_PATH, encoding="utf-8") as handle:
         return yaml.safe_load(handle)
 
 
