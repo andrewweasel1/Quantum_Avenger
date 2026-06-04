@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(./reference_code/**)",
+      "Write(./reference_code/**)"
+    ]
+  }
+}
