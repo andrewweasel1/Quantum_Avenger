@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from new_pipeline.config import reload_config

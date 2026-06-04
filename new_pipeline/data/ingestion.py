@@ -36,7 +36,8 @@ class DataIngestion:
                     df.to_parquet(target_path, index=False)
                 except ImportError as exc:
                     raise IngestionError(
-                        "Parquet support requires pyarrow or fastparquet. Install it before using .parquet output."
+                        "Parquet support requires pyarrow or fastparquet. "
+                        "Install it before using .parquet output."
                     ) from exc
             else:
                 df.to_csv(target_path, index=False)

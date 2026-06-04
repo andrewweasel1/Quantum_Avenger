@@ -1,7 +1,6 @@
 import argparse
-from pathlib import Path
 
-from new_pipeline.config import get_config, reload_config
+from new_pipeline.config import get_config
 from new_pipeline.core.logging import configure_logging
 from new_pipeline.data.vaults import VaultManager
 from new_pipeline.monitoring.health import HealthCheck
@@ -25,7 +24,11 @@ def run_health() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Quantum Avenger Phase 1 CLI")
-    parser.add_argument("command", choices=["show-config", "init-vaults", "health"], help="CLI command to execute")
+    parser.add_argument(
+        "command",
+        choices=["show-config", "init-vaults", "health"],
+        help="CLI command to execute",
+    )
     return parser.parse_args()
 
 

@@ -1,0 +1,4 @@
+# Development tooling for Quantum Avenger.
+# Installed by the SessionStart hook (.claude/hooks/session-start.sh) so that
+# linters work out of the box in Claude Code on the web sessions.
+ruff>=0.15

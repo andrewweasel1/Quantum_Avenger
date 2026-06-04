@@ -1,5 +1,4 @@
 import pandas as pd
-
 from new_pipeline.config import reload_config
 from new_pipeline.data.ingestion import DataIngestion
 

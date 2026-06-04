@@ -12,7 +12,7 @@ def retry(policy: RetryPolicy):
             while attempt <= policy.max_retries:
                 try:
                     return func(*args, **kwargs)
-                except Exception as exc:
+                except Exception:
                     attempt += 1
                     if attempt > policy.max_retries:
                         raise
