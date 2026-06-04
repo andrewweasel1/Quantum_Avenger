@@ -22,7 +22,8 @@ from new_pipeline.tournament.director import run_sector_tournament
 from new_pipeline.tournament.trainer import load_booster, predict_proba
 
 FEATURE_COLS = [
-    "returns", "atr", "adv_20", "volatility", "spread_pct", "amihud", "ncskew", "duvol",
+    "returns", "atr", "adv_20", "volatility", "spread_pct", "roll_spread",
+    "amihud", "ncskew", "duvol",
 ]
 
 

@@ -2,7 +2,8 @@
 
 Streams one Parquet row-group at a time into an ``xgb.QuantileDMatrix`` /
 ``xgb.ExtMemQuantileDMatrix`` so training never materializes the whole vault in
-memory — the basis for the GPU out-of-core path (``cache_host_ratio``).
+memory — the basis for the GPU out-of-core path (``cache_host_ratio``). Columns
+are converted Arrow -> NumPy directly (no pandas materialization).
 """
 
 import numpy as np
@@ -27,10 +28,12 @@ class ParquetDataIter(xgb.DataIter):
         table = self._parquet.read_row_group(
             self._row_group, columns=[*self._features, self._label]
         )
-        frame = table.to_pandas()
-        input_data(
-            data=frame[self._features].to_numpy(dtype=np.float64),
-            label=frame[self._label].to_numpy(dtype=np.float64),
+        features = np.column_stack(
+            [table.column(name).to_numpy(zero_copy_only=False) for name in self._features]
+        ).astype(np.float64, copy=False)
+        labels = table.column(self._label).to_numpy(zero_copy_only=False).astype(
+            np.float64, copy=False
         )
+        input_data(data=features, label=labels)
         self._row_group += 1
         return 1

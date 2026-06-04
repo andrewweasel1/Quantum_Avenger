@@ -4,15 +4,23 @@ Computes the Phase 2 technical + microstructure feature set with no Python
 loops (principle G2). Operates per ticker so rolling windows never bleed across
 symbols. Required input columns: date, ticker, open, high, low, close, volume.
 
+Scale (Tier 2): :meth:`PolarsFeatureEngine.compile` is out-of-core — it scans
+the vault lazily and streams one ticker at a time, writing psutil-sized row
+groups, so memory stays bounded. :func:`compile_features_dask` parallelizes a
+pre-partitioned (one-file-per-ticker) vault via Dask.
+
 Hygiene (G5): purge NaNs from bad *inputs* before calling this; the leading
 nulls that rolling windows legitimately produce are left for the caller to drop.
 """
 
 import math
+from pathlib import Path
 
 import polars as pl
+import pyarrow.parquet as pq
 
 from new_pipeline.core.exceptions import SchemaValidationError
+from new_pipeline.data.sizing import dynamic_row_group_size
 from new_pipeline.features.base import FeatureEngine
 from new_pipeline.features.gpu_kernels import rolling_duvol, rolling_ncskew
 from new_pipeline.features.registry import FeatureMetadata, feature_registry
@@ -21,6 +29,7 @@ ATR_PERIOD = 14
 ADV_WINDOW = 20
 VOL_WINDOW = 20
 AMIHUD_WINDOW = 20
+SPREAD_WINDOW = 20
 CRASH_WINDOW = 60
 TRADING_DAYS = 252
 REGIME_QUANTILE = 0.8
@@ -31,6 +40,7 @@ FEATURE_NAMES = (
     "adv_20",
     "volatility",
     "spread_pct",
+    "roll_spread",
     "amihud",
     "regime",
     "ncskew",
@@ -49,6 +59,9 @@ def _feature_metadata() -> dict[str, FeatureMetadata]:
             "volatility", "Annualized rolling volatility.", "price", f"{VOL_WINDOW}d"
         ),
         "spread_pct": FeatureMetadata("spread_pct", "High-low spread over mid.", "price", "1d"),
+        "roll_spread": FeatureMetadata(
+            "roll_spread", "Rolling mean high-low spread.", "price", f"{SPREAD_WINDOW}d"
+        ),
         "amihud": FeatureMetadata("amihud", "Amihud illiquidity.", "volume", f"{AMIHUD_WINDOW}d"),
         "regime": FeatureMetadata(
             "regime", "High-volatility regime flag.", "price", f"{VOL_WINDOW}d", "int"
@@ -89,6 +102,7 @@ def add_features(frame: pl.DataFrame) -> pl.DataFrame:
         ((pl.col("high") - pl.col("low")) / pl.col("_mid")).alias("spread_pct"),
     )
     out = out.with_columns(
+        pl.col("spread_pct").rolling_mean(window_size=SPREAD_WINDOW).alias("roll_spread"),
         (pl.col("returns").abs() / (pl.col("close") * pl.col("volume")))
         .rolling_mean(window_size=AMIHUD_WINDOW)
         .alias("amihud"),
@@ -116,6 +130,35 @@ def compile_features(frame: pl.DataFrame) -> pl.DataFrame:
     return pl.concat(groups) if groups else frame
 
 
+def _compile_file(path: str) -> pl.DataFrame:
+    return add_features(pl.read_parquet(path))
+
+
+def compile_features_dask(input_dir, output_path) -> None:
+    """Parallel per-file feature compilation via Dask (each file = one ticker)."""
+    import dask
+
+    files = sorted(Path(input_dir).glob("*.parquet"))
+    if not files:
+        return
+    frames = dask.compute(*[dask.delayed(_compile_file)(str(path)) for path in files])
+    _stream_write(frames, output_path)
+
+
+def _stream_write(frames, output_path) -> None:
+    row_group_size = dynamic_row_group_size()
+    writer = None
+    try:
+        for frame in frames:
+            table = frame.to_arrow()
+            if writer is None:
+                writer = pq.ParquetWriter(str(output_path), table.schema)
+            writer.write_table(table, row_group_size=row_group_size)
+    finally:
+        if writer is not None:
+            writer.close()
+
+
 class PolarsFeatureEngine(FeatureEngine):
     """FeatureEngine implementation backed by :func:`compile_features`."""
 
@@ -123,7 +166,13 @@ class PolarsFeatureEngine(FeatureEngine):
         self._register_features()
 
     def compile(self, raw_path, processed_path) -> None:
-        compile_features(pl.read_parquet(raw_path)).write_parquet(processed_path)
+        """Out-of-core: scan lazily and stream one ticker at a time to disk."""
+        lazy = pl.scan_parquet(raw_path)
+        tickers = lazy.select("ticker").unique().collect().to_series().to_list()
+        featured = (
+            add_features(lazy.filter(pl.col("ticker") == ticker).collect()) for ticker in tickers
+        )
+        _stream_write(featured, processed_path)
 
     def list_available_features(self) -> list[str]:
         return list(FEATURE_NAMES)

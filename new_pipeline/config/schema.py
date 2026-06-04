@@ -75,6 +75,7 @@ class TournamentConfig(BaseModel):
     cache_host_ratio: float = 0.75
     tree_method: str = "hist"
     device: str = "cpu"
+    max_workers: int = 1
     cfs_distance_threshold: float = 0.5
     cfs_min_importance: float = 0.0
     sectors: list[str] = Field(default_factory=list)

@@ -3,11 +3,13 @@
 For each sector in the processed feature frame it (optionally) prunes features
 with Clustered Feature Selection, runs the CPCV grid search, trains an
 early-stopped candidate, and writes the candidate booster + feature manifest +
-returns matrix under the candidates directory. Restores the legacy
-``execute_gauntlet`` loop the modular rebuild had dropped.
+returns matrix under the candidates directory. Sectors are independent, so they
+run in parallel on a thread pool (XGBoost releases the GIL during training) when
+``max_workers > 1``. Restores the legacy ``execute_gauntlet`` loop.
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -55,55 +57,66 @@ def _sharpe_score_fn(labels, prices, cfg):
     return score
 
 
-def run_sector_tournament(frame: pl.DataFrame, feature_cols, output_dir, use_cfs: bool = True):
+def run_sector_tournament(frame, feature_cols, output_dir, use_cfs=True, max_workers=None):
     """Run the tournament per sector; returns a {sector: result} summary dict."""
     cfg = get_config()
+    workers = max_workers if max_workers is not None else cfg.tournament.max_workers
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     required = [*feature_cols, "target_label", *_PRICE_COLUMNS]
 
-    results: dict[str, dict] = {}
+    sectors = []
     for _, group in frame.group_by("sector", maintain_order=True):
         # Polars treats NaN as distinct from null; coerce so rolling/label NaNs drop.
         clean = group.with_columns(pl.col(required).fill_nan(None)).drop_nulls(subset=required)
-        if clean.height < _MIN_ROWS:
-            continue
-        sector = clean["sector"][0]
-        labels = clean["target_label"].to_numpy().astype(np.float64)
-        prices = {col: clean[col].to_numpy().astype(np.float64) for col in _PRICE_COLUMNS}
-        matrix = clean.select(feature_cols).to_numpy()
+        if clean.height >= _MIN_ROWS:
+            sectors.append(clean)
 
-        selected = list(feature_cols)
-        if use_cfs and matrix.shape[1] > 1:
-            selected = select_orthogonal_features(
-                matrix,
-                list(feature_cols),
-                _sharpe_score_fn(labels, prices, cfg),
-                distance_threshold=cfg.tournament.cfs_distance_threshold,
-                min_importance=cfg.tournament.cfs_min_importance,
-                seed=active_seed(),
-            )
-        selected_matrix = clean.select(selected).to_numpy()
+    def work(clean):
+        return _process_sector(clean, feature_cols, output, cfg, use_cfs)
 
-        search = run_grid_search(selected_matrix, labels, prices)
-        booster = _train_candidate(selected_matrix, labels, cfg)
+    if workers and workers > 1 and len(sectors) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            outcomes = list(pool.map(work, sectors))
+    else:
+        outcomes = [work(clean) for clean in sectors]
+    return {sector: result for sector, result in outcomes}
 
-        results[sector] = _persist(output, sector, booster, selected, search)
-    return results
+
+def _process_sector(clean, feature_cols, output, cfg, use_cfs):
+    sector = clean["sector"][0]
+    labels = clean["target_label"].to_numpy().astype(np.float64)
+    prices = {col: clean[col].to_numpy().astype(np.float64) for col in _PRICE_COLUMNS}
+    matrix = clean.select(feature_cols).to_numpy()
+
+    selected = list(feature_cols)
+    if use_cfs and matrix.shape[1] > 1:
+        selected = select_orthogonal_features(
+            matrix,
+            list(feature_cols),
+            _sharpe_score_fn(labels, prices, cfg),
+            distance_threshold=cfg.tournament.cfs_distance_threshold,
+            min_importance=cfg.tournament.cfs_min_importance,
+            seed=active_seed(),
+        )
+    selected_matrix = clean.select(selected).to_numpy()
+
+    search = run_grid_search(selected_matrix, labels, prices)
+    booster = _train_candidate(selected_matrix, labels, cfg)
+    return sector, _persist(output, sector, booster, selected, search)
 
 
 def _train_candidate(matrix, labels, cfg):
     split = int(len(labels) * 0.8)
-    eval_features = matrix[split:] if len(labels) - split >= 10 else None
-    eval_labels = labels[split:] if eval_features is not None else None
+    use_eval = len(labels) - split >= 10
     return train_booster(
-        matrix[:split] if eval_features is not None else matrix,
-        labels[:split] if eval_features is not None else labels,
+        matrix[:split] if use_eval else matrix,
+        labels[:split] if use_eval else labels,
         num_boost_round=cfg.tournament.num_boost_round,
         penalty_fp=cfg.tournament.penalty_fp,
         penalty_fn=cfg.tournament.penalty_fn,
-        eval_features=eval_features,
-        eval_labels=eval_labels,
+        eval_features=matrix[split:] if use_eval else None,
+        eval_labels=labels[split:] if use_eval else None,
         early_stopping_rounds=cfg.tournament.early_stopping_rounds,
     )
 

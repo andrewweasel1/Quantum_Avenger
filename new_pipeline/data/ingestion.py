@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -57,3 +58,10 @@ class DataIngestion:
             return pd.read_csv(source_path, parse_dates=["date"])
         except Exception as exc:
             raise IngestionError(f"Failed to load raw dataframe: {exc}") from exc
+
+    def load_many(self, source_names, max_workers: int = 4) -> dict[str, pd.DataFrame]:
+        """Load multiple raw files concurrently (I/O-bound ThreadPool)."""
+        names = list(source_names)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            frames = list(pool.map(self.load_raw_dataframe, names))
+        return dict(zip(names, frames, strict=True))
