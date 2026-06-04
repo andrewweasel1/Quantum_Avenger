@@ -51,3 +51,34 @@ gpu:
   cuda_enabled: false
   device: "cpu"
   fallback_to_cpu: true
+
+tournament:
+  n_groups: 6
+  test_groups: 2
+  purge_days: 5
+  embargo_days: 5
+  penalty_fp: 5.0
+  penalty_fn: 1.0
+  num_boost_round: 100
+  cache_host_ratio: 0.75
+  tree_method: "hist"
+  device: "cpu"
+  sectors:
+    - "Information Technology"
+    - "Health Care"
+    - "Financials"
+    - "Consumer Discretionary"
+    - "Communication Services"
+    - "Industrials"
+    - "Consumer Staples"
+    - "Energy"
+    - "Utilities"
+    - "Real Estate"
+    - "Materials"
+
+evaluation:
+  dsr_promotion_threshold: 0.95
+  hmm_states: 3
+  hmm_n_iter: 100
+  synthetic_sr_min: 0.0
+  registry_path: "./models/prod/promotion_registry.json"
