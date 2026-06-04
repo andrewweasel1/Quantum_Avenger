@@ -1,0 +1,15 @@
+# Production overlay — GPU on, structured JSON logs, live fusion.
+# Layered over defaults.yaml, then any QA_-prefixed env vars (incl. secrets) win.
+logging:
+  level: "INFO"
+  json_logs: true
+features:
+  gpu_enabled: true
+gpu:
+  cuda_enabled: true
+  device: "cuda"
+  fallback_to_cpu: true
+fusion:
+  enabled: true
+system:
+  run_mode: "live"

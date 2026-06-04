@@ -26,6 +26,8 @@ logging:
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   log_file: "./logs/system.log"
   max_bytes: 10485760
+  json_logs: false
+  trace_enabled: true
 
 fusion:
   enabled: false
@@ -39,3 +41,8 @@ system:
   dask_enabled: false
   num_workers: 1
   memory_limit: "8GB"
+
+gpu:
+  cuda_enabled: false
+  device: "cpu"
+  fallback_to_cpu: true

@@ -1,3 +1,4 @@
+import copy
 import os
 from pathlib import Path
 from typing import Any
@@ -6,8 +7,16 @@ import yaml
 
 from .schema import AppConfig
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULTS_PATH = _PROJECT_ROOT / "config" / "defaults.yaml"
+_CONFIG_DIR = Path(__file__).resolve().parent
+_DEFAULTS_PATH = _CONFIG_DIR / "defaults.yaml"
+
+# Recognized deployment environments and their overlay files (layered over
+# defaults.yaml, then any QA_-prefixed env vars win).
+_ENV_OVERLAYS = {
+    "development": _CONFIG_DIR / "development.yaml",
+    "testing": _CONFIG_DIR / "testing.yaml",
+    "production": _CONFIG_DIR / "production.yaml",
+}
 
 _CONFIG_INSTANCE: AppConfig | None = None
 
@@ -17,16 +26,38 @@ def load_defaults() -> dict[str, Any]:
         return yaml.safe_load(handle)
 
 
+def _load_overlay(env: str) -> dict[str, Any]:
+    path = _ENV_OVERLAYS.get(env)
+    if path is None or not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 class ConfigManager:
-    def __init__(self) -> None:
+    def __init__(self, env: str | None = None) -> None:
+        self._env = env if env is not None else os.environ.get("QA_ENV")
         self._defaults = load_defaults()
         self._config = self._build_config()
 
     def _build_config(self) -> AppConfig:
-        merged = self._defaults.copy()
+        merged = copy.deepcopy(self._defaults)
+        if self._env:
+            merged = _deep_merge(merged, _load_overlay(self._env))
 
         for key, value in os.environ.items():
-            if key.startswith("QA_"):
+            # QA_ENV selects the overlay; it is not a config key itself.
+            if key.startswith("QA_") and key != "QA_ENV":
                 parts = key[3:].lower().split("__")
                 target = merged
                 for part in parts[:-1]:
@@ -63,3 +94,8 @@ def reload_config() -> AppConfig:
     global _CONFIG_INSTANCE
     _CONFIG_INSTANCE = None
     return get_config()
+
+
+def build_config(env: str | None = None) -> AppConfig:
+    """Build a fresh (non-singleton) config for a specific environment overlay."""
+    return ConfigManager(env=env).get_config()
