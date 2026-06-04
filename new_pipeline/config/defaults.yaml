@@ -10,6 +10,10 @@ features:
   gpu_enabled: false
   batch_size: 1024
   metadata_dir: "./data/metadata"
+  slippage_constant: 0.5
+  regime_percentile: 0.8
+  bps_scaler: 10000.0
+  max_slippage_bps: 50.0
 
 models:
   prod_models_dir: "./models/prod"
@@ -20,6 +24,7 @@ execution:
   max_risk_per_trade: 0.02
   atr_stop_multiplier: 2.0
   confidence_threshold: 0.65
+  max_adv_coverage: 0.25
 
 logging:
   level: "INFO"
