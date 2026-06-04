@@ -25,6 +25,9 @@ execution:
   atr_stop_multiplier: 2.0
   confidence_threshold: 0.65
   max_adv_coverage: 0.25
+  ledger_dir: "./data/ledger"
+  max_retries: 3
+  tif: "day"
 
 logging:
   level: "INFO"
@@ -40,6 +43,7 @@ fusion:
   llm_model_name: "qwen-3"
   sentiment_timeout: 5.0
   semaphore_limit: 20
+  verdict_model: "qwen-3"
 
 system:
   run_mode: "backtest"
@@ -82,3 +86,12 @@ evaluation:
   hmm_n_iter: 100
   synthetic_sr_min: 0.0
   registry_path: "./models/prod/promotion_registry.json"
+
+mcp:
+  transport: "stdio"
+
+rag:
+  embedder: "hashing"
+  top_k: 5
+  chunk_size: 512
+  chunk_overlap: 100

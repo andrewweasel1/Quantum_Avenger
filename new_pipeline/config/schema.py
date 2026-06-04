@@ -31,6 +31,9 @@ class ExecutionConfig(BaseModel):
     atr_stop_multiplier: float
     confidence_threshold: float
     max_adv_coverage: float = 0.25
+    ledger_dir: str = "./data/ledger"
+    max_retries: int = 3
+    tif: str = "day"
 
 
 class LoggingConfig(BaseModel):
@@ -48,6 +51,7 @@ class FusionConfig(BaseModel):
     llm_model_name: str
     sentiment_timeout: float
     semaphore_limit: int
+    verdict_model: str = "qwen-3"
 
 
 class GPUConfig(BaseModel):
@@ -78,6 +82,17 @@ class EvaluationConfig(BaseModel):
     registry_path: str = "./models/prod/promotion_registry.json"
 
 
+class MCPConfig(BaseModel):
+    transport: str = "stdio"
+
+
+class RAGConfig(BaseModel):
+    embedder: str = "hashing"
+    top_k: int = 5
+    chunk_size: int = 512
+    chunk_overlap: int = 100
+
+
 class SystemConfig(BaseModel):
     run_mode: str
     dask_enabled: bool
@@ -96,3 +111,5 @@ class AppConfig(BaseModel):
     gpu: GPUConfig = Field(default_factory=GPUConfig)
     tournament: TournamentConfig = Field(default_factory=TournamentConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
+    rag: RAGConfig = Field(default_factory=RAGConfig)
