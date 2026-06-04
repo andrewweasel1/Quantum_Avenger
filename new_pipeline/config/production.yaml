@@ -11,5 +11,7 @@ gpu:
   fallback_to_cpu: true
 fusion:
   enabled: true
+tournament:
+  device: "cuda"
 system:
   run_mode: "live"

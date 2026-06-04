@@ -56,6 +56,28 @@ class GPUConfig(BaseModel):
     fallback_to_cpu: bool = True
 
 
+class TournamentConfig(BaseModel):
+    n_groups: int = 6
+    test_groups: int = 2
+    purge_days: int = 5
+    embargo_days: int = 5
+    penalty_fp: float = 5.0
+    penalty_fn: float = 1.0
+    num_boost_round: int = 100
+    cache_host_ratio: float = 0.75
+    tree_method: str = "hist"
+    device: str = "cpu"
+    sectors: list[str] = Field(default_factory=list)
+
+
+class EvaluationConfig(BaseModel):
+    dsr_promotion_threshold: float = 0.95
+    hmm_states: int = 3
+    hmm_n_iter: int = 100
+    synthetic_sr_min: float = 0.0
+    registry_path: str = "./models/prod/promotion_registry.json"
+
+
 class SystemConfig(BaseModel):
     run_mode: str
     dask_enabled: bool
@@ -72,3 +94,5 @@ class AppConfig(BaseModel):
     fusion: FusionConfig
     system: SystemConfig
     gpu: GPUConfig = Field(default_factory=GPUConfig)
+    tournament: TournamentConfig = Field(default_factory=TournamentConfig)
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
