@@ -1,0 +1,35 @@
+{
+  "title": "Quantum Avenger",
+  "schemaVersion": 39,
+  "editable": true,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Veto rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "quantum_avenger_veto_rate", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "title": "Max drawdown",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "quantum_avenger_max_drawdown", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "title": "Deflated Sharpe",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"expr": "quantum_avenger_dsr_value", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "title": "Execution latency (ms)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "quantum_avenger_execution_latency_ms", "refId": "A"}]
+    }
+  ]
+}

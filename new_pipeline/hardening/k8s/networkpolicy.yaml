@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quantum-avenger-default-deny
+spec:
+  podSelector:
+    matchLabels:
+      app: quantum-avenger
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quantum-avenger
+  egress:
+    # Allow DNS; tighten the rest to the Alpaca / Ollama endpoints in production.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quantum-avenger

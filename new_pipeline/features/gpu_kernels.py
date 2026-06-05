@@ -146,6 +146,78 @@ if _CUDA_IMPORTABLE:
             dollar_volume = close[i] * volume[i]
             out[i] = abs(returns[i]) / dollar_volume if dollar_volume > 0.0 else 0.0
 
+    @cuda.jit
+    def _rolling_ncskew_kernel(returns, window, out):  # pragma: no cover - requires a GPU
+        i = cuda.grid(1)
+        if i < window - 1 or i >= returns.size:
+            return
+        start = i - window + 1
+        mean = 0.0
+        for k in range(start, i + 1):
+            mean += returns[k]
+        mean /= window
+        s2 = 0.0
+        s3 = 0.0
+        for k in range(start, i + 1):
+            d = returns[k] - mean
+            s2 += d * d
+            s3 += d * d * d
+        if s2 <= 0.0:
+            out[i] = 0.0
+        else:
+            out[i] = -(window * (window - 1) ** 1.5 * s3) / ((window - 1) * (window - 2) * s2**1.5)
+
+    @cuda.jit
+    def _rolling_duvol_kernel(returns, window, out):  # pragma: no cover - requires a GPU
+        i = cuda.grid(1)
+        if i < window - 1 or i >= returns.size:
+            return
+        start = i - window + 1
+        mean = 0.0
+        for k in range(start, i + 1):
+            mean += returns[k]
+        mean /= window
+        down_sum = 0.0
+        up_sum = 0.0
+        down_count = 0
+        up_count = 0
+        for k in range(start, i + 1):
+            d = returns[k] - mean
+            if d < 0.0:
+                down_sum += d * d
+                down_count += 1
+            else:
+                up_sum += d * d
+                up_count += 1
+        if down_count < 2 or up_count < 2 or down_sum <= 0.0 or up_sum <= 0.0:
+            out[i] = 0.0
+        else:
+            out[i] = math.log(((up_count - 1) * down_sum) / ((down_count - 1) * up_sum))
+
+
+def compute_rolling_ncskew(returns, window: int, use_gpu: bool = False) -> np.ndarray:
+    if use_gpu and gpu_available():  # pragma: no cover - requires a GPU
+        values = np.ascontiguousarray(returns, dtype=np.float64)
+        out = np.full(values.size, np.nan)
+        threads = 256
+        blocks = (values.size + threads - 1) // threads
+        device_out = cuda.to_device(out)
+        _rolling_ncskew_kernel[blocks, threads](cuda.to_device(values), window, device_out)
+        return device_out.copy_to_host()
+    return rolling_ncskew(returns, window)
+
+
+def compute_rolling_duvol(returns, window: int, use_gpu: bool = False) -> np.ndarray:
+    if use_gpu and gpu_available():  # pragma: no cover - requires a GPU
+        values = np.ascontiguousarray(returns, dtype=np.float64)
+        out = np.full(values.size, np.nan)
+        threads = 256
+        blocks = (values.size + threads - 1) // threads
+        device_out = cuda.to_device(out)
+        _rolling_duvol_kernel[blocks, threads](cuda.to_device(values), window, device_out)
+        return device_out.copy_to_host()
+    return rolling_duvol(returns, window)
+
 
 def _launch(kernel, size, *arrays):  # pragma: no cover - requires a GPU
     out = np.empty(size, dtype=np.float64)
