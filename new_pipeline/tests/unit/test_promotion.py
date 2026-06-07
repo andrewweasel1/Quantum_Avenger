@@ -38,3 +38,29 @@ def test_promoted_without_model_path_raises(tmp_path):
     registry = PromotionRegistry(tmp_path / "reg.json")
     with pytest.raises(PromotionError):
         registry.record(assess_promotion("Energy", 0.97, 0.2))
+
+
+def test_pbo_gate_blocks_overfit_candidate():
+    decision = assess_promotion("Energy", 0.97, 0.2, pbo=0.8, pbo_threshold=0.5)
+    assert decision.promoted is False
+    assert decision.reason == "overfit (high PBO)"
+
+
+def test_pbo_within_threshold_still_promotes():
+    decision = assess_promotion("Energy", 0.97, 0.2, pbo=0.3, pbo_threshold=0.5)
+    assert decision.promoted is True
+    assert decision.pbo == 0.3
+
+
+def test_omitted_pbo_leaves_gate_disabled():
+    # Back-compat: callers that pass no PBO are gated on DSR + synthetic only.
+    assert assess_promotion("Energy", 0.97, 0.2).promoted is True
+
+
+def test_diagnostics_are_recorded(tmp_path):
+    registry = PromotionRegistry(tmp_path / "reg.json")
+    decision = assess_promotion("Energy", 0.97, 0.2, pbo=0.1, psr=0.99, haircut_sharpe=1.1)
+    entry = registry.record(decision, model_path="/m/e.json")
+    assert entry["pbo"] == 0.1
+    assert entry["psr"] == 0.99
+    assert entry["haircut_sharpe"] == 1.1

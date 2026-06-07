@@ -1,7 +1,9 @@
 """Champion promotion gate + immutable registry.
 
-A candidate is promoted only if its Deflated Sharpe >= threshold AND its HMM
-synthetic Sharpe > minimum. The registry is an append-only JSON audit:
+A candidate is promoted only if it clears every gate: Deflated Sharpe >=
+threshold, HMM synthetic Sharpe > minimum, and (when supplied) Probability of
+Backtest Overfitting <= threshold. PSR and the haircut Sharpe ride along as
+recorded diagnostics. The registry is an append-only JSON audit:
 ``{"promotions": [...], "active_champions": {sector: model_path}}``.
 """
 
@@ -20,15 +22,40 @@ class PromotionDecision:
     synthetic_sharpe: float
     promoted: bool
     reason: str
+    pbo: float | None = None
+    psr: float | None = None
+    haircut_sharpe: float | None = None
 
 
 def assess_promotion(
-    sector, dsr, synthetic_sharpe, dsr_threshold=0.95, synthetic_min=0.0
+    sector,
+    dsr,
+    synthetic_sharpe,
+    dsr_threshold=0.95,
+    synthetic_min=0.0,
+    pbo=None,
+    pbo_threshold=0.5,
+    psr=None,
+    haircut_sharpe=None,
 ) -> PromotionDecision:
-    if dsr >= dsr_threshold and synthetic_sharpe > synthetic_min:
-        return PromotionDecision(sector, dsr, synthetic_sharpe, True, "true alpha")
-    reason = "low DSR" if dsr < dsr_threshold else "failed synthetic gauntlet"
-    return PromotionDecision(sector, dsr, synthetic_sharpe, False, reason)
+    """Apply every promotion gate; the first failure names the rejection reason."""
+    gates = {
+        "low DSR": dsr < dsr_threshold,
+        "failed synthetic gauntlet": synthetic_sharpe <= synthetic_min,
+        "overfit (high PBO)": pbo is not None and pbo > pbo_threshold,
+    }
+    failed = [reason for reason, tripped in gates.items() if tripped]
+    promoted = not failed
+    return PromotionDecision(
+        sector,
+        dsr,
+        synthetic_sharpe,
+        promoted,
+        "true alpha" if promoted else failed[0],
+        pbo=pbo,
+        psr=psr,
+        haircut_sharpe=haircut_sharpe,
+    )
 
 
 class PromotionRegistry:
@@ -48,6 +75,9 @@ class PromotionRegistry:
             "sector": decision.sector,
             "dsr": decision.dsr,
             "synthetic_sharpe": decision.synthetic_sharpe,
+            "pbo": decision.pbo,
+            "psr": decision.psr,
+            "haircut_sharpe": decision.haircut_sharpe,
             "promoted": decision.promoted,
             "reason": decision.reason,
             "timestamp": datetime.now(UTC).isoformat(),

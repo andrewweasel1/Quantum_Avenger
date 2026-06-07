@@ -86,6 +86,11 @@ evaluation:
   hmm_n_iter: 100
   synthetic_sr_min: 0.0
   registry_path: "./models/prod/promotion_registry.json"
+  psr_benchmark_sr: 0.0
+  pbo_threshold: 0.5
+  pbo_partitions: 10
+  mt_method: "bhy"
+  enforce_minbtl: false
 
 mcp:
   transport: "stdio"

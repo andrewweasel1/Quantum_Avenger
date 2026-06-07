@@ -87,6 +87,11 @@ class EvaluationConfig(BaseModel):
     hmm_n_iter: int = 100
     synthetic_sr_min: float = 0.0
     registry_path: str = "./models/prod/promotion_registry.json"
+    psr_benchmark_sr: float = 0.0
+    pbo_threshold: float = 0.5
+    pbo_partitions: int = 10
+    mt_method: str = "bhy"
+    enforce_minbtl: bool = False
 
 
 class MCPConfig(BaseModel):
