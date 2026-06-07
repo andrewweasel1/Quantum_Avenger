@@ -57,6 +57,18 @@ def test_omitted_pbo_leaves_gate_disabled():
     assert assess_promotion("Energy", 0.97, 0.2).promoted is True
 
 
+def test_minbtl_gate_blocks_short_backtest():
+    decision = assess_promotion("Energy", 0.97, 0.2, minbtl_satisfied=False)
+    assert decision.promoted is False
+    assert decision.reason == "backtest shorter than MinBTL"
+
+
+def test_minbtl_gate_disabled_by_default():
+    # minbtl_satisfied=None (the default) must not gate.
+    assert assess_promotion("Energy", 0.97, 0.2, minbtl_satisfied=True).promoted is True
+    assert assess_promotion("Energy", 0.97, 0.2).promoted is True
+
+
 def test_diagnostics_are_recorded(tmp_path):
     registry = PromotionRegistry(tmp_path / "reg.json")
     decision = assess_promotion("Energy", 0.97, 0.2, pbo=0.1, psr=0.99, haircut_sharpe=1.1)

@@ -16,6 +16,7 @@ from new_pipeline.config import get_config
 from new_pipeline.evaluation.dsr import compute_deflated_sharpe_ratio, probabilistic_sharpe_ratio
 from new_pipeline.evaluation.haircut import haircut_sharpe_ratio
 from new_pipeline.evaluation.hmm_gauntlet import run_hmm_synthetic_gauntlet
+from new_pipeline.evaluation.minbtl import backtest_length_is_sufficient
 from new_pipeline.evaluation.pbo import probability_of_backtest_overfitting
 from new_pipeline.evaluation.promotion import PromotionRegistry, assess_promotion
 from new_pipeline.features.labels import add_labels
@@ -78,19 +79,24 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
         dsr = compute_deflated_sharpe_ratio(champion_returns, trials)
         synthetic_sr = _synthetic_sharpe(frame, sector, result, champion_returns)
         # Overfitting/selection diagnostics over the full (n_obs x n_trials) matrix.
+        champion_sharpe = sharpe_ratio(champion_returns)
         pbo = probability_of_backtest_overfitting(
             returns_matrix.to_numpy(), cfg.evaluation.pbo_partitions
         )
         psr = probabilistic_sharpe_ratio(champion_returns, cfg.evaluation.psr_benchmark_sr)
         haircut = haircut_sharpe_ratio(
-            sharpe_ratio(champion_returns), champion_returns.size, len(trials),
-            cfg.evaluation.mt_method,
+            champion_sharpe, champion_returns.size, len(trials), cfg.evaluation.mt_method,
         ).adjusted_sharpe
+        minbtl_ok = None
+        if cfg.evaluation.enforce_minbtl:
+            minbtl_ok = backtest_length_is_sufficient(
+                champion_returns.size, len(trials), champion_sharpe
+            )
         decision = assess_promotion(
             sector, dsr, synthetic_sr,
             cfg.evaluation.dsr_promotion_threshold, cfg.evaluation.synthetic_sr_min,
             pbo=pbo, pbo_threshold=cfg.evaluation.pbo_threshold,
-            psr=psr, haircut_sharpe=haircut,
+            psr=psr, haircut_sharpe=haircut, minbtl_satisfied=minbtl_ok,
         )
         model_path = result["candidate_path"] if decision.promoted else None
         registry.record(decision, model_path=model_path)

@@ -37,12 +37,14 @@ def assess_promotion(
     pbo_threshold=0.5,
     psr=None,
     haircut_sharpe=None,
+    minbtl_satisfied=None,
 ) -> PromotionDecision:
     """Apply every promotion gate; the first failure names the rejection reason."""
     gates = {
         "low DSR": dsr < dsr_threshold,
         "failed synthetic gauntlet": synthetic_sharpe <= synthetic_min,
         "overfit (high PBO)": pbo is not None and pbo > pbo_threshold,
+        "backtest shorter than MinBTL": minbtl_satisfied is False,
     }
     failed = [reason for reason, tripped in gates.items() if tripped]
     promoted = not failed
