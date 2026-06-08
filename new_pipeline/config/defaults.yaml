@@ -28,6 +28,7 @@ execution:
   ledger_dir: "./data/ledger"
   max_retries: 3
   tif: "day"
+  account_capital: 100000.0
 
 logging:
   level: "INFO"

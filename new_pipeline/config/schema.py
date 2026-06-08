@@ -37,6 +37,7 @@ class ExecutionConfig(BaseModel):
     ledger_dir: str = "./data/ledger"
     max_retries: int = 3
     tif: str = "day"
+    account_capital: float = 100_000.0
 
 
 class LoggingConfig(BaseModel):
