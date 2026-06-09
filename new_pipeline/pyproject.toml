@@ -29,6 +29,16 @@ ignore = [
 [tool.coverage.run]
 source = ["new_pipeline"]
 branch = true
+omit = [
+    # Live integrations: require alpaca-py + egress, absent from the offline CI
+    # image, so they are exercised by mock-injected unit tests here but excluded
+    # from the coverage gate (cf. the @pytest.mark.gpu kernels).
+    "new_pipeline/adapters/market_alpaca.py",
+    "new_pipeline/adapters/news_alpaca.py",
+    "new_pipeline/adapters/broker_alpaca.py",
+    "new_pipeline/scripts/live_smoke.py",
+    "new_pipeline/scripts/ingest_training_data.py",
+]
 
 [tool.coverage.report]
 show_missing = true

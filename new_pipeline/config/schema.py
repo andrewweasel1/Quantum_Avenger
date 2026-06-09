@@ -123,6 +123,16 @@ class SystemConfig(BaseModel):
     memory_limit: str
 
 
+class AlpacaConfig(BaseModel):
+    """Live Alpaca credentials/settings. Keys come from QA_ALPACA__* env vars and
+    are never committed; dev/test/backtest run on fakes and ignore these."""
+
+    api_key: str = ""
+    secret_key: str = ""
+    paper: bool = True
+    data_feed: str = "iex"  # free feed; "sip" needs a paid subscription
+
+
 class AppConfig(BaseModel):
     data: DataConfig
     features: FeatureConfig
@@ -137,3 +147,4 @@ class AppConfig(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
+    alpaca: AlpacaConfig = Field(default_factory=AlpacaConfig)

@@ -1,0 +1,9 @@
+# Live integration dependencies (Alpaca paper/live trading + market data + news).
+# Deliberately NOT installed by the SessionStart hook — the offline dev/CI
+# sandbox runs entirely on deterministic fakes and has no egress to Alpaca.
+# Install on a host that is allowlisted for paper-api.alpaca.markets and
+# data.alpaca.markets:
+#   pip install -r new_pipeline/requirements-live.txt
+# Credentials are provided via QA_ALPACA__API_KEY / QA_ALPACA__SECRET_KEY env
+# vars and are never committed.
+alpaca-py>=0.33

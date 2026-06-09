@@ -3,3 +3,4 @@
 # linters work out of the box in Claude Code on the web sessions.
 ruff>=0.15
 pytest-cov>=5.0
+matplotlib>=3.8  # backtest performance visualization (analysis/backtest.py)

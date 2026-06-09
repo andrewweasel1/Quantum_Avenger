@@ -47,10 +47,31 @@ def build_adapters(cfg) -> AdapterBundle:
             universe=StaticUniverseProvider(),
         )
     if mode in LIVE_MODES:
-        raise NotImplementedError(
-            f"run_mode={mode!r} needs the live adapters (adapters/llm_ollama.py, "
-            "adapters/market_alpaca.py, adapters/broker_alpaca.py), which are not "
-            "wired yet. Implement them behind the existing ABCs and extend "
-            "build_adapters(); the trade loop itself does not change."
-        )
+        if not (cfg.alpaca.api_key and cfg.alpaca.secret_key):
+            raise ValueError(
+                f"run_mode={mode!r} requires QA_ALPACA__API_KEY and "
+                "QA_ALPACA__SECRET_KEY (never commit them)."
+            )
+        return _build_live_adapters(cfg)
     raise ValueError(f"unknown run_mode: {mode!r}")
+
+
+def _build_live_adapters(cfg) -> AdapterBundle:  # pragma: no cover - needs the live SDK + egress
+    """Assemble the live Alpaca adapters (lazy SDK import keeps offline runs clean).
+
+    The LLM stays the deterministic fake until an Ollama endpoint is configured —
+    Alpaca covers market data, news, and order execution. Going fully live is a
+    drop-in LLM client here, no change elsewhere.
+    """
+    from new_pipeline.adapters.broker_alpaca import AlpacaBroker
+    from new_pipeline.adapters.market_alpaca import AlpacaMarketDataSource
+    from new_pipeline.adapters.news_alpaca import AlpacaNewsSource
+
+    creds = (cfg.alpaca.api_key, cfg.alpaca.secret_key)
+    return AdapterBundle(
+        market_data=AlpacaMarketDataSource(*creds, feed=cfg.alpaca.data_feed),
+        news=AlpacaNewsSource(*creds),
+        llm=FakeLLMClient(),
+        broker=AlpacaBroker(*creds, paper=cfg.alpaca.paper),
+        universe=StaticUniverseProvider(),
+    )
