@@ -1,4 +1,12 @@
 {
+  "sandbox": {
+    "network": {
+      "allowedDomains": [
+        "paper-api.alpaca.markets",
+        "data.alpaca.markets"
+      ]
+    }
+  },
   "permissions": {
     "deny": [
       "Edit(./reference_code/**)",
