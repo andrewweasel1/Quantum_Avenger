@@ -26,8 +26,14 @@ if [ -f new_pipeline/requirements-dev.txt ]; then
   python3 -m pip install -r new_pipeline/requirements-dev.txt
 fi
 
-# Make the repo root importable so `import new_pipeline...` resolves the same
-# way `python -m pytest new_pipeline/tests` expects, regardless of cwd.
+# Session environment.
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  # Make the repo root importable so `import new_pipeline...` resolves the same
+  # way `python -m pytest new_pipeline/tests` expects, regardless of cwd.
   echo "export PYTHONPATH=\"$PROJECT_DIR\"" >> "$CLAUDE_ENV_FILE"
+  # CPU-only sandbox: disable Numba JIT so the @njit / @cuda.jit paths execute
+  # in pure Python. Faster, deterministic, and it lets coverage trace those
+  # bodies — the >=85% gate depends on it. Override per-command with
+  # NUMBA_DISABLE_JIT=0 to exercise real JIT/CUDA compilation.
+  echo "export NUMBA_DISABLE_JIT=\"1\"" >> "$CLAUDE_ENV_FILE"
 fi
