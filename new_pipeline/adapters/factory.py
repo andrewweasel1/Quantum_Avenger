@@ -8,17 +8,25 @@ returned bundle, never on a concrete client — so going live is a config flip
 plus three adapter implementations, no change to the trade loop.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from new_pipeline.adapters.base import LLMClient, MarketDataSource, NewsSource, UniverseProvider
+from new_pipeline.adapters.base import (
+    LLMClient,
+    MarketDataSource,
+    NewsSource,
+    SentimentEngine,
+    UniverseProvider,
+)
 from new_pipeline.adapters.fakes import (
     FakeBroker,
     FakeLLMClient,
     FakeMarketDataSource,
     FakeNewsSource,
+    FakeSentimentEngine,
 )
 from new_pipeline.adapters.universe_static import StaticUniverseProvider
 from new_pipeline.execution.broker import BrokerAdapter
+from new_pipeline.execution.entity_anonymizer import Anonymizer, EntityAnonymizer
 
 # Offline, network-free modes that resolve to deterministic fakes.
 OFFLINE_MODES = frozenset({"offline", "backtest", "replay", "sim", "development", "testing"})
@@ -33,18 +41,25 @@ class AdapterBundle:
     llm: LLMClient
     broker: BrokerAdapter
     universe: UniverseProvider
+    sentiment_engine: SentimentEngine = field(default_factory=FakeSentimentEngine)
+    anonymizer: Anonymizer = field(default_factory=EntityAnonymizer)
 
 
 def build_adapters(cfg) -> AdapterBundle:
     """Return the adapter bundle for ``cfg.system.run_mode``."""
     mode = (cfg.system.run_mode or "offline").lower()
     if mode in OFFLINE_MODES:
+        universe = StaticUniverseProvider()
         return AdapterBundle(
             market_data=FakeMarketDataSource(),
             news=FakeNewsSource(),
             llm=FakeLLMClient(),
             broker=FakeBroker(),
-            universe=StaticUniverseProvider(),
+            universe=universe,
+            sentiment_engine=FakeSentimentEngine(),
+            anonymizer=EntityAnonymizer(
+                vocabulary=universe.symbols(), gazetteer=universe.aliases()
+            ),
         )
     if mode in LIVE_MODES:
         if not (cfg.alpaca.api_key and cfg.alpaca.secret_key):
@@ -68,10 +83,33 @@ def _build_live_adapters(cfg) -> AdapterBundle:  # pragma: no cover - needs the 
     from new_pipeline.adapters.news_alpaca import AlpacaNewsSource
 
     creds = (cfg.alpaca.api_key, cfg.alpaca.secret_key)
+    universe = StaticUniverseProvider()
+    sentiment_engine, anonymizer = _build_fusion(cfg, universe)
     return AdapterBundle(
         market_data=AlpacaMarketDataSource(*creds, feed=cfg.alpaca.data_feed),
         news=AlpacaNewsSource(*creds),
         llm=FakeLLMClient(),
         broker=AlpacaBroker(*creds, paper=cfg.alpaca.paper),
-        universe=StaticUniverseProvider(),
+        universe=universe,
+        sentiment_engine=sentiment_engine,
+        anonymizer=anonymizer,
+    )
+
+
+def _build_fusion(cfg, universe):  # pragma: no cover - heavy ML deps (torch/transformers/spaCy)
+    """FinBERT + spaCy when fusion is enabled; deterministic fakes otherwise.
+
+    Lazy imports keep torch/transformers/spaCy out of the offline image; the
+    gazetteer is built from the universe's ticker -> alias map.
+    """
+    if not cfg.fusion.enabled:
+        return FakeSentimentEngine(), EntityAnonymizer(
+            vocabulary=universe.symbols(), gazetteer=universe.aliases()
+        )
+    from new_pipeline.adapters.sentiment_finbert import FinBERTSentimentEngine
+    from new_pipeline.execution.anonymizer_spacy import SpacyNewsAnonymizer
+
+    return (
+        FinBERTSentimentEngine(model_name=cfg.fusion.sentiment_model),
+        SpacyNewsAnonymizer(universe.aliases(), spacy_model=cfg.fusion.spacy_model),
     )

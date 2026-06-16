@@ -38,6 +38,9 @@ omit = [
     "new_pipeline/adapters/broker_alpaca.py",
     "new_pipeline/scripts/live_smoke.py",
     "new_pipeline/scripts/ingest_training_data.py",
+    # Fusion ML adapters: require torch/transformers/spaCy, absent from the CI image.
+    "new_pipeline/adapters/sentiment_finbert.py",
+    "new_pipeline/execution/anonymizer_spacy.py",
 ]
 
 [tool.coverage.report]

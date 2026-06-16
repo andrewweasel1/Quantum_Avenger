@@ -56,6 +56,9 @@ class FusionConfig(BaseModel):
     sentiment_timeout: float
     semaphore_limit: int
     verdict_model: str = "qwen-3"
+    sentiment_model: str = "ProsusAI/finbert"  # FinBERT weights (live sentiment engine)
+    spacy_model: str = "en_core_web_lg"  # spaCy NER model (live anonymizer)
+    mask_for_scorer: bool = False  # FinBERT trained WITH names; mask only for the LLM
 
 
 class GPUConfig(BaseModel):

@@ -14,7 +14,9 @@ from new_pipeline.adapters.base import (
     MarketDataSource,
     NewsItem,
     NewsSource,
+    SentimentEngine,
     SentimentResult,
+    SentimentScore,
     Verdict,
 )
 from new_pipeline.execution.broker import BrokerAdapter
@@ -87,6 +89,30 @@ class FakeNewsSource(NewsSource):
                 headline=f"{symbol} steady as markets digest data on {on.isoformat()}.",
             )
         ]
+
+
+class FakeSentimentEngine(SentimentEngine):
+    """Deterministic sentiment sensor: a signed score in [-1, 1] (same hash as
+    FakeLLMClient) plus a coherent 3-class distribution (signed = p_pos - p_neg,
+    probabilities sum to 1)."""
+
+    def score_headlines(self, texts, batch_size: int = 64) -> list[SentimentScore]:
+        scores: list[SentimentScore] = []
+        for text in texts:
+            signed = _stable_unit(text)
+            p_pos = max(signed, 0.0)
+            p_neg = max(-signed, 0.0)
+            p_neutral = 1.0 - abs(signed)
+            scores.append(
+                SentimentScore(
+                    signed=signed,
+                    confidence=max(p_pos, p_neg, p_neutral),
+                    p_pos=p_pos,
+                    p_neg=p_neg,
+                    p_neutral=p_neutral,
+                )
+            )
+        return scores
 
 
 class FakeBroker(BrokerAdapter):

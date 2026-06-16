@@ -14,6 +14,7 @@ from new_pipeline.core.exceptions import UniverseError
 from new_pipeline.core.paths import data_dir
 
 DEFAULT_MEMBERSHIP_PATH = data_dir() / "universe" / "membership.csv"
+DEFAULT_ALIASES_PATH = data_dir() / "universe" / "aliases.csv"
 
 
 def _parse_optional_date(value: str | None) -> date | None:
@@ -24,9 +25,13 @@ def _parse_optional_date(value: str | None) -> date | None:
 
 
 class StaticUniverseProvider(UniverseProvider):
-    def __init__(self, membership_path: Path | None = None) -> None:
+    def __init__(
+        self, membership_path: Path | None = None, aliases_path: Path | None = None
+    ) -> None:
         self._path = membership_path or DEFAULT_MEMBERSHIP_PATH
         self._members = self._load()
+        self._aliases_path = aliases_path or DEFAULT_ALIASES_PATH
+        self._aliases = self._load_aliases()
 
     def _load(self) -> list[UniverseMember]:
         if not self._path.exists():
@@ -50,3 +55,23 @@ class StaticUniverseProvider(UniverseProvider):
         if as_of is None:
             return list(self._members)
         return [member for member in self._members if member.active_on(as_of)]
+
+    def _load_aliases(self) -> dict[str, list[str]]:
+        """Optional ``ticker,alias`` fixture (multi-row). Missing file -> no
+        gazetteer (the anonymizer still masks the symbol vocabulary)."""
+        if not self._aliases_path.exists():
+            return {}
+        aliases: dict[str, list[str]] = {}
+        with open(self._aliases_path, encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                ticker = row["ticker"].strip()
+                alias = row["alias"].strip()
+                if ticker and alias:
+                    aliases.setdefault(ticker, []).append(alias)
+        return aliases
+
+    def aliases(self, as_of: date | None = None) -> dict[str, list[str]]:
+        if as_of is None:
+            return {ticker: list(names) for ticker, names in self._aliases.items()}
+        active = {member.ticker for member in self.members(as_of)}
+        return {t: list(n) for t, n in self._aliases.items() if t in active}

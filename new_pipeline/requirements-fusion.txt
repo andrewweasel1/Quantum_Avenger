@@ -1,0 +1,11 @@
+# Heavy ML dependencies for sentiment fusion (FinBERT via transformers, spaCy NER).
+# Deliberately NOT installed by the SessionStart hook — torch/transformers/spaCy are
+# large and the offline dev/CI sandbox runs entirely on deterministic fakes. The two
+# fusion modules (adapters/sentiment_finbert.py, execution/anonymizer_spacy.py) lazy-
+# import these and are excluded from the coverage gate. Install on a host that runs
+# the fusion pipeline:
+#   pip install -r new_pipeline/requirements-fusion.txt
+#   python -m spacy download en_core_web_lg
+torch>=2.0
+transformers>=4.30
+spacy>=3.7

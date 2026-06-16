@@ -20,6 +20,22 @@ class SentimentResult:
 
 
 @dataclass(frozen=True)
+class SentimentScore:
+    """Deterministic FinBERT-style score: a signed scalar + class probabilities.
+
+    Distinct from ``SentimentResult`` (the generative ``LLMClient``'s coarse
+    score/label) — this is the deterministic sensor's richer output that the HMM
+    fusion and decay-weighting consume.
+    """
+
+    signed: float  # P(pos) - P(neg), in [-1, 1]
+    confidence: float  # max class probability, in [0, 1]
+    p_pos: float
+    p_neg: float
+    p_neutral: float
+
+
+@dataclass(frozen=True)
 class Verdict:
     stance: str  # "BULLISH" | "BEARISH" | "NEUTRAL"
     rationale: str
@@ -67,6 +83,15 @@ class LLMClient(ABC):
         raise NotImplementedError
 
 
+class SentimentEngine(ABC):
+    """Deterministic sentiment sensor (e.g. FinBERT in eval mode). It produces a
+    number, not a generative verdict (G1), so it lives apart from ``LLMClient``."""
+
+    @abstractmethod
+    def score_headlines(self, texts: list[str], batch_size: int = 64) -> list[SentimentScore]:
+        raise NotImplementedError
+
+
 class MarketDataSource(ABC):
     @abstractmethod
     def history(self, symbol: str, start: date, end: date) -> list[Bar]:
@@ -91,3 +116,10 @@ class UniverseProvider(ABC):
 
     def sectors(self, as_of: date | None = None) -> dict[str, str]:
         return {member.ticker: member.gics_sector for member in self.members(as_of)}
+
+    def aliases(self, as_of: date | None = None) -> dict[str, list[str]]:
+        """Ticker -> [company name, alias, ...] for the anonymizer gazetteer.
+
+        Default empty (no aliases known); concrete providers may override.
+        """
+        return {}

@@ -9,6 +9,7 @@ suite is unaffected; here we turn it on and assert the chain still runs.
 
 from datetime import date
 
+from new_pipeline.adapters.factory import build_adapters
 from new_pipeline.config import get_config, reload_config
 from new_pipeline.core.seeding import seed_everything
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES
@@ -47,3 +48,27 @@ def test_regime_gate_and_neff_pipeline_runs(tmp_path, monkeypatch):
     assert summary["sectors"]
     assert set(summary["promotions"]).issubset(set(summary["sectors"]))
     assert (tmp_path / "promotion_registry.json").exists()
+
+
+def test_fusion_attaches_nonzero_sentiment_to_features(monkeypatch):
+    monkeypatch.setenv("QA_FUSION__ENABLED", "true")
+    reload_config()
+    seed_everything(0)
+    cfg = get_config()
+    bundle = build_adapters(cfg)  # offline -> FakeSentimentEngine + gazetteer anonymizer
+
+    frame = build_training_frame(
+        ["AAPL", "MSFT"],
+        {"AAPL": "Tech", "MSFT": "Tech"},
+        date(2021, 1, 1),
+        date(2021, 3, 31),
+        source=bundle.market_data,
+        cfg=cfg,
+        news_source=bundle.news,
+        sentiment_engine=bundle.sentiment_engine,
+        anonymizer=bundle.anonymizer,
+    )
+    assert "sentiment_score" in frame.columns
+    # FakeNewsSource yields a headline per day -> real (non-neutral) sentiment lands.
+    assert frame["sentiment_score"].abs().sum() > 0.0
+    assert all(name in frame.columns for name in MARKOV_FEATURE_NAMES)

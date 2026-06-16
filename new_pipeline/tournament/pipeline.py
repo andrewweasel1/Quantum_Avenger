@@ -44,8 +44,23 @@ FEATURE_COLS = [
 ]
 
 
-def build_training_frame(symbols, sectors, start, end, source=None, cfg=None) -> pl.DataFrame:
-    """Synthetic OHLCV -> features -> sector join + target_label, one frame."""
+def build_training_frame(
+    symbols,
+    sectors,
+    start,
+    end,
+    source=None,
+    cfg=None,
+    news_source=None,
+    sentiment_engine=None,
+    anonymizer=None,
+) -> pl.DataFrame:
+    """Synthetic OHLCV -> features -> sector join + target_label, one frame.
+
+    When ``news_source`` + ``sentiment_engine`` + ``anonymizer`` are supplied, a
+    real causally-aligned ``sentiment_score`` is joined in before the (optional)
+    sentiment-fused micro-HMM features.
+    """
     source = source or FakeMarketDataSource()
     cfg = cfg or get_config()
     rows = [
@@ -58,6 +73,8 @@ def build_training_frame(symbols, sectors, start, end, source=None, cfg=None) ->
     ]
     features = compile_features(pl.DataFrame(rows))
     labeled = add_labels(features, cfg.features.label_horizon, cfg.features.label_cost_bps)
+    if news_source is not None and sentiment_engine is not None and anonymizer is not None:
+        labeled = _attach_sentiment(labeled, symbols, news_source, sentiment_engine, anonymizer)
     if cfg.fusion.enabled:
         labeled = add_markov_regime_features(labeled)
     sector_df = pl.DataFrame(
@@ -66,13 +83,53 @@ def build_training_frame(symbols, sectors, start, end, source=None, cfg=None) ->
     return labeled.join(sector_df, on="ticker", how="left")
 
 
+def _attach_sentiment(labeled, symbols, news_source, sentiment_engine, anonymizer) -> pl.DataFrame:
+    """Overwrite the neutral ``sentiment_score`` with a real, causally-aligned
+    daily score joined per (ticker, date); no-news days keep the neutral 0.0."""
+    from new_pipeline.data.sentiment_feature_builder import SentimentFeatureBuilder
+
+    builder = SentimentFeatureBuilder(anonymizer=anonymizer, engine=sentiment_engine)
+    dates = labeled.select("date").unique().to_series().to_list()
+    records = [
+        {"timestamp": item.timestamp, "text": item.headline, "ticker": item.symbol}
+        for symbol in symbols
+        for day in dates
+        for item in news_source.headlines(symbol, day)
+    ]
+    if not records:
+        return labeled
+    daily = builder.build_daily_sentiment(pd.DataFrame(records))
+    if daily.empty:
+        return labeled
+    daily_pl = pl.from_pandas(daily[["date", "ticker", "sentiment"]]).with_columns(
+        pl.col("date").cast(pl.Date)
+    )
+    return (
+        labeled.join(daily_pl, on=["date", "ticker"], how="left")
+        .with_columns(pl.coalesce(["sentiment", "sentiment_score"]).alias("sentiment_score"))
+        .drop("sentiment")
+    )
+
+
 def run_offline_pipeline(
     output_dir, start=date(2021, 1, 1), end=date(2022, 12, 31), max_symbols=None, source=None
 ) -> dict:
     cfg = get_config()
     sectors = StaticUniverseProvider().sectors()
     symbols = list(sectors)[: max_symbols] if max_symbols else list(sectors)
-    frame = build_training_frame(symbols, sectors, start, end, source, cfg)
+    news_source = sentiment_engine = anonymizer = None
+    if cfg.fusion.enabled:
+        from new_pipeline.adapters.factory import build_adapters
+
+        bundle = build_adapters(cfg)
+        news_source, sentiment_engine, anonymizer = (
+            bundle.news, bundle.sentiment_engine, bundle.anonymizer,
+        )
+        source = source or bundle.market_data
+    frame = build_training_frame(
+        symbols, sectors, start, end, source, cfg,
+        news_source=news_source, sentiment_engine=sentiment_engine, anonymizer=anonymizer,
+    )
     feature_cols = list(FEATURE_COLS)
     if cfg.fusion.enabled:
         feature_cols += list(MARKOV_FEATURE_NAMES)

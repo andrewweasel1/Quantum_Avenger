@@ -1,0 +1,55 @@
+ticker,alias
+AAPL,Apple
+AAPL,Apple Inc
+MSFT,Microsoft
+MSFT,Microsoft Corp
+NVDA,Nvidia
+NVDA,NVIDIA Corporation
+CSCO,Cisco
+CSCO,Cisco Systems
+JNJ,Johnson & Johnson
+UNH,UnitedHealth
+UNH,UnitedHealth Group
+PFE,Pfizer
+MRK,Merck
+JPM,JPMorgan
+JPM,JPMorgan Chase
+BAC,Bank of America
+WFC,Wells Fargo
+GS,Goldman Sachs
+LEH,Lehman Brothers
+AMZN,Amazon
+AMZN,Amazon.com
+HD,Home Depot
+MCD,McDonald's
+NKE,Nike
+GOOGL,Alphabet
+GOOGL,Google
+META,Meta
+META,Meta Platforms
+META,Facebook
+NFLX,Netflix
+DIS,Disney
+DIS,Walt Disney
+CAT,Caterpillar
+BA,Boeing
+HON,Honeywell
+GE,General Electric
+PG,Procter & Gamble
+KO,Coca-Cola
+PEP,PepsiCo
+PEP,Pepsi
+WMT,Walmart
+XOM,ExxonMobil
+XOM,Exxon Mobil
+CVX,Chevron
+COP,ConocoPhillips
+NEE,NextEra Energy
+DUK,Duke Energy
+SO,Southern Company
+AMT,American Tower
+PLD,Prologis
+EQIX,Equinix
+LIN,Linde
+SHW,Sherwin-Williams
+FCX,Freeport-McMoRan
