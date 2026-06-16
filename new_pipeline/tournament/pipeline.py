@@ -5,21 +5,34 @@ features -> sector join + friction labels -> per-sector tournament -> Deflated
 Sharpe + HMM promotion. The legacy multi-phase ``main`` flow, rebuilt offline.
 """
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import polars as pl
 
 from new_pipeline.adapters import FakeMarketDataSource, StaticUniverseProvider
 from new_pipeline.config import get_config
-from new_pipeline.evaluation.dsr import compute_deflated_sharpe_ratio, probabilistic_sharpe_ratio
+from new_pipeline.evaluation.dsr import (
+    compute_deflated_sharpe_ratio,
+    deflated_sharpe_report,
+    effective_number_of_trials,
+    probabilistic_sharpe_ratio,
+)
 from new_pipeline.evaluation.haircut import haircut_sharpe_ratio
 from new_pipeline.evaluation.hmm_gauntlet import run_hmm_synthetic_gauntlet
 from new_pipeline.evaluation.minbtl import backtest_length_is_sufficient
 from new_pipeline.evaluation.pbo import probability_of_backtest_overfitting
 from new_pipeline.evaluation.promotion import PromotionRegistry, assess_promotion
+from new_pipeline.evaluation.regime_dsr import (
+    QuantitativeEvaluator,
+    RegimeVerdict,
+    ThinRegimePolicy,
+)
 from new_pipeline.features.labels import add_labels
+from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov_regime_features
 from new_pipeline.features.polars_engine import compile_features
 from new_pipeline.tournament.director import run_sector_tournament
 from new_pipeline.tournament.simulator import sharpe_ratio
@@ -45,6 +58,8 @@ def build_training_frame(symbols, sectors, start, end, source=None, cfg=None) ->
     ]
     features = compile_features(pl.DataFrame(rows))
     labeled = add_labels(features, cfg.features.label_horizon, cfg.features.label_cost_bps)
+    if cfg.fusion.enabled:
+        labeled = add_markov_regime_features(labeled)
     sector_df = pl.DataFrame(
         {"ticker": list(sectors), "sector": [sectors[t] for t in sectors]}
     )
@@ -58,7 +73,10 @@ def run_offline_pipeline(
     sectors = StaticUniverseProvider().sectors()
     symbols = list(sectors)[: max_symbols] if max_symbols else list(sectors)
     frame = build_training_frame(symbols, sectors, start, end, source, cfg)
-    results = run_sector_tournament(frame, FEATURE_COLS, output_dir)
+    feature_cols = list(FEATURE_COLS)
+    if cfg.fusion.enabled:
+        feature_cols += list(MARKOV_FEATURE_NAMES)
+    results = run_sector_tournament(frame, feature_cols, output_dir)
     promotions = _evaluate_and_promote(frame, results, output_dir, cfg)
     return {"sectors": list(results), "promotions": promotions}
 
@@ -76,7 +94,7 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
         ))
         champion_returns = returns_matrix[:, best].to_numpy()
 
-        dsr = compute_deflated_sharpe_ratio(champion_returns, trials)
+        dsr = _deflated_sharpe(champion_returns, trials, returns_matrix, cfg)
         synthetic_sr = _synthetic_sharpe(frame, sector, result, champion_returns)
         # Overfitting/selection diagnostics over the full (n_obs x n_trials) matrix.
         champion_sharpe = sharpe_ratio(champion_returns)
@@ -98,6 +116,9 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             pbo=pbo, pbo_threshold=cfg.evaluation.pbo_threshold,
             psr=psr, haircut_sharpe=haircut, minbtl_satisfied=minbtl_ok,
         )
+        if cfg.evaluation.regime_gate_enabled and decision.promoted:
+            if not _regime_verdict(champion_returns, trials, cfg).promoted:
+                decision = replace(decision, promoted=False, reason="failed per-regime DSR")
         model_path = result["candidate_path"] if decision.promoted else None
         registry.record(decision, model_path=model_path)
         decisions[sector] = decision.promoted
@@ -117,4 +138,30 @@ def _synthetic_sharpe(frame, sector, result, champion_returns) -> float:
         return 0.0
     return run_hmm_synthetic_gauntlet(
         champion_returns, features, lambda matrix: predict_proba(booster, matrix), n_iter=20
+    )
+
+
+def _deflated_sharpe(champion_returns, trials, returns_matrix, cfg) -> float:
+    """Deflated Sharpe for the champion. With ``use_effective_trials`` the trial
+    count is the correlation-adjusted N_eff (correlated grid configs otherwise
+    over-deflate the DSR); the per-trial Sharpes still supply the variance."""
+    if cfg.evaluation.use_effective_trials:
+        n_eff = effective_number_of_trials(returns_matrix.to_numpy().T)
+        return deflated_sharpe_report(champion_returns, n_eff, trial_sharpes=trials).dsr
+    return compute_deflated_sharpe_ratio(champion_returns, trials)
+
+
+def _regime_verdict(champion_returns, trials, cfg) -> RegimeVerdict:
+    """Per-regime DSR gate over the champion's OOS returns: volatility is the
+    champion's own rolling std, regimes are decoded by a Gaussian HMM, and DSR
+    must clear the threshold in every testable regime (thin regimes per policy)."""
+    volatility = pd.Series(champion_returns).rolling(10).std().bfill().fillna(0.0).to_numpy()
+    evaluator = QuantitativeEvaluator(
+        min_dsr_threshold=cfg.evaluation.dsr_promotion_threshold,
+        n_components=cfg.evaluation.hmm_states,
+        min_regime_obs=cfg.evaluation.min_regime_obs,
+        thin_policy=ThinRegimePolicy(cfg.evaluation.thin_regime_policy),
+    )
+    return evaluator.evaluate_model_robustness(
+        champion_returns, volatility, len(trials), trial_sharpes=trials
     )

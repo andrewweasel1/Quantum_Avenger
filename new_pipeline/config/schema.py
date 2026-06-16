@@ -93,6 +93,11 @@ class EvaluationConfig(BaseModel):
     pbo_partitions: int = 10
     mt_method: str = "bhy"
     enforce_minbtl: bool = False
+    # Sentiment-fusion (offline core): correlation-adjusted deflation + per-regime DSR.
+    use_effective_trials: bool = True
+    regime_gate_enabled: bool = False
+    min_regime_obs: int = 60
+    thin_regime_policy: str = "skip"
 
 
 class MCPConfig(BaseModel):

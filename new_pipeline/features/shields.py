@@ -27,6 +27,12 @@ DEFAULT_SLIPPAGE_CONSTANT = 0.5
 DEFAULT_MAX_SLIPPAGE_BPS = 50.0
 DEFAULT_BPS_SCALER = 10000.0
 
+# Asymmetric sentiment-volatility gate defaults (beta > alpha: downside steeper).
+DEFAULT_SENTIMENT_ALPHA = 0.25   # upside size sensitivity
+DEFAULT_SENTIMENT_BETA = 1.0     # downside size sensitivity
+DEFAULT_SENTIMENT_GAMMA = 0.40   # stop tightening on negative sentiment
+DEFAULT_MIN_STOP_FRAC = 0.25     # floor on the effective ATR multiple
+
 
 @njit(fastmath=True, cache=True)
 def calculate_kelly_position_size(
@@ -107,4 +113,58 @@ def evaluate_risk_veto_gates(
     if position_size - current_qty <= 0.0:
         return False, 0.0
 
+    return True, position_size
+
+
+@njit(fastmath=True, cache=True)
+def sentiment_volatility_gate(
+    entry_price,
+    atr,
+    atr_multiplier,
+    account_capital,
+    max_risk_pct,
+    sentiment,
+    alpha=DEFAULT_SENTIMENT_ALPHA,
+    beta=DEFAULT_SENTIMENT_BETA,
+    gamma=DEFAULT_SENTIMENT_GAMMA,
+    min_stop_frac=DEFAULT_MIN_STOP_FRAC,
+):
+    """Asymmetric sentiment-volatility veto — a scalar, branch-light, Numba
+    extension of the Shield's asymmetric-loss philosophy: downside is penalized
+    harder than upside is rewarded. Returns ``(approved, position_size)``.
+
+    Negative sentiment shrinks size steeply *and* tightens the ATR stop; positive
+    sentiment relaxes size mildly (capped). Size gain ``g(s)=1+alpha*s`` for
+    ``s>=0`` and ``1+beta*s`` for ``s<0`` (``beta>alpha``); a hard veto fires when
+    ``g<=0``. The effective ATR multiple is tightened by ``gamma*max(0,-s)`` and
+    floored at ``min_stop_frac`` of the base multiple. Single-threaded by design:
+    inputs are scalars, so a thread-spawn would cost more than the arithmetic.
+    """
+    if entry_price <= 0.0 or atr <= 0.0 or atr_multiplier <= 0.0:
+        return False, 0.0
+    if account_capital <= 0.0 or max_risk_pct <= 0.0:
+        return False, 0.0
+
+    # Asymmetric size gain g(s).
+    if sentiment >= 0.0:
+        g = 1.0 + alpha * sentiment
+    else:
+        g = 1.0 + beta * sentiment
+    if g <= 0.0:
+        return False, 0.0  # sentiment sufficiently negative -> hard veto
+
+    # Asymmetric stop tightening: only negative sentiment pulls the stop in.
+    downside = -sentiment if sentiment < 0.0 else 0.0
+    atr_mult_eff = atr_multiplier * (1.0 - gamma * downside)
+    floor = atr_multiplier * min_stop_frac
+    if atr_mult_eff < floor:
+        atr_mult_eff = floor
+
+    stop_distance = atr_mult_eff * atr
+    if stop_distance <= 0.0:
+        return False, 0.0
+    if entry_price - stop_distance <= 0.0:  # stop must sit below entry for a long
+        return False, 0.0
+
+    position_size = (account_capital * max_risk_pct / stop_distance) * g
     return True, position_size
