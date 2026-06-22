@@ -9,7 +9,8 @@ suite is unaffected; here we turn it on and assert the chain still runs.
 
 from datetime import date
 
-from new_pipeline.adapters.factory import build_adapters
+from new_pipeline.adapters.factory import build_adapters, build_news_source
+from new_pipeline.adapters.universe_static import StaticUniverseProvider
 from new_pipeline.config import get_config, reload_config
 from new_pipeline.core.seeding import seed_everything
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES
@@ -70,5 +71,30 @@ def test_fusion_attaches_nonzero_sentiment_to_features(monkeypatch):
     )
     assert "sentiment_score" in frame.columns
     # FakeNewsSource yields a headline per day -> real (non-neutral) sentiment lands.
+    assert frame["sentiment_score"].abs().sum() > 0.0
+    assert all(name in frame.columns for name in MARKOV_FEATURE_NAMES)
+
+
+def test_pit_news_source_feeds_sentiment(monkeypatch):
+    monkeypatch.setenv("QA_FUSION__ENABLED", "true")
+    reload_config()
+    seed_everything(0)
+    cfg = get_config()
+    universe = StaticUniverseProvider()
+    bundle = build_adapters(cfg)
+    news_source = build_news_source(cfg, universe)  # offline -> StaticNewsSource fixture
+
+    frame = build_training_frame(
+        ["AAPL", "MSFT"],
+        {"AAPL": "Tech", "MSFT": "Tech"},
+        date(2021, 1, 1),
+        date(2021, 3, 31),
+        source=bundle.market_data,
+        cfg=cfg,
+        news_source=news_source,
+        sentiment_engine=bundle.sentiment_engine,
+        anonymizer=bundle.anonymizer,
+    )
+    # The fixture carries AAPL/MSFT headlines in Q1 2021, so sentiment is non-zero.
     assert frame["sentiment_score"].abs().sum() > 0.0
     assert all(name in frame.columns for name in MARKOV_FEATURE_NAMES)

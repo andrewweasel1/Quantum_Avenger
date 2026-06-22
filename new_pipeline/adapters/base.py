@@ -10,7 +10,7 @@ client in production. This keeps all 7 phases unit-testable with no network.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 
 @dataclass(frozen=True)
@@ -102,6 +102,25 @@ class NewsSource(ABC):
     @abstractmethod
     def headlines(self, symbol: str, on: date) -> list[NewsItem]:
         raise NotImplementedError
+
+    def fetch(
+        self, symbol: str, start: date, end: date, as_of: datetime | None = None
+    ) -> list[NewsItem]:
+        """All news for ``symbol`` in ``[start, end]`` (inclusive), optionally
+        truncated to items knowable by ``as_of`` (``timestamp <= as_of`` — a hard
+        look-ahead cutoff complementing the sentiment builder's session mapping).
+
+        Default loops ``headlines`` per calendar day; range-native providers
+        (fixture, GDELT, EDGAR) override this with a single query.
+        """
+        items: list[NewsItem] = []
+        day = start
+        while day <= end:
+            items.extend(self.headlines(symbol, day))
+            day += timedelta(days=1)
+        if as_of is not None:
+            items = [item for item in items if item.timestamp <= as_of]
+        return items
 
 
 class UniverseProvider(ABC):

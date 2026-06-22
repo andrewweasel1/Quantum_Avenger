@@ -1,0 +1,28 @@
+timestamp,ticker,headline
+2021-01-08T09:30:00,AAPL,Apple shares climb as iPhone demand beats expectations
+2021-01-08T15:00:00,AAPL,Analysts raise Apple price targets on strong services growth
+2021-01-09T12:00:00,AAPL,Apple weekend report highlights wearables momentum
+2021-01-15T11:00:00,AAPL,Apple supplier warns of a chip shortage pressuring output
+2021-02-01T14:00:00,AAPL,Apple unveils record quarterly revenue
+2021-03-12T10:15:00,AAPL,Apple faces antitrust scrutiny in Europe
+2021-05-04T13:30:00,AAPL,Apple buyback lifts investor sentiment
+2021-01-08T10:00:00,MSFT,Microsoft cloud revenue accelerates again
+2021-01-08T21:30:00,MSFT,Microsoft announces a major acquisition after hours
+2021-01-20T16:30:00,MSFT,Microsoft beats earnings estimates after the close
+2021-02-18T09:45:00,MSFT,Microsoft warns of slowing PC sales ahead
+2021-03-09T12:00:00,MSFT,Microsoft expands Azure data center capacity
+2021-06-01T11:20:00,MSFT,Microsoft raises its dividend
+2021-01-14T09:30:00,JPM,JPMorgan profit jumps on a trading boom
+2021-02-10T15:45:00,JPM,JPMorgan sets aside fresh loan loss reserves
+2021-04-13T10:00:00,JPM,JPMorgan beats on investment banking fees
+2021-01-11T08:30:00,XOM,Exxon shares slide as oil demand weakens
+2021-02-02T14:30:00,XOM,Exxon posts a surprise quarterly loss
+2021-03-05T11:00:00,XOM,Exxon cuts capital spending plans
+2021-05-28T13:00:00,XOM,Exxon rallies as crude prices recover
+2021-01-12T10:30:00,NVDA,Nvidia gaming demand surges past forecasts
+2021-02-24T16:15:00,NVDA,Nvidia guides revenue above estimates
+2021-04-12T09:50:00,NVDA,Nvidia faces ongoing supply constraints
+2021-01-19T10:00:00,JNJ,Johnson and Johnson vaccine data looks promising
+2021-03-22T14:45:00,JNJ,Johnson and Johnson lifts full year guidance
+2021-02-05T11:30:00,HD,Home Depot sales surge on housing demand
+2021-04-20T09:40:00,HD,Home Depot warns of supply chain costs

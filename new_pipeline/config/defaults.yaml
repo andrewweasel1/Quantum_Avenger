@@ -102,6 +102,19 @@ rag:
   chunk_size: 512
   chunk_overlap: 100
 
+news:
+  providers:
+    - "gdelt"
+  fixture_path: ""  # empty -> packaged new_pipeline/data/news/headlines.csv
+  vault_dir: "./data/raw/news"
+  limit: 20
+  gdelt_endpoint: "https://api.gdeltproject.org/api/v2/doc/doc"
+  edgar_forms:
+    - "8-K"
+    - "10-Q"
+    - "10-K"
+  edgar_identity: ""
+
 dashboard:
   veto_ledger_path: "./data/ledger/veto_ledger.parquet"
   trade_log_path: "./data/ledger/trade_log.parquet"

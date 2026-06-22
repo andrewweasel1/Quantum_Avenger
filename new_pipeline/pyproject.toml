@@ -41,6 +41,9 @@ omit = [
     # Fusion ML adapters: require torch/transformers/spaCy, absent from the CI image.
     "new_pipeline/adapters/sentiment_finbert.py",
     "new_pipeline/execution/anonymizer_spacy.py",
+    # Live PIT news providers: require egress (GDELT) / edgartools (EDGAR).
+    "new_pipeline/adapters/news_gdelt.py",
+    "new_pipeline/adapters/news_edgar.py",
 ]
 
 [tool.coverage.report]

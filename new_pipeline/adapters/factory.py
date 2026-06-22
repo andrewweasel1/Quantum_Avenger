@@ -113,3 +113,41 @@ def _build_fusion(cfg, universe):  # pragma: no cover - heavy ML deps (torch/tra
         FinBERTSentimentEngine(model_name=cfg.fusion.sentiment_model),
         SpacyNewsAnonymizer(universe.aliases(), spacy_model=cfg.fusion.spacy_model),
     )
+
+
+def build_news_source(cfg, universe):
+    """Point-in-time news source for the training/ingestion path: the deterministic
+    fixture offline, a composite of the configured live providers otherwise. Kept
+    separate from ``AdapterBundle.news`` (the runner's live trade-context feed)."""
+    mode = (cfg.system.run_mode or "offline").lower()
+    if mode in OFFLINE_MODES:
+        from new_pipeline.adapters.news_static import StaticNewsSource
+
+        return StaticNewsSource(cfg.news.fixture_path or None)
+    return _build_live_news_source(cfg, universe)
+
+
+def _build_live_news_source(cfg, universe):  # pragma: no cover - egress / live providers
+    from new_pipeline.adapters.news_composite import CompositeNewsSource
+
+    sources = []
+    for provider in cfg.news.providers:
+        if provider == "gdelt":
+            from new_pipeline.adapters.news_gdelt import GdeltNewsSource
+
+            sources.append(
+                GdeltNewsSource(
+                    universe.aliases(), endpoint=cfg.news.gdelt_endpoint, limit=cfg.news.limit
+                )
+            )
+        elif provider == "edgar":
+            from new_pipeline.adapters.news_edgar import EdgarFilingSource
+
+            sources.append(
+                EdgarFilingSource(
+                    forms=cfg.news.edgar_forms,
+                    identity=cfg.news.edgar_identity,
+                    limit=cfg.news.limit,
+                )
+            )
+    return CompositeNewsSource(sources)

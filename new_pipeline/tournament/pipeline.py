@@ -115,16 +115,16 @@ def run_offline_pipeline(
     output_dir, start=date(2021, 1, 1), end=date(2022, 12, 31), max_symbols=None, source=None
 ) -> dict:
     cfg = get_config()
-    sectors = StaticUniverseProvider().sectors()
+    universe = StaticUniverseProvider()
+    sectors = universe.sectors()
     symbols = list(sectors)[: max_symbols] if max_symbols else list(sectors)
     news_source = sentiment_engine = anonymizer = None
     if cfg.fusion.enabled:
-        from new_pipeline.adapters.factory import build_adapters
+        from new_pipeline.adapters.factory import build_adapters, build_news_source
 
         bundle = build_adapters(cfg)
-        news_source, sentiment_engine, anonymizer = (
-            bundle.news, bundle.sentiment_engine, bundle.anonymizer,
-        )
+        news_source = build_news_source(cfg, universe)  # PIT fixture offline
+        sentiment_engine, anonymizer = bundle.sentiment_engine, bundle.anonymizer
         source = source or bundle.market_data
     frame = build_training_frame(
         symbols, sectors, start, end, source, cfg,

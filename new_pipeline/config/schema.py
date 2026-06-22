@@ -114,6 +114,18 @@ class RAGConfig(BaseModel):
     chunk_overlap: int = 100
 
 
+class NewsConfig(BaseModel):
+    """Point-in-time news feed: offline fixture + live providers (GDELT/EDGAR)."""
+
+    providers: list[str] = Field(default_factory=lambda: ["gdelt"])  # live composite order
+    fixture_path: str = ""  # offline StaticNewsSource; "" -> packaged data/news/headlines.csv
+    vault_dir: str = "./data/raw/news"
+    limit: int = 20
+    gdelt_endpoint: str = "https://api.gdeltproject.org/api/v2/doc/doc"
+    edgar_forms: list[str] = Field(default_factory=lambda: ["8-K", "10-Q", "10-K"])
+    edgar_identity: str = ""  # SEC requires a "Name email" User-Agent identity
+
+
 class DashboardConfig(BaseModel):
     veto_ledger_path: str = "./data/ledger/veto_ledger.parquet"
     trade_log_path: str = "./data/ledger/trade_log.parquet"
@@ -154,5 +166,6 @@ class AppConfig(BaseModel):
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
+    news: NewsConfig = Field(default_factory=NewsConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     alpaca: AlpacaConfig = Field(default_factory=AlpacaConfig)
