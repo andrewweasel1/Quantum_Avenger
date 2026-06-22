@@ -25,6 +25,8 @@ class PromotionDecision:
     pbo: float | None = None
     psr: float | None = None
     haircut_sharpe: float | None = None
+    cpcv_path_pass_fraction: float | None = None
+    cpcv_path_dsr_median: float | None = None
 
 
 def assess_promotion(
@@ -38,13 +40,29 @@ def assess_promotion(
     psr=None,
     haircut_sharpe=None,
     minbtl_satisfied=None,
+    path_pass_fraction=None,
+    path_fraction_threshold=0.5,
+    path_dsr_median=None,
+    path_gate_enabled=False,
 ) -> PromotionDecision:
-    """Apply every promotion gate; the first failure names the rejection reason."""
+    """Apply every promotion gate; the first failure names the rejection reason.
+
+    The CPCV path gate (when enabled and supplied) requires at least
+    ``path_fraction_threshold`` of the reconstructed backtest paths to clear the
+    Deflated-Sharpe threshold individually — robustness beyond the single mean
+    path's DSR.
+    """
+    path_gate = (
+        path_gate_enabled
+        and path_pass_fraction is not None
+        and path_pass_fraction < path_fraction_threshold
+    )
     gates = {
         "low DSR": dsr < dsr_threshold,
         "failed synthetic gauntlet": synthetic_sharpe <= synthetic_min,
         "overfit (high PBO)": pbo is not None and pbo > pbo_threshold,
         "backtest shorter than MinBTL": minbtl_satisfied is False,
+        "unstable across CPCV paths": path_gate,
     }
     failed = [reason for reason, tripped in gates.items() if tripped]
     promoted = not failed
@@ -57,6 +75,8 @@ def assess_promotion(
         pbo=pbo,
         psr=psr,
         haircut_sharpe=haircut_sharpe,
+        cpcv_path_pass_fraction=path_pass_fraction,
+        cpcv_path_dsr_median=path_dsr_median,
     )
 
 
@@ -80,6 +100,8 @@ class PromotionRegistry:
             "pbo": decision.pbo,
             "psr": decision.psr,
             "haircut_sharpe": decision.haircut_sharpe,
+            "cpcv_path_pass_fraction": decision.cpcv_path_pass_fraction,
+            "cpcv_path_dsr_median": decision.cpcv_path_dsr_median,
             "promoted": decision.promoted,
             "reason": decision.reason,
             "timestamp": datetime.now(UTC).isoformat(),

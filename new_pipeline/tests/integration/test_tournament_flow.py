@@ -57,6 +57,12 @@ def test_offline_end_to_end_pipeline(tmp_path, monkeypatch):
     assert result.returns_matrix.shape[0] == 4
     champion_returns = result.returns_matrix[int(np.argmax(result.trial_sharpes))]
 
+    # CPCV paths: phi = C(5, 1) = 5 for the canonical 6/2 splitter, and the mean
+    # of the champion's paths equals its canonical per-sample OOS average.
+    assert result.path_count == 5
+    assert result.paths.shape == (5, features.shape[0])
+    np.testing.assert_allclose(result.paths.mean(axis=0), champion_returns, rtol=1e-9, atol=1e-12)
+
     booster = train_booster(features, labels, num_boost_round=20)
     candidate_path = tmp_path / "AAPL_candidate.json"
     save_candidate(booster, candidate_path)

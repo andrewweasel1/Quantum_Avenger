@@ -87,6 +87,7 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
     sector = clean["sector"][0]
     labels = clean["target_label"].to_numpy().astype(np.float64)
     prices = {col: clean[col].to_numpy().astype(np.float64) for col in _PRICE_COLUMNS}
+    t1_offset = clean["label_t1_offset"].to_numpy() if "label_t1_offset" in clean.columns else None
     matrix = clean.select(feature_cols).to_numpy()
 
     selected = list(feature_cols)
@@ -101,7 +102,7 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
         )
     selected_matrix = clean.select(selected).to_numpy()
 
-    search = run_grid_search(selected_matrix, labels, prices)
+    search = run_grid_search(selected_matrix, labels, prices, t1_offset=t1_offset)
     booster = _train_candidate(selected_matrix, labels, cfg)
     return sector, _persist(output, sector, booster, selected, search)
 
@@ -139,6 +140,11 @@ def _persist(output: Path, sector: str, booster, selected, search) -> dict:
     pl.DataFrame(
         matrix.T, schema=[f"trial_{i}" for i in range(matrix.shape[0])]
     ).write_parquet(returns_path)
+    if search.paths is not None and search.paths.size:
+        paths = search.paths
+        pl.DataFrame(
+            paths.T, schema=[f"path_{i}" for i in range(paths.shape[0])]
+        ).write_parquet(output / f"{slug}_paths.parquet")
 
     return {
         "selected_features": selected,

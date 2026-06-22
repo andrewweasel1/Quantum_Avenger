@@ -76,3 +76,36 @@ def test_diagnostics_are_recorded(tmp_path):
     assert entry["pbo"] == 0.1
     assert entry["psr"] == 0.99
     assert entry["haircut_sharpe"] == 1.1
+
+
+def test_cpcv_path_gate_blocks_unstable_paths():
+    decision = assess_promotion(
+        "Energy", 0.97, 0.2,
+        path_pass_fraction=0.2, path_fraction_threshold=0.5, path_gate_enabled=True,
+    )
+    assert decision.promoted is False
+    assert decision.reason == "unstable across CPCV paths"
+    assert decision.cpcv_path_pass_fraction == 0.2
+
+
+def test_cpcv_path_gate_passes_when_enough_paths_clear():
+    decision = assess_promotion(
+        "Energy", 0.97, 0.2,
+        path_pass_fraction=0.8, path_fraction_threshold=0.5, path_gate_enabled=True,
+    )
+    assert decision.promoted is True
+
+
+def test_cpcv_path_gate_inert_when_disabled():
+    # Default path_gate_enabled=False: the fraction is recorded but never gates.
+    decision = assess_promotion("Energy", 0.97, 0.2, path_pass_fraction=0.0)
+    assert decision.promoted is True
+    assert decision.cpcv_path_pass_fraction == 0.0
+
+
+def test_cpcv_path_diagnostics_recorded(tmp_path):
+    registry = PromotionRegistry(tmp_path / "reg.json")
+    decision = assess_promotion("Energy", 0.97, 0.2, path_pass_fraction=0.6, path_dsr_median=0.93)
+    entry = registry.record(decision, model_path="/m/e.json")
+    assert entry["cpcv_path_pass_fraction"] == 0.6
+    assert entry["cpcv_path_dsr_median"] == 0.93

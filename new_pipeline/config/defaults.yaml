@@ -68,6 +68,7 @@ tournament:
   test_groups: 2
   purge_days: 5
   embargo_days: 5
+  embargo_pct: 0.01
   penalty_fp: 5.0
   penalty_fn: 1.0
   num_boost_round: 100
@@ -98,6 +99,8 @@ evaluation:
   pbo_partitions: 10
   mt_method: "bhy"
   enforce_minbtl: false
+  cpcv_path_gate_enabled: true
+  cpcv_path_min_fraction: 0.5
 
 mcp:
   transport: "stdio"

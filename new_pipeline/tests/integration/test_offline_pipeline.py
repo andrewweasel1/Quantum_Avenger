@@ -38,7 +38,8 @@ def test_offline_pipeline_records_overfitting_diagnostics(tmp_path, monkeypatch)
     registry = json.loads((tmp_path / "promotion_registry.json").read_text())
     assert registry["promotions"]
     entry = registry["promotions"][0]
-    # Evaluation Rigor v2 gates ride along in the audit trail.
-    assert {"pbo", "psr", "haircut_sharpe"} <= set(entry)
+    # Evaluation Rigor v2 gates + the CPCV path-DSR gate ride along in the audit trail.
+    assert {"pbo", "psr", "haircut_sharpe", "cpcv_path_pass_fraction"} <= set(entry)
     assert isinstance(entry["pbo"], float)
     assert isinstance(entry["psr"], float)
+    assert 0.0 <= entry["cpcv_path_pass_fraction"] <= 1.0

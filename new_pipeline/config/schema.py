@@ -75,6 +75,7 @@ class TournamentConfig(BaseModel):
     test_groups: int = 2
     purge_days: int = 5
     embargo_days: int = 5
+    embargo_pct: float = 0.0  # fractional embargo: ceil(pct * n_samples) positions
     penalty_fp: float = 5.0
     penalty_fn: float = 1.0
     num_boost_round: int = 100
@@ -104,6 +105,10 @@ class EvaluationConfig(BaseModel):
     regime_gate_enabled: bool = False
     min_regime_obs: int = 60
     thin_regime_policy: str = "skip"
+    # CPCV backtest-path DSR gate: require >= cpcv_path_min_fraction of the phi
+    # reconstructed paths to clear dsr_promotion_threshold individually.
+    cpcv_path_gate_enabled: bool = True
+    cpcv_path_min_fraction: float = 0.5
 
 
 class MCPConfig(BaseModel):

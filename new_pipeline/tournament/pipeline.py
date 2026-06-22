@@ -157,8 +157,10 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             "_candidate.json", "_returns_matrix.parquet"
         ))
         champion_returns = returns_matrix[:, best].to_numpy()
+        paths = _load_champion_paths(result["candidate_path"])
 
         dsr = _deflated_sharpe(champion_returns, trials, returns_matrix, cfg)
+        path_pass_fraction, path_dsr_median = _path_dsr_stats(paths, trials, returns_matrix, cfg)
         synthetic_sr = _synthetic_sharpe(frame, sector, result, champion_returns)
         # Overfitting/selection diagnostics over the full (n_obs x n_trials) matrix.
         champion_sharpe = sharpe_ratio(champion_returns)
@@ -179,6 +181,10 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             cfg.evaluation.dsr_promotion_threshold, cfg.evaluation.synthetic_sr_min,
             pbo=pbo, pbo_threshold=cfg.evaluation.pbo_threshold,
             psr=psr, haircut_sharpe=haircut, minbtl_satisfied=minbtl_ok,
+            path_pass_fraction=path_pass_fraction,
+            path_fraction_threshold=cfg.evaluation.cpcv_path_min_fraction,
+            path_dsr_median=path_dsr_median,
+            path_gate_enabled=cfg.evaluation.cpcv_path_gate_enabled,
         )
         if cfg.evaluation.regime_gate_enabled and decision.promoted:
             if not _regime_verdict(champion_returns, trials, cfg).promoted:
@@ -203,6 +209,34 @@ def _synthetic_sharpe(frame, sector, result, champion_returns) -> float:
     return run_hmm_synthetic_gauntlet(
         champion_returns, features, lambda matrix: predict_proba(booster, matrix), n_iter=20
     )
+
+
+def _load_champion_paths(candidate_path):
+    """Load the champion's reconstructed CPCV backtest paths as a (phi, n) array."""
+    paths_file = Path(candidate_path.replace("_candidate.json", "_paths.parquet"))
+    if not paths_file.exists():
+        return None
+    return pl.read_parquet(paths_file).to_numpy().T  # columns are paths -> rows are paths
+
+
+def _path_dsr_stats(paths, trials, returns_matrix, cfg):
+    """Per-path Deflated Sharpe over the phi CPCV paths: (pass_fraction, median).
+
+    Each path is the champion strategy resampled, so it is deflated by the same
+    (effective) trial count and cross-trial variance as the mean-path DSR; the
+    pass fraction is the share of paths individually clearing the threshold.
+    """
+    if paths is None or paths.shape[0] == 0:
+        return None, None
+    if cfg.evaluation.use_effective_trials:
+        n_eff = effective_number_of_trials(returns_matrix.to_numpy().T)
+        path_dsrs = np.array(
+            [deflated_sharpe_report(path, n_eff, trial_sharpes=trials).dsr for path in paths]
+        )
+    else:
+        path_dsrs = np.array([compute_deflated_sharpe_ratio(path, trials) for path in paths])
+    pass_fraction = float(np.mean(path_dsrs >= cfg.evaluation.dsr_promotion_threshold))
+    return pass_fraction, float(np.median(path_dsrs))
 
 
 def _deflated_sharpe(champion_returns, trials, returns_matrix, cfg) -> float:
