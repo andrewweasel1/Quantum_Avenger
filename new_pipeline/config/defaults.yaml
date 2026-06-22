@@ -75,6 +75,11 @@ tournament:
   cache_host_ratio: 0.75
   tree_method: "hist"
   device: "cpu"
+  # Feature selection: "clustered_permutation" (correlational, default) | "causal"
+  # (Granger directional screen + purged-CPCV MDA).
+  feature_selection_method: "clustered_permutation"
+  causal_alpha: 0.10
+  causal_granger_lags: 3
   sectors:
     - "Information Technology"
     - "Health Care"
