@@ -32,6 +32,15 @@ import numpy as np
 from new_pipeline.core.exceptions import CPCVSplitError
 
 
+def absolute_t1(t1_offset, n_samples: int) -> np.ndarray | None:
+    """Per-row 'bars ahead to first touch' offsets -> clamped absolute event-end
+    positions for CPCV purging. Clamping to n-1 only widens the purge (safe)."""
+    if t1_offset is None:
+        return None
+    offsets = np.nan_to_num(np.asarray(t1_offset, dtype=np.float64), nan=0.0).astype(np.int64)
+    return np.minimum(np.arange(n_samples) + offsets, n_samples - 1)
+
+
 @dataclass
 class CPCVSplitGenerator:
     n_groups: int = 6

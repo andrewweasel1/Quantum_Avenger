@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from new_pipeline.config import get_config
-from new_pipeline.tournament.cpcv import CPCVSplitGenerator
+from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
 from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
 from new_pipeline.tournament.trainer import default_params, predict_proba, train_booster
 
@@ -27,15 +27,6 @@ class GridSearchResult:
     trial_sharpes: list[float] = field(default_factory=list)
     paths: np.ndarray | None = None  # champion CPCV backtest paths (phi, n_samples)
     path_count: int = 0
-
-
-def _absolute_t1(t1_offset, n_samples: int) -> np.ndarray | None:
-    """Convert per-row 'bars ahead to first touch' offsets into clamped absolute
-    event-end positions. Clamping to n-1 only ever widens the purge (conservative)."""
-    if t1_offset is None:
-        return None
-    offsets = np.nan_to_num(np.asarray(t1_offset, dtype=np.float64), nan=0.0).astype(np.int64)
-    return np.minimum(np.arange(n_samples) + offsets, n_samples - 1)
 
 
 def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.5, t1_offset=None):
@@ -57,7 +48,7 @@ def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.
         embargo_pct=cfg.tournament.embargo_pct,
     )
     n = len(labels)
-    t1 = _absolute_t1(t1_offset, n)
+    t1 = absolute_t1(t1_offset, n)
     folds = splitter.split(n, t1=t1)
     combo_groups = splitter.combinations()
     bounds = splitter.group_bounds(n)

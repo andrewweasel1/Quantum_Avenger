@@ -1,7 +1,14 @@
 import numpy as np
 import pytest
 from new_pipeline.core.exceptions import CPCVSplitError
-from new_pipeline.tournament.cpcv import CPCVSplitGenerator
+from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
+
+
+def test_absolute_t1_clamps_and_handles_none():
+    assert absolute_t1(None, 10) is None
+    # offset 2 ahead, clamped to n-1; NaN offsets collapse to the row itself.
+    out = absolute_t1(np.array([2.0, 2.0, np.nan, 2.0, 2.0]), 5)
+    assert out.tolist() == [2, 3, 2, 4, 4]
 
 
 def test_canonical_fifteen_folds():
