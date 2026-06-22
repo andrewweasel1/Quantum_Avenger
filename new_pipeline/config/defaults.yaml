@@ -14,6 +14,12 @@ features:
   regime_percentile: 0.8
   bps_scaler: 10000.0
   max_slippage_bps: 50.0
+  # Triple-barrier target labels (sl_mult mirrors execution.atr_stop_multiplier).
+  label_horizon: 5
+  label_cost_bps: 10.0
+  label_method: "triple_barrier"
+  label_pt_mult: 2.0
+  label_sl_mult: 2.0
 
 models:
   prod_models_dir: "./models/prod"

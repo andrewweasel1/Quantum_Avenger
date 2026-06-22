@@ -21,6 +21,9 @@ class FeatureConfig(BaseModel):
     crash_window: int = 60
     label_horizon: int = 1
     label_cost_bps: float = 10.0
+    label_method: str = "triple_barrier"  # "triple_barrier" | "friction"
+    label_pt_mult: float = 2.0  # profit-take barrier in ATR units
+    label_sl_mult: float = 2.0  # stop-loss barrier in ATR units (mirrors execution stop)
 
 
 class ModelConfig(BaseModel):

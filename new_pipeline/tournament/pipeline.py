@@ -72,7 +72,14 @@ def build_training_frame(
         for bar in source.history(symbol, start, end)
     ]
     features = compile_features(pl.DataFrame(rows))
-    labeled = add_labels(features, cfg.features.label_horizon, cfg.features.label_cost_bps)
+    labeled = add_labels(
+        features,
+        cfg.features.label_horizon,
+        cfg.features.label_cost_bps,
+        cfg.features.label_pt_mult,
+        cfg.features.label_sl_mult,
+        cfg.features.label_method,
+    )
     if news_source is not None and sentiment_engine is not None and anonymizer is not None:
         labeled = _attach_sentiment(labeled, symbols, news_source, sentiment_engine, anonymizer)
     if cfg.fusion.enabled:
