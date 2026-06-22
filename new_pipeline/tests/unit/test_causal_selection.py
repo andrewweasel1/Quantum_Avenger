@@ -3,7 +3,9 @@ import pytest
 from new_pipeline.tournament.causal_selection import (
     granger_pvalue,
     granger_screen,
+    purged_cpcv_mda,
 )
+from new_pipeline.tournament.cpcv import CPCVSplitGenerator
 
 
 def _causal_dataset(n=400, seed=0):
@@ -61,3 +63,28 @@ def test_granger_screen_keeps_cause_drops_decoy():
     )
     assert survivors == ["x_true"]
     assert adjusted["x_true"] < adjusted["x_decoy"]
+
+
+# --- Stage B: purged-CPCV MDA ------------------------------------------------
+def _label_corr_predictor(train_x, train_y):
+    """Stub: pick the train-most-correlated column, predict its sign on test."""
+    corrs = [abs(np.corrcoef(train_x[:, j], train_y)[0, 1]) for j in range(train_x.shape[1])]
+    best = int(np.nanargmax(corrs))
+    return lambda test_x: (test_x[:, best] > 0.0).astype(np.float64)
+
+
+def test_purged_mda_is_deterministic_and_ranks_the_cause_top():
+    rng = np.random.default_rng(3)
+    n = 240
+    x_true = rng.normal(size=n)
+    x_decoy = rng.normal(size=n)
+    labels = (x_true > 0.0).astype(np.float64)  # label depends on x_true contemporaneously
+    matrix = np.column_stack([x_true, x_decoy])
+    splitter = CPCVSplitGenerator(n_groups=4, test_groups=2, purge=0, embargo=0)
+
+    names = ["x_true", "x_decoy"]
+    first = purged_cpcv_mda(matrix, names, labels, _label_corr_predictor, splitter, seed=7)
+    second = purged_cpcv_mda(matrix, names, labels, _label_corr_predictor, splitter, seed=7)
+    assert first == second  # determinism under a fixed seed
+    assert first["x_true"] > first["x_decoy"]  # permuting the genuine driver hurts accuracy most
+    assert first["x_decoy"] == pytest.approx(0.0, abs=1e-9)  # predictor ignores the decoy column

@@ -20,6 +20,8 @@ leakage-purged importance (but is associational). The hybrid upgrades both. Pure
 numpy/scipy + the existing BHY adjuster; deterministic and offline.
 """
 
+from collections.abc import Callable
+
 import numpy as np
 from scipy import stats
 
@@ -97,3 +99,51 @@ def granger_screen(
     adjusted_map = {name: float(adjusted[j]) for j, name in enumerate(names)}
     survivors = [name for j, name in enumerate(names) if adjusted[j] < alpha]
     return survivors, adjusted_map
+
+
+def _accuracy(predictions, actual) -> float:
+    return float(np.mean(np.asarray(predictions) == np.asarray(actual)))
+
+
+def purged_cpcv_mda(
+    feature_matrix,
+    feature_names: list[str],
+    labels,
+    fit_fn: Callable[[np.ndarray, np.ndarray], Callable[[np.ndarray], np.ndarray]],
+    splitter,
+    t1: np.ndarray | None = None,
+    seed: int = 0,
+) -> dict[str, float]:
+    """Mean-decrease-accuracy per feature, averaged over the purged CPCV folds.
+
+    ``fit_fn(train_X, train_y) -> predict`` trains ONCE per fold and returns a
+    predictor mapping a test matrix to binary predictions; each feature's
+    importance is the out-of-sample accuracy *drop* when its test column is
+    permuted (López de Prado out-of-sample MDA). Permutations draw from a
+    per-(fold, feature) seed, so the result is bit-identical regardless of how
+    the sectors' folds are scheduled across threads.
+    """
+    matrix = np.asarray(feature_matrix, dtype=np.float64)
+    labels = np.asarray(labels, dtype=np.float64)
+    names = list(feature_names)
+    n_features = matrix.shape[1]
+
+    totals = np.zeros(n_features, dtype=np.float64)
+    folds_used = 0
+    for fold_index, (train_idx, test_idx) in enumerate(splitter.split(matrix.shape[0], t1=t1)):
+        if test_idx.size == 0 or np.unique(labels[train_idx]).size < 2:
+            continue  # a degenerate fold (empty test or single-class train) can't score
+        predict = fit_fn(matrix[train_idx], labels[train_idx])
+        test_x, test_y = matrix[test_idx], labels[test_idx]
+        base_accuracy = _accuracy(predict(test_x), test_y)
+        for j in range(n_features):
+            rng = np.random.default_rng([seed, fold_index, j])
+            permuted = test_x.copy()
+            permuted[:, j] = rng.permutation(permuted[:, j])
+            totals[j] += base_accuracy - _accuracy(predict(permuted), test_y)
+        folds_used += 1
+
+    if folds_used == 0:
+        return {name: 0.0 for name in names}
+    means = totals / folds_used
+    return {name: float(means[j]) for j, name in enumerate(names)}
