@@ -8,6 +8,11 @@ import numpy as np
 import pytest
 from new_pipeline.tournament.causal_selection import granger_pvalue, purged_cpcv_mda
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator
+from new_pipeline.tournament.sample_weights import (
+    average_uniqueness,
+    get_concurrency,
+    sequential_bootstrap,
+)
 
 
 def test_granger_pvalue_golden():
@@ -40,3 +45,12 @@ def test_purged_cpcv_mda_golden():
     importances = purged_cpcv_mda(matrix, ["x", "decoy"], labels, fit_fn, splitter, seed=0)
     assert importances["x"] == pytest.approx(0.4666666666666666, abs=1e-12)
     assert importances["decoy"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_sample_weights_golden():
+    t1 = np.array([0, 2, 2, 4, 4, 4, 6, 6])
+    assert get_concurrency(t1).tolist() == [1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0]
+    np.testing.assert_allclose(
+        average_uniqueness(t1), [1.0, 0.75, 0.5, 0.75, 0.5, 1.0, 1.0, 1.0], atol=1e-12
+    )
+    assert sequential_bootstrap(t1, size=8, seed=7).tolist() == [5, 7, 5, 1, 2, 6, 0, 6]
