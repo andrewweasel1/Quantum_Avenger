@@ -54,3 +54,11 @@ def test_sample_weights_golden():
         average_uniqueness(t1), [1.0, 0.75, 0.5, 0.75, 0.5, 1.0, 1.0, 1.0], atol=1e-12
     )
     assert sequential_bootstrap(t1, size=8, seed=7).tolist() == [5, 7, 5, 1, 2, 6, 0, 6]
+
+
+def test_cpcv_folds_golden():
+    folds = CPCVSplitGenerator().split(24)
+    assert len(folds) == 15
+    train0, test0 = folds[0]
+    assert test0.tolist() == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert train0.tolist() == [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
