@@ -32,13 +32,32 @@ import numpy as np
 from new_pipeline.core.exceptions import CPCVSplitError
 
 
-def absolute_t1(t1_offset, n_samples: int) -> np.ndarray | None:
+def block_end_index(block_ids) -> np.ndarray:
+    """For each row, the index of the last row in its contiguous block (run).
+
+    ``block_ids`` is a per-row block id (e.g. a ticker run id); rows of the same
+    block are assumed contiguous. Used to cap label spans / simulation at a block
+    boundary so they never cross into another ticker.
+    """
+    ids = np.asarray(block_ids)
+    n = ids.size
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    run_ends = np.append(np.flatnonzero(ids[1:] != ids[:-1]), n - 1)
+    return run_ends[np.searchsorted(run_ends, np.arange(n), side="left")]
+
+
+def absolute_t1(t1_offset, n_samples: int, block_ids=None) -> np.ndarray | None:
     """Per-row 'bars ahead to first touch' offsets -> clamped absolute event-end
-    positions for CPCV purging. Clamping to n-1 only widens the purge (safe)."""
+    positions for CPCV purging. Clamps each span to the end of its contiguous
+    block (e.g. ticker run) when ``block_ids`` is given, else to ``n-1``; clamping
+    only shrinks a span, so it never crosses a block boundary into another ticker."""
     if t1_offset is None:
         return None
     offsets = np.nan_to_num(np.asarray(t1_offset, dtype=np.float64), nan=0.0).astype(np.int64)
-    return np.minimum(np.arange(n_samples) + offsets, n_samples - 1)
+    raw = np.arange(n_samples) + offsets
+    ceiling = (n_samples - 1) if block_ids is None else block_end_index(block_ids)
+    return np.minimum(raw, ceiling)
 
 
 @dataclass

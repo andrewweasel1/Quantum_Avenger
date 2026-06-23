@@ -36,6 +36,27 @@ def simulate_t1_returns(signals, close, low, atr, atr_multiplier, max_risk_pct):
     return out
 
 
+def simulate_t1_returns_blockwise(
+    signals, close, low, atr, block_ids, atr_multiplier, max_risk_pct
+):
+    """:func:`simulate_t1_returns` applied independently within each contiguous
+    block (e.g. ticker run) of ``block_ids``, so a trade's t+1 exit never crosses
+    a block boundary into another ticker. With a single block this is identical to
+    :func:`simulate_t1_returns`."""
+    n = np.asarray(close).shape[0]
+    out = np.zeros(n, dtype=np.float64)
+    if n == 0:
+        return out
+    ids = np.asarray(block_ids)
+    starts = np.concatenate([[0], np.flatnonzero(ids[1:] != ids[:-1]) + 1])
+    ends = np.concatenate([starts[1:], [n]])  # exclusive
+    for a, b in zip(starts, ends, strict=True):
+        out[a:b] = simulate_t1_returns(
+            signals[a:b], close[a:b], low[a:b], atr[a:b], atr_multiplier, max_risk_pct
+        )
+    return out
+
+
 def sharpe_ratio(returns: np.ndarray, periods: int = 252) -> float:
     """Annualized Sharpe of a per-bar return series (0 risk-free)."""
     series = np.asarray(returns, dtype=np.float64)

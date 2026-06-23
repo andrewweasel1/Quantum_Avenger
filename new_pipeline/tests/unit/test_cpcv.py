@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from new_pipeline.core.exceptions import CPCVSplitError
-from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
+from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1, block_end_index
 
 
 def test_absolute_t1_clamps_and_handles_none():
@@ -9,6 +9,19 @@ def test_absolute_t1_clamps_and_handles_none():
     # offset 2 ahead, clamped to n-1; NaN offsets collapse to the row itself.
     out = absolute_t1(np.array([2.0, 2.0, np.nan, 2.0, 2.0]), 5)
     assert out.tolist() == [2, 3, 2, 4, 4]
+
+
+def test_block_end_index_per_run():
+    ids = np.array([0, 0, 1, 1, 1, 2])
+    assert block_end_index(ids).tolist() == [1, 1, 4, 4, 4, 5]
+
+
+def test_absolute_t1_does_not_cross_block_boundary():
+    # block 0 = rows [0,1,2], block 1 = [3,4]; offsets of 3 would reach into the
+    # next ticker, but block-aware clamping caps each span at its own block end.
+    block_ids = np.array([0, 0, 0, 1, 1])
+    out = absolute_t1(np.array([3.0, 3.0, 3.0, 3.0, 3.0]), 5, block_ids=block_ids)
+    assert out.tolist() == [2, 2, 2, 4, 4]
 
 
 def test_canonical_fifteen_folds():

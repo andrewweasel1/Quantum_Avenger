@@ -3,7 +3,11 @@ from new_pipeline.tournament.objectives import (
     asymmetric_financial_loss,
     asymmetric_loss_factory,
 )
-from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
+from new_pipeline.tournament.simulator import (
+    sharpe_ratio,
+    simulate_t1_returns,
+    simulate_t1_returns_blockwise,
+)
 
 
 class _DMatrix:
@@ -61,6 +65,23 @@ def test_simulator_no_lookahead_on_last_bar():
     atr = np.full(2, 1.0)
     out = simulate_t1_returns(np.array([0, 1]), close, low, atr, 2.0, 0.02)
     assert out[-1] == 0.0  # a signal on the final bar has no t+1 -> no trade
+
+
+def test_blockwise_sim_does_not_cross_ticker_boundary():
+    # block A = [0,1], block B = [2,3]. A's last bar (idx 1) must not exit on B's
+    # first bar (idx 2) — that would fabricate a stop-out from a different ticker.
+    signals = np.array([1, 1, 0, 0])
+    close = np.array([100.0, 102.0, 50.0, 60.0])
+    low = np.array([99.0, 101.0, 49.0, 59.0])
+    atr = np.array([1.0, 1.0, 1.0, 1.0])
+    block_ids = np.array([0, 0, 1, 1])
+
+    out = simulate_t1_returns_blockwise(signals, close, low, atr, block_ids, 2.0, 0.02)
+    naive = simulate_t1_returns(signals, close, low, atr, 2.0, 0.02)
+
+    assert out[0] > 0.0  # within-block trade still realizes on the next in-block bar
+    assert out[1] == 0.0  # A's last bar: no cross-ticker t+1
+    assert naive[1] != 0.0  # the naive concatenated sim leaks (idx2 stop-out)
 
 
 def test_sharpe_zero_for_flat_series():
