@@ -14,7 +14,7 @@ import numpy as np
 from new_pipeline.config import get_config
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
 from new_pipeline.tournament.sample_weights import uniqueness_sample_weights
-from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
+from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns_blockwise
 from new_pipeline.tournament.trainer import default_params, predict_proba, train_booster
 
 _DEFAULT_GRID = {"max_depth": [1, 2], "learning_rate": [0.01, 0.05]}
@@ -30,7 +30,9 @@ class GridSearchResult:
     path_count: int = 0
 
 
-def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.5, t1_offset=None):
+def run_grid_search(
+    features, labels, prices, grid=None, confidence_threshold=0.5, t1_offset=None, block_ids=None
+):
     """``prices`` is a dict of equal-length 'close'/'low'/'atr' arrays.
 
     When ``t1_offset`` (per-row bars-to-first-touch from the labeller) is given,
@@ -49,7 +51,7 @@ def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.
         embargo_pct=cfg.tournament.embargo_pct,
     )
     n = len(labels)
-    t1 = absolute_t1(t1_offset, n)
+    t1 = absolute_t1(t1_offset, n, block_ids)
     weights = (
         uniqueness_sample_weights(t1)
         if t1 is not None and cfg.tournament.sample_weighting == "uniqueness"
@@ -83,19 +85,20 @@ def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.
                 penalty_fn=cfg.tournament.penalty_fn,
                 sample_weight=None if weights is None else weights[train_idx],
             )
-            # Simulate each test group on its own contiguous block, so a group's
-            # last bar never uses the next (non-adjacent) group's first bar as its
-            # t+1 — eliminating the cross-group boundary leak.
+            # Simulate each test group on its own contiguous block, block-wise per
+            # ticker, so a trade's t+1 never crosses a group OR ticker boundary.
             for g in test_groups:
                 gstart, gend = bounds[g]
                 block = slice(gstart, gend + 1)
                 proba = predict_proba(booster, features[block])
                 signals = (proba > confidence_threshold).astype(np.int64)
-                segments[(combo_index, g)] = simulate_t1_returns(
+                group_ids = np.zeros(gend - gstart + 1) if block_ids is None else block_ids[block]
+                segments[(combo_index, g)] = simulate_t1_returns_blockwise(
                     signals,
                     prices["close"][block],
                     prices["low"][block],
                     prices["atr"][block],
+                    group_ids,
                     cfg.execution.atr_stop_multiplier,
                     cfg.execution.max_risk_per_trade,
                 )

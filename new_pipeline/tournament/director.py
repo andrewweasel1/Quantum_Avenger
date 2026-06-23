@@ -23,7 +23,7 @@ from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
 from new_pipeline.tournament.feature_selection import select_orthogonal_features
 from new_pipeline.tournament.grid_search import run_grid_search
 from new_pipeline.tournament.sample_weights import uniqueness_sample_weights
-from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
+from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns_blockwise
 from new_pipeline.tournament.trainer import predict_proba, save_candidate, train_booster
 
 _PRICE_COLUMNS = ("close", "low", "atr")
@@ -34,9 +34,10 @@ def _slug(sector: str) -> str:
     return sector.lower().replace(" ", "_").replace("/", "_")
 
 
-def _sharpe_score_fn(labels, prices, cfg):
+def _sharpe_score_fn(labels, prices, cfg, block_ids=None):
     """A score_fn(feature_matrix) -> Sharpe used for CFS permutation importance."""
     rounds = min(40, cfg.tournament.num_boost_round)
+    ids = np.zeros(len(labels)) if block_ids is None else block_ids
 
     def score(matrix):
         booster = train_booster(
@@ -48,11 +49,12 @@ def _sharpe_score_fn(labels, prices, cfg):
         )
         proba = predict_proba(booster, matrix)
         signals = (proba > cfg.execution.confidence_threshold).astype(np.int64)
-        returns = simulate_t1_returns(
+        returns = simulate_t1_returns_blockwise(
             signals,
             prices["close"],
             prices["low"],
             prices["atr"],
+            ids,
             cfg.execution.atr_stop_multiplier,
             cfg.execution.max_risk_per_trade,
         )
@@ -79,7 +81,7 @@ def _mda_fit_fn(cfg):
     return fit
 
 
-def _select_causal(clean, feature_cols, matrix, labels, prices, t1_offset, cfg):
+def _select_causal(clean, feature_cols, matrix, labels, prices, t1_offset, cfg, block_ids=None):
     """Granger + purged-CPCV-MDA selection, falling back to the correlational
     selector if the CPCV split is infeasible (too few rows)."""
     splitter = CPCVSplitGenerator(
@@ -97,7 +99,7 @@ def _select_causal(clean, feature_cols, matrix, labels, prices, t1_offset, cfg):
             labels,
             _mda_fit_fn(cfg),
             splitter,
-            t1=absolute_t1(t1_offset, len(labels)),
+            t1=absolute_t1(t1_offset, len(labels), block_ids),
             lags=cfg.tournament.causal_granger_lags,
             horizon=cfg.features.label_horizon,
             causal_alpha=cfg.tournament.causal_alpha,
@@ -110,7 +112,7 @@ def _select_causal(clean, feature_cols, matrix, labels, prices, t1_offset, cfg):
         return select_orthogonal_features(
             matrix,
             list(feature_cols),
-            _sharpe_score_fn(labels, prices, cfg),
+            _sharpe_score_fn(labels, prices, cfg, block_ids),
             distance_threshold=cfg.tournament.cfs_distance_threshold,
             min_importance=cfg.tournament.cfs_min_importance,
             seed=active_seed(),
@@ -150,36 +152,42 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
     labels = clean["target_label"].to_numpy().astype(np.float64)
     prices = {col: clean[col].to_numpy().astype(np.float64) for col in _PRICE_COLUMNS}
     t1_offset = clean["label_t1_offset"].to_numpy() if "label_t1_offset" in clean.columns else None
+    # Per-ticker run ids: cap label spans / t+1 sim at ticker boundaries (no cross-ticker leak).
+    block_ids = clean["ticker"].rle_id().to_numpy() if "ticker" in clean.columns else None
     matrix = clean.select(feature_cols).to_numpy()
 
     selected = list(feature_cols)
     if use_cfs and matrix.shape[1] > 1:
         if cfg.tournament.feature_selection_method == "causal" and "fwd_ret" in clean.columns:
-            selected = _select_causal(clean, feature_cols, matrix, labels, prices, t1_offset, cfg)
+            selected = _select_causal(
+                clean, feature_cols, matrix, labels, prices, t1_offset, cfg, block_ids
+            )
         else:
             selected = select_orthogonal_features(
                 matrix,
                 list(feature_cols),
-                _sharpe_score_fn(labels, prices, cfg),
+                _sharpe_score_fn(labels, prices, cfg, block_ids),
                 distance_threshold=cfg.tournament.cfs_distance_threshold,
                 min_importance=cfg.tournament.cfs_min_importance,
                 seed=active_seed(),
             )
     selected_matrix = clean.select(selected).to_numpy()
 
-    search = run_grid_search(selected_matrix, labels, prices, t1_offset=t1_offset)
-    booster = _train_candidate(selected_matrix, labels, cfg, t1_offset)
+    search = run_grid_search(
+        selected_matrix, labels, prices, t1_offset=t1_offset, block_ids=block_ids
+    )
+    booster = _train_candidate(selected_matrix, labels, cfg, t1_offset, block_ids)
     return sector, _persist(output, sector, booster, selected, search)
 
 
-def _train_candidate(matrix, labels, cfg, t1_offset=None):
+def _train_candidate(matrix, labels, cfg, t1_offset=None, block_ids=None):
     n = len(labels)
     split = int(n * 0.8)
     use_eval = n - split >= 10
     train_n = split if use_eval else n
     weights = None
     if t1_offset is not None and cfg.tournament.sample_weighting == "uniqueness":
-        weights = uniqueness_sample_weights(absolute_t1(t1_offset, n))[:train_n]
+        weights = uniqueness_sample_weights(absolute_t1(t1_offset, n, block_ids))[:train_n]
     return train_booster(
         matrix[:split] if use_eval else matrix,
         labels[:split] if use_eval else labels,
