@@ -161,7 +161,7 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
 
         dsr = _deflated_sharpe(champion_returns, trials, returns_matrix, cfg)
         path_pass_fraction, path_dsr_median = _path_dsr_stats(paths, trials, returns_matrix, cfg)
-        synthetic_sr = _synthetic_sharpe(frame, sector, result, champion_returns)
+        synthetic_sr = _synthetic_sharpe(frame, sector, result, champion_returns, cfg)
         # Overfitting/selection diagnostics over the full (n_obs x n_trials) matrix.
         champion_sharpe = sharpe_ratio(champion_returns)
         pbo = probability_of_backtest_overfitting(
@@ -195,7 +195,7 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
     return decisions
 
 
-def _synthetic_sharpe(frame, sector, result, champion_returns) -> float:
+def _synthetic_sharpe(frame, sector, result, champion_returns, cfg) -> float:
     booster = load_booster(result["candidate_path"])
     features = (
         frame.filter(pl.col("sector") == sector)
@@ -207,7 +207,11 @@ def _synthetic_sharpe(frame, sector, result, champion_returns) -> float:
     if features.shape[0] < 10:
         return 0.0
     return run_hmm_synthetic_gauntlet(
-        champion_returns, features, lambda matrix: predict_proba(booster, matrix), n_iter=20
+        champion_returns,
+        features,
+        lambda matrix: predict_proba(booster, matrix),
+        n_iter=20,
+        block_size=cfg.evaluation.gauntlet_block_size,
     )
 
 

@@ -109,6 +109,7 @@ evaluation:
   enforce_minbtl: false
   cpcv_path_gate_enabled: true
   cpcv_path_min_fraction: 0.5
+  gauntlet_block_size: 10
 
 mcp:
   transport: "stdio"

@@ -113,6 +113,7 @@ class EvaluationConfig(BaseModel):
     # reconstructed paths to clear dsr_promotion_threshold individually.
     cpcv_path_gate_enabled: bool = True
     cpcv_path_min_fraction: float = 0.5
+    gauntlet_block_size: int = 10  # stationary-bootstrap avg block len for the HMM gauntlet
 
 
 class MCPConfig(BaseModel):
