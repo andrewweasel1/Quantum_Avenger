@@ -1,199 +1,117 @@
-# Quantum Avenger — Architecture & Execution Roadmap (7 Phases)
+# Quantum Avenger — Architecture & Current State
 
 ## Context
 
-Quantum Avenger is a hybrid **LLM + ML quantitative trading system**: unstructured data (news/filings) flows through an LLM for sentiment/verdict, while structured market data is run through a rigorous, vectorized quant pipeline (technical + microstructure features, CPCV backtesting, an XGBoost alpha model, a hard‑coded risk "Shield Agent"), with promotion gated by statistical significance, a Streamlit dashboard, and finally live paper‑trading via Alpaca.
+Quantum Avenger is a hybrid **LLM + ML quantitative trading system**: unstructured data (news/filings) flows through an LLM for sentiment/verdict, while structured market data runs through a rigorous, vectorized quant pipeline (technical + microstructure features, CPCV backtesting, an XGBoost alpha model, a hard‑coded risk "Shield Agent"), with promotion gated by statistical significance, a Streamlit dashboard, and live paper‑trading via Alpaca.
 
-**Why this plan exists.** The work so far stood up the project tooling (ruff, a web SessionStart hook, a `reference_code/` read‑only guardrail) and Phase 1 is ~85% built in `new_pipeline/`. The `docs/` specs define a full **7‑phase / ~16‑week** build, and `reference_code/` is a working‑but‑flawed legacy prototype ("Quantum Sentinel V6") that encodes the intended algorithms *and* a catalog of bugs we must not reproduce. Before writing more code, we need one agreed **architecture + sequencing map** so each phase has clear deliverables, contracts, and acceptance criteria.
+**Status (this document supersedes the original "plan only" framing).** Phases 1–6 are **implemented and offline‑operational** in `new_pipeline/` — the whole chain runs with no network, fully seeded and deterministic, behind adapter interfaces with deterministic fakes. The statistical‑evaluation and leakage‑hygiene layer has been hardened well past the original spec (triple‑barrier labels, span/ticker‑aware purged CPCV with combinatorial backtest paths, sample‑uniqueness weighting, causal feature selection, a path‑distribution Deflated‑Sharpe gate, a golden‑file harness). What remains is **live integration** (the Ollama LLM client, plus validating the Alpaca/GDELT/EDGAR/FinBERT/spaCy adapters on a networked host), the **agentic‑RAG evidence loop + a real embedder**, **monitoring/alert backends**, and **Phase 7 production hardening**.
 
-**Scope of this deliverable (confirmed with user):** a **plan only — no implementation yet**, covering all 7 phases.
+- **Test posture:** ~115 modules under `new_pipeline/`; **333 tests** (330 pass, 3 skipped on optional `torch`/`spaCy`/`alpaca` + 1 GPU), **~93 % branch coverage**, `ruff` clean (E/F/I/W/B/UP), reproducible under a single seed.
 
-**Two further decisions (confirmed):**
-- **Compute:** design to **target a CUDA GPU directly** as the production runtime (`@cuda.jit`, CuPy, XGBoost `device='cuda'`). CPU fallback only where it's one branch away. (This container is CPU‑only, so GPU paths are written but exercised on a real GPU box / skipped in CI.)
-- **Integrations:** the dev/sandbox is **fully offline** — every external dependency (LLM, broker, market data/news, universe) sits behind an **adapter interface + deterministic fake/fixture**, so all 7 phases are unit‑testable with no network. Live clients are wired in later behind the identical interface.
-
-**Intended outcome:** an approved roadmap we execute phase‑by‑phase, starting with closing Phase 1 + standing up the offline‑adapter/seeding foundation.
+**Two standing decisions (unchanged):**
+- **Compute:** **target a CUDA GPU directly** as the production runtime (`@cuda.jit`, CuPy, XGBoost `device='cuda'`). CPU fallback is one branch away and is the default in this CPU‑only sandbox; GPU paths are written but exercised on a real GPU box / skipped in CI.
+- **Integrations:** the dev/sandbox is **fully offline** — every external dependency (LLM, broker, market data/news, universe, sentiment, anonymizer) sits behind an **adapter interface + deterministic fake/fixture**, so the whole system is unit‑testable with no network. Live clients are wired in behind the identical interface.
 
 ---
 
 ## Guiding principles
 
-| # | Principle | Implication |
-|---|-----------|-------------|
-| G1 | Deterministic ↔ probabilistic isolation | LLM never does math. All quant calcs exposed as **FastMCP** JSON‑RPC tools; a deterministic Shield Agent + Grader can veto any LLM verdict. |
-| G2 | Vectorization first | Polars lazy‑frames + Numba/CUDA kernels; **no `iterrows()`**; batch `predict`, never per‑row (both legacy bugs). |
-| G3 | GPU is the production target | Real `@cuda.jit` kernels, CuPy buffers, XGBoost `device='cuda'` + `ExtMemQuantileDMatrix(cache_host_ratio=0.75)`. |
-| G4 | External = adapter + fake | LLM, broker, market‑data, news, universe are ABCs with offline fakes. Every phase testable with no network. |
-| G5 | Backtesting hygiene | Purge **before** feature compute; CPCV purge+embargo; asymmetric loss; survivorship‑safe universe; t+1 simulation; **no in‑sample feature selection**. |
-| G6 | Reproducibility | One `core/seeding.py::seed_everything(seed)`; golden‑file tests pin every quant formula to fixed numbers. |
+| # | Principle | Implication | Realized in |
+|---|-----------|-------------|-------------|
+| G1 | Deterministic ↔ probabilistic isolation | LLM never does math. Quant calcs are deterministic tools; a Shield Agent + Grader can veto any LLM verdict. | `execution/mcp_tools.py`, `execution/grader.py`, `features/shields.py` |
+| G2 | Vectorization first | Polars lazy‑frames + Numba/CUDA kernels; no `iterrows()`; batch `predict`. | `features/polars_engine.py`, `features/gpu_kernels.py` |
+| G3 | GPU is the production target | `@cuda.jit` kernels, XGBoost `device='cuda'`/`hist`, `ExtMemQuantileDMatrix`; CPU fallback. | `features/gpu_kernels.py`, `tournament/trainer.py`, `tournament/data_iterator.py` |
+| G4 | External = adapter + fake | LLM/broker/market/news/universe/sentiment are ABCs with offline fakes; every path testable with no network. | `adapters/`, `execution/broker.py` |
+| G5 | Backtesting hygiene | Purge before feature compute; **CPCV span/ticker purge + embargo**; asymmetric loss; survivorship‑safe universe; t+1 simulation; **no in‑sample feature selection**; **non‑IID label weighting**. | `tournament/cpcv.py`, `tournament/sample_weights.py`, `tournament/simulator.py` |
+| G6 | Reproducibility | One `core/seeding.py::seed_everything(seed)`; **golden‑file tests pin every quant formula**. | `core/seeding.py`, `tests/golden/` |
 
-**Central invariant:** the Shield Agent `evaluate_risk_veto_gates(...)` is **one** Numba function in `features/shields.py`, imported by three call sites — the P3 t+1 backtest sim, the P5 LangGraph Risk‑Veto node, and a P5 MCP tool. Never re‑implemented.
-
----
-
-## Target module layout (`new_pipeline/`)
-
-`[reuse]` exists & solid · `[extend]` exists, must grow · `[NEW]` to create.
-
-```
-config/      schema.py[extend] base.py[reuse] defaults.yaml[extend]
-             development.py/testing.py/production.py[extend: today all 3 are stubs returning get_config()]
-core/        exceptions.py[extend 5→20+] logging.py[extend: JSON + trace_id] constants.py[reuse] paths.py[reuse]
-             circuit_breaker.py[NEW] seeding.py[NEW]
-adapters/    [NEW package — the offline seam]
-             base.py(LLMClient, MarketDataSource, NewsSource, UniverseProvider ABCs)  fakes.py(deterministic fakes)
-             llm_ollama.py  market_alpaca.py  broker_alpaca.py  universe_static.py   [live, wired P5+]
-data/        base.py/ingestion.py/vaults.py/validation.py[reuse]   schemas.py[NEW: pyarrow vault schemas]
-features/    base.py/registry.py/compiler.py[reuse: compiler=CPU fallback oracle]
-             polars_engine.py[NEW P2]  gpu_kernels.py[NEW P2]  shields.py[NEW P2]  slippage.py[NEW P2]
-models/      metadata.py/registry.py[reuse: P4 adds durable promotion registry]
-tournament/  [NEW P3] cpcv.py data_iterator.py objectives.py trainer.py grid_search.py simulator.py
-evaluation/  [NEW P4] dsr.py hmm_gauntlet.py promotion.py tearsheet.py
-execution/   broker.py/risk.py[reuse]  mcp_server.py entity_anonymizer.py rag_engine.py
-             verdict_engine.py grader.py orchestrator.py veto_ledger.py   [NEW P5]
-monitoring/  health.py/metrics.py/telemetry.py[reuse/extend]  dashboard/[NEW P6: app.py, pages/, realtime.py, alerts.py]
-hardening/   [NEW P7] docker/ k8s/ terraform/ ci/ observability/ chaos/ recovery/
-utils/       decorators.py/retry.py/serialization.py/time.py[reuse]
-scripts/     check_health.py[FIX broken import]
-tests/       conftest.py/fixtures/[extend]  unit/ integration/[extend]  golden/[NEW]
-```
-
-**Adapter placement:** new top‑level `adapters/` holds the LLM/market/news/universe ABCs + fakes. **Exception:** `BrokerAdapter` already lives at `execution/broker.py` — keep it there; `adapters/broker_alpaca.py` and `adapters/fakes.py::FakeBroker` implement it (avoid two broker abstractions).
+**Central invariant (realized).** The Shield Agent `evaluate_risk_veto_gates(...)` is **one** Numba function in `features/shields.py`, imported by three call sites — the t+1 backtest simulator (`tournament/simulator.py`), the LangGraph Risk‑Veto node (`execution/orchestrator.py`), and the MCP risk tool (`execution/mcp_tools.py`). Never re‑implemented. The asymmetric `sentiment_volatility_gate` lives beside it.
 
 ---
 
-## Per‑phase roadmap
+## Current architecture by subsystem
 
-### Phase 1 — Core infra gap‑closure *(~85% done; quick low‑risk win)*
-- `core/logging.py`[extend]: JSON formatter + `trace_id` contextvar (today: plain `%(asctime)s…` per `defaults.yaml`).
-- `core/circuit_breaker.py`[NEW]: CLOSED/OPEN/HALF_OPEN, pairs with `utils/retry.py` + `utils/decorators.py::@retry`.
-- `core/exceptions.py`[extend]: 5 → 20+ (per‑phase leaves: `ShieldVetoError`, `TournamentError`, `EvaluationError`, `MCPToolError`, `BrokerError`, …).
-- `config/{development,testing,production}.py`[extend]: replace stubs with real overlays — a `QA_ENV` selector layering `{env}.yaml` **beneath** the existing `QA_`‑prefixed env overrides in `config/base.py`.
-- `scripts/check_health.py`[FIX]: `from monitoring.health` → `from new_pipeline.monitoring.health`.
-- Stand up `adapters/base.py` + `adapters/fakes.py` + `core/seeding.py` now (bakes in G4 + G6 before any quant code).
-- **Acceptance:** structured JSON logs carry `trace_id`; 3 real env overlays; breaker unit‑tested; health script runs; coverage gate ≥85%; all 11 existing tests still pass.
+Legend: **✅ complete & tested** · **◐ offline‑complete, live deferred** · **○ scaffolded / placeholder**.
 
-### Phase 2 — Vectorized quant engine + Shield Agent
-- `features/polars_engine.py`: `compute_returns`, `compute_atr`(Wilder), `compute_adv`(20d), `compute_rolling_volatility`(√252), `tag_volatility_regimes`(80th‑pct → `regime∈{0,1}`), `compute_spreads`→`spread_pct`, `compute_amihud_illiquidity`→`amihud`.
-- `features/gpu_kernels.py`: `@cuda.jit` spreads / Amihud / NCSKEW / DUVOL + CuPy host wrappers + CPU fallback (guarded by `features.gpu_enabled`, already in config).
-- `features/shields.py`: `@njit(fastmath=True) evaluate_risk_veto_gates(entry_price, atr, atr_multiplier, account_capital, max_risk_pct, current_qty, adv_20, volume_today, volatility) -> (approved: bool, position_size: float)` — 5 gates: stop validity, Kelly sizing, liquidity ≤25% ADV, slippage ≤50 bps, portfolio reconciliation; plus `calculate_kelly_position_size`, `enforce_volatility_stop`.
-- `features/slippage.py`: `S = c·σ·√(Q/V)` (c≈0.5), `adjust_slippage_by_regime` (2× in high‑vol).
-- **Reuse:** register features in `features/registry.py::feature_registry`; `execution/risk.py::RiskManager.compute_position_size` is the **golden oracle** for gate‑2.
-- **Offline:** pure functions; golden vectors for ATR/vol/Amihud/slippage; Shield decision table.
-- **Acceptance:** features match golden; Shield <100 µs benchmark; GPU≈CPU within tol (skip‑if‑no‑CUDA); **purge NaNs before compute**.
-
-### Phase 3 — Tournament backtesting
-- `tournament/cpcv.py`: `CPCVSplitGenerator(n_groups=6, purge_days=5, embargo_days=5)` → C(6,2)=15 folds; self‑validates no train/test overlap.
-- `tournament/data_iterator.py`: `ParquetDataIter(xgb.DataIter)` zero‑copy.
-- `tournament/objectives.py`: `asymmetric_financial_loss(preds, dtrain, penalty_fp=5.0, penalty_fn=1.0)` → grad/hess ×5 where `label==0`.
-- `tournament/trainer.py`: `ExtMemQuantileDMatrix(iter, cache_host_ratio=0.75)`, `device='cuda'`, `tree_method='hist'` (CPU fallback `device='cpu'`).
-- `tournament/grid_search.py` + `tournament/simulator.py` (t+1 sim calls the **P2 Shield**).
-- **Artifacts out** (under `models.candidate_models_dir`): `{sector}_candidate.json`, `{sector}_candidate_features.json`, `returns_matrix.parquet`.
-- **Reuse:** `models/metadata.py::ModelMetadata`; `data/schemas.py`; `core/seeding.py`.
-- **Acceptance:** 15 folds w/ verified gaps; custom objective trains; reproducible under seed; **no in‑sample feature selection**.
-
-### Phase 4 — Statistical evaluation / promotion
-- `evaluation/dsr.py`: `compute_deflated_sharpe_ratio`, `expected_max_sr(var_trials, n_trials)` (Euler–Mascheroni ≈0.5772156649), `interpret_dsr`; deflation via skew γ₃ + kurtosis γ₄.
-- `evaluation/hmm_gauntlet.py`: 3‑state `GaussianHMM(covariance_type='full')` → synthetic returns → **correlation‑preserving** feature bootstrap → infer → synthetic Sharpe > 0.
-- `evaluation/promotion.py`: gate = `DSR ≥ dsr_promotion_threshold AND synthetic_sr > 0`; `PromotionRegistry` immutable JSON (`{promotions:[], active_champions:{}}`) into `models.prod_models_dir`.
-- `evaluation/tearsheet.py`: quantstats HTML (optional dep).
-- **Acceptance:** DSR matches golden; gate deterministic; registry append‑only. **Flag:** resolve the 0.95‑vs‑"99.5th‑percentile" label (Resolved decision #1).
-
-### Phase 5 — Live execution / orchestration *(offline‑testable end‑to‑end)*
-- `execution/mcp_server.py`: `FastMCP` exposing **30+ deterministic tools** (risk/feature/market/position) wrapping P2–P4 functions; stdio transport.
-- `execution/entity_anonymizer.py`: spaCy `en_core_web_sm` NER masking ("Apple"→"[COMPANY_A]") + deanonymize.
-- `execution/rag_engine.py`: late chunking + sentence‑transformers + Faiss + BM25.
-- `execution/verdict_engine.py` + `grader.py`: LLM verdict + grader **via `LLMClient` adapter**.
-- `execution/orchestrator.py`: LangGraph `StateGraph` Verdict→Grader→Risk‑Veto(Shield)→Execute/Fallback, ≤3 retries.
-- `execution/veto_ledger.py`: append‑only parquet (9‑col schema below).
-- **Reuse:** `features/shields.py` IS the Risk‑Veto node; `execution/broker.py::BrokerAdapter` is the broker seam (live = `adapters/broker_alpaca.py`, DAY‑TIF limit orders).
-- **Offline (linchpin):** `FakeLLMClient` scripted verdicts/grades, `FakeBroker` records orders in memory, fake market/news fixtures → whole graph unit‑tested with no network.
-- **Acceptance:** deterministic verdict→approve/veto→ledger row; MCP tools callable over stdio; LLM does no math.
-
-### Phase 6 — Dashboard / monitoring
-- `monitoring/dashboard/`: Streamlit multipage (live monitor, veto analysis, trade log, model registry, risk, settings); `realtime.py::RealtimeDataManager` reads veto‑ledger + trade‑log parquet; KPI cards (equity, P&L, Sharpe, drawdown, win rate, profit factor); `alerts.py`.
-- **Reuse:** P4 `PromotionRegistry` for the registry page; `monitoring/metrics.py::MetricsCollector`.
-- **Offline:** develop against fixture parquet from the P5 fake flow; snapshot‑test KPIs vs golden.
-- **Acceptance:** all 6 pages render from fixtures; KPIs match golden; alerts fire on threshold breach.
-
-### Phase 7 — Production hardening
-- `hardening/`: Docker (app/dashboard/mcp), K8s, Terraform, CI/CD (lint + ≥85% coverage + golden tests), Prometheus+Grafana, chaos/load tests, secrets, recovery playbooks.
-- **Reuse:** `core/circuit_breaker.py` + `utils/retry.py` in recovery; wire `monitoring/telemetry.py` (stub) to Prometheus; SessionStart‑hook pattern informs CI install.
-- **GPU:** GPU base image + node selectors for trainer/feature service; CPU image for dashboard/MCP.
-- **Acceptance:** images build; CI green w/ coverage gate; chaos/recovery documented; secrets never in repo.
+| Package | Status | What's there | Key files |
+|---|---|---|---|
+| `config/` | ✅ | Pydantic schema + `defaults.yaml`, real `development`/`testing`/`production` overlays layered under `QA_`‑prefixed env overrides. | `schema.py`, `base.py`, `{development,testing,production}.py` |
+| `core/` | ✅ | 20+‑leaf exception hierarchy; JSON logging + `trace_id`; CLOSED/OPEN/HALF_OPEN circuit breaker; `seed_everything`. | `exceptions.py`, `logging.py`, `circuit_breaker.py`, `seeding.py` |
+| `adapters/` | ◐ | Deterministic fakes (market/broker/LLM/sentiment/news) + `StaticUniverse`/`StaticNews` fixtures fully wired offline; live **Alpaca** (market/broker/news), **GDELT**/**EDGAR** PIT news, **FinBERT** sentiment, **spaCy** anonymizer are lazy‑imported, coverage‑omitted, and unit‑tested via mock injection. **Ollama LLM is not yet wired — the verdict path always uses `FakeLLMClient`.** | `fakes.py`, `factory.py`, `market_alpaca.py`, `news_{gdelt,edgar,static,composite}.py`, `sentiment_finbert.py`, `universe_static.py` |
+| `data/` | ✅ | Out‑of‑core PyArrow vaults, ingestion, schema validation, psutil row‑group sizing, PIT news vault, causal sentiment feature builder, training DB. | `ingestion.py`, `vaults.py`, `validation.py`, `news_vault.py`, `sentiment_feature_builder.py` |
+| `features/` | ✅ | Polars engine (returns, Wilder ATR, ADV20, vol√252, regime flag, spread, Amihud, NCSKEW, DUVOL); CUDA kernels + CPU fallback; 5‑gate Shield + sentiment‑vol gate; hydrodynamic slippage; rolling‑HMM regime + sentiment fusion; **triple‑barrier labels + `fwd_ret` + `label_t1_offset`**; feature registry; pandas compiler oracle. | `polars_engine.py`, `gpu_kernels.py`, `shields.py`, `slippage.py`, `markov_regime.py`, `regime_fusion.py`, `labels.py` |
+| `tournament/` | ✅ | Combinatorial **CPCV** (span + ticker purge, fractional embargo, backtest paths); zero‑copy `ParquetDataIter`; asymmetric objective (+ sample weights); XGBoost trainer (GPU/CPU, early stopping, `sample_weight`); grid search → per‑combo CPCV paths; t+1 + block‑wise simulator; per‑sector director (thread‑parallel); **causal feature selection**; **uniqueness sample weights**. | `cpcv.py`, `grid_search.py`, `director.py`, `trainer.py`, `objectives.py`, `simulator.py`, `causal_selection.py`, `sample_weights.py`, `feature_selection.py` |
+| `evaluation/` | ✅ | Deflated/Probabilistic Sharpe + MinTRL + N_eff; per‑regime DSR; HMM synthetic gauntlet (stationary block bootstrap); PBO via CSCV; MinBTL; Harvey‑Liu haircut SR; multi‑gate promotion + immutable registry; tearsheet. | `dsr.py`, `regime_dsr.py`, `hmm_gauntlet.py`, `pbo.py`, `cscv.py`, `minbtl.py`, `haircut.py`, `promotion.py` |
+| `execution/` | ◐ | LangGraph `StateGraph` Verdict→Grader→Risk‑Veto(Shield)→Execute/Fallback (≤3 retries); deterministic MCP tools; verdict/grader via `LLMClient`; broker seam (Fake ✅ / Alpaca stub); append‑only veto ledger + trade log; gazetteer anonymizer (offline) + spaCy (live). **RAG engine uses a hashing‑bag embedder placeholder and the agentic evidence_for/against/missing loop is not yet in the graph.** | `orchestrator.py`, `mcp_tools.py`, `verdict_engine.py`, `grader.py`, `runner.py`, `veto_ledger.py`, `rag_engine.py` |
+| `monitoring/` | ◐ | Streamlit multipage dashboard (live monitor, veto analysis, trade log, model registry, risk, settings) rendering from veto‑ledger/trade‑log parquet; KPI cards; Prometheus‑text telemetry formatter. **Metrics collector / health check are minimal; alert delivery (email/Slack/webhook) is stubbed; no live streaming.** | `dashboard/`, `metrics.py`, `health.py`, `telemetry.py` |
+| `models/` | ◐ | Minimal in‑memory registry + metadata dataclass; the **durable** promotion registry lives in `evaluation/promotion.py`. | `registry.py`, `metadata.py` |
+| `hardening/` | ○ | Only a chaos/load test exists; Docker/K8s/Terraform/CI/observability/secrets are Phase‑7 TODO. | `chaos/load_test.py` |
+| `scripts/` | ✅ | `main.py` CLI (`pipeline`/`trade`/`show-config`/`init-vaults`/`health`); MCP server; training‑data + news‑vault ingestion; live paper smoke. | `main.py`, `scripts/serve_mcp.py`, `scripts/ingest_training_data.py`, `scripts/live_smoke.py` |
 
 ---
 
-## Inter‑phase data contracts *(define in `data/schemas.py` + JSON shapes)*
+## Quantitative rigor (the differentiator)
 
-- **Raw vault** (P1→P2): `date(ts), open, high, low, close(f64), volume(i64), ticker(str)` — matches `compiler.py::_validate_dataframe`.
-- **Processed feature‑vault** (P2→P3): `date, ticker, open, high, low, close, volume, returns, atr, adv_20, volatility, regime(i8), spread_pct, amihud, ncskew, duvol, sentiment_score, target_label`.
-- **Candidate artifacts** (P3→P4): `{sector}_candidate.json` (booster) · `{sector}_candidate_features.json` `{features:[...], metadata:{sector,params,created_at}}` · `returns_matrix.parquet`.
-- **Promotion registry** (P4→P5/P6): immutable `{"promotions":[{sector,model_path,dsr,synthetic_sr,timestamp}], "active_champions":{sector:model_path}}`.
-- **Veto ledger** (P5→P6): `timestamp(ns), symbol, signal, entry_price(f64), veto_reason, veto_gate∈{grader,shield,execution}, dsr(f64), position_size(i32), execution_id`.
-- **Trade log** (P5→P6): `timestamp, symbol, side, qty, limit_price, status, order_id, fill_price, pnl`.
-- **KPI dict** (P6): `{equity, pnl, sharpe, max_drawdown, win_rate, profit_factor}`.
-- **MCP tool** (P5): JSON‑RPC 2.0 / stdio; typed scalars in → structured dict out (e.g. slippage → `{slippage_bps, slippage_usd, approval, reasoning}`).
-- **Shield Agent (central):** `evaluate_risk_veto_gates(entry_price, atr, atr_multiplier, account_capital, max_risk_pct, current_qty, adv_20, volume_today, volatility) -> (approved: bool, position_size: float)`.
+The leakage‑hygiene, labelling, and multiple‑testing stack — all offline, deterministic, and golden‑pinned:
 
----
-
-## Cross‑cutting
-
-**Config additions** (`config/schema.py` + `defaults.yaml`; current nests: Data/Feature/Model/Execution/Logging/Fusion/System — verified):
-
-| Phase | Add |
-|------|-----|
-| P1 | `GPUConfig{device, fallback_to_cpu}` (consolidate w/ existing `features.gpu_enabled`); `LoggingConfig += json_logs, trace_enabled` |
-| P2 | `FeatureConfig += slippage_constant(0.5), regime_percentile(80), bps_scaler(10000), max_slippage_bps(50)`; `ExecutionConfig += max_adv_coverage(0.25)` |
-| P3 | `TournamentConfig{n_groups:6, purge_days:5, embargo_days:5, penalty_fp:5.0, penalty_fn:1.0, cache_host_ratio:0.75, tree_method:'hist', device:'cuda', sectors:[...]}` |
-| P4 | `EvaluationConfig{dsr_promotion_threshold:0.95, hmm_states:3, hmm_n_iter:1000, synthetic_sr_min:0.0, registry_path}` |
-| P5 | `MCPConfig{transport:'stdio'}`, `RAGConfig{embedder, faiss_index_path, top_k, chunk_size}`, `ExecutionConfig += ledger_dir, max_retries:3, tif:'day'`, `FusionConfig += verdict_model` (already has ollama_endpoint, semaphore_limit:20) |
-| P6 | `DashboardConfig{trade_log_path, veto_ledger_path, refresh_seconds, alert_thresholds}` |
-| P7 | `SystemConfig += env, prometheus_port` |
-
-**Dependency phasing.** Today installed: `pydantic, pytest, pyyaml, numpy, pandas`. The SessionStart hook installs `requirements.txt` synchronously every web session, so split: `requirements.txt` (runtime CPU‑installable), `requirements-gpu.txt` (cupy / numba‑CUDA / XGBoost‑GPU — **not** in the hook), `requirements-dev.txt`.
-
-| Phase | New deps |
-|------|----------|
-| P2 | `polars, numba, pyarrow` (GPU: `cupy`, numba‑CUDA) |
-| P3 | `xgboost, scipy` (CPU wheel installs offline; `device='cuda'` runtime‑only) |
-| P4 | `hmmlearn`, `quantstats`(optional) |
-| P5 | `fastmcp, langgraph, spacy(+en_core_web_sm), sentence-transformers, faiss-cpu, rank-bm25, jsonschema`; live‑only: `alpaca-py`, Ollama client |
-| P6 | `streamlit` |
-| opt | `dask` (`system.dask_enabled` exists), `pandas_ta` |
-
-**Seeding:** `core/seeding.py::seed_everything(seed)` for `random/numpy/torch` (xgboost/hmmlearn take per‑call `random_state` seeded from the same value), called at every entrypoint + test.
-
-**Testing:** offline unit tests via `adapters/fakes.py`; `tests/golden/` pins ATR, vol√252, Amihud, slippage, asymmetric grad/hess, DSR, Kelly; `@pytest.mark.gpu` skip‑if‑no‑CUDA (assert CPU≈GPU); property tests for Shield invariants (never negative size; veto ⇒ size 0); coverage gate **≥85%**.
+- **Labels** — López de Prado **triple‑barrier**: ATR‑scaled profit‑take / stop (the stop mirrors the simulator's `atr_stop_multiplier`) + a vertical/time barrier; first‑touch outcome, conservative same‑bar ties → stop. Emits the binary `target_label`, the continuous `fwd_ret`, and `label_t1_offset` (the per‑sample event span). Friction label retained as the no‑OHLC fallback. (`features/labels.py`)
+- **Cross‑validation** — combinatorial **purged CPCV**: purge by the *actual* label span `t1` (getTrainTimes), **ticker/block‑aware** so spans and t+1 never cross a ticker boundary in the concatenated per‑sector matrix; fractional embargo; reconstructs the φ = C(N−1,k−1) combinatorial **backtest paths**. (`tournament/cpcv.py`, `grid_search.py`)
+- **Sample weighting** — overlapping triple‑barrier labels are non‑IID, so training is weighted by **average uniqueness** (concurrency⁻¹ over each span), folded into the asymmetric objective's grad/hess; sequential‑bootstrap utility provided. (`tournament/sample_weights.py`, `objectives.py`)
+- **Feature selection** — **causal** by default: a Granger directional screen (feature → `fwd_ret`, controlling for the target's own lags, overlap‑deflated, BHY‑FDR) → Ward‑cluster survivors → keep the best **purged‑CPCV MDA** feature per cluster. Correlational clustered‑permutation retained as an option/fallback. (`tournament/causal_selection.py`)
+- **Significance gates** — Deflated Sharpe (with **N_eff** effective‑trials correction), PSR/MinTRL, **DSR across the CPCV paths** (a path‑pass‑fraction gate), PBO via CSCV, Harvey‑Liu haircut SR, MinBTL, and a per‑regime DSR gate; the HMM synthetic gauntlet now resamples features with a **stationary block bootstrap** (preserves cross‑feature *and* temporal autocorrelation). (`evaluation/`)
+- **Simulation** — t+1 entry with ATR stop and risk‑based sizing, run **block‑wise per group and per ticker** so no trade's exit borrows a non‑adjacent bar. (`tournament/simulator.py`)
+- **Determinism + golden harness** — `tests/golden/` pins ATR/vol/Amihud/slippage, Kelly + the 5‑gate Shield, DSR/PSR/MinTRL/haircut, CPCV folds, Granger/MDA, uniqueness/sequential‑bootstrap, and the gauntlet output to fixed numbers.
 
 ---
 
-## Sequencing & milestones
+## Inter‑phase data contracts
 
-```
-P1 ─► P2 ─► P3 ─► P4 ─► P5 ─► P6 ─► P7
-       │            ▲      ▲
-       └── Shield ──┴──────┘   (P5 reuses P2 Shield; P5 MCP wraps P2/P3/P4)
-adapters/+seeding (built in P1) ─► consumed by P2,P3,P5,P6
-```
-- **Parallel once P1 lands:** `adapters/`, `seeding`, `data/schemas`, `tests/golden`; within P2 the engine / shields+slippage / GPU kernels are 3 independent streams; P6 builds on fixtures before P5 live wiring.
-- **Hard serial:** P3 needs P2 vault+Shield; P4 needs P3 returns_matrix; P5 Risk‑Veto needs P2 Shield.
-- **Milestones:** M1 P1+adapters/seeding · M2 P2 (golden‑tested) · M3 P3+P4 (candidate→DSR→promotion on fixtures) · M4 P5 (offline graph+MCP+ledger) · M5 P6+P7.
-
-**Recommended first increment after approval:** **finish P1 + stand up `adapters/base.py`, `adapters/fakes.py`, `core/seeding.py` together** — closes the near‑done phase for a quick win and lays the offline+determinism foundation every later phase tests against. Concretely: fix `check_health.py`, add JSON/trace_id logging, replace the 3 config‑overlay stubs, add the circuit breaker, land adapters/fakes/seeding.
+- **Raw vault:** `date(ts), open, high, low, close(f64), volume(i64), ticker(str)`.
+- **Processed feature‑vault:** `date, ticker, open, high, low, close, volume, returns, atr, adv_20, volatility, regime(i8), spread_pct, roll_spread, amihud, ncskew, duvol, sentiment_score, [markov_prob_persist_0/1 when fusion enabled], target_label, fwd_ret, label_t1_offset`. `target_label` is the **triple‑barrier** label.
+- **Candidate artifacts** (under `models.candidate_models_dir`): `{sector}_candidate.json` (booster) · `{sector}_candidate_features.json` `{features:[...], metadata:{sector,params}}` · `{sector}_returns_matrix.parquet` (per‑combo OOS) · `{sector}_paths.parquet` (champion CPCV paths).
+- **Promotion registry** (immutable JSON): `{"promotions":[{sector, dsr, synthetic_sharpe, pbo, psr, haircut_sharpe, cpcv_path_pass_fraction, cpcv_path_dsr_median, promoted, reason, timestamp, model_path}], "active_champions":{sector:model_path}}`.
+- **Veto ledger:** `timestamp(ns), symbol, signal, entry_price, veto_reason, veto_gate∈{grader,shield,execution}, dsr, position_size, execution_id`. **Trade log:** `timestamp, symbol, side, qty, limit_price, status, order_id, fill_price, pnl`. **KPI dict:** `{equity, pnl, sharpe, max_drawdown, win_rate, profit_factor}`.
+- **MCP tool:** JSON‑RPC 2.0 / stdio; typed scalars in → structured dict out. **Shield (central):** `evaluate_risk_veto_gates(entry_price, atr, atr_multiplier, account_capital, max_risk_pct, current_qty, adv_20, volume_today, volatility) -> (approved: bool, position_size: float)`.
 
 ---
 
-## Resolved decisions *(answered; defaults the build runs with — overridable)*
+## Configuration
 
-1. **DSR threshold (P4):** Gate stays **DSR ≥ 0.95** (95% confidence — canonical Bailey/López de Prado; DSR is itself a probability). The docs' "99.5th percentile" is a wording error → read as "95th percentile / 95% confidence". Config‑driven (`evaluation.dsr_promotion_threshold: 0.95`); a stricter `0.99` "high‑conviction" tier can gate live‑capital allocation later.
-2. **Pandas compiler (P2):** **Keep** `features/compiler.py` as a CPU reference oracle behind `FeatureConfig.engine='polars'|'pandas'`; the Polars engine is the default and is golden‑tested against it.
-3. **Universe/sectors (P3):** `adapters/universe_static.py` implements a `UniverseProvider` interface fed by a checked‑in **point‑in‑time membership fixture** at `data/universe/membership.csv` (`ticker, gics_sector, start_date, end_date`) + a synthetic‑but‑realistic default spanning the **11 GICS sectors** (= `TournamentConfig.sectors`) — offline & survivorship‑safe by construction. **The one spot needing real production data later:** a licensed PIT membership dataset drops into the same interface, no code change.
-4. **`target_label` (P2/P3):** **Friction‑aware equities label** — `1` if the t+1 forward return over `label_horizon` beats round‑trip cost (slippage + fees), else `0`; horizon + cost model config‑driven. Matches the Alpaca equities target and the 5× asymmetric loss (FP = trade that loses after costs). Options‑mode payoff deferred behind the same label interface as a future `RunMode`.
-5. **XGBoost API (P3):** Target **XGBoost ≥ 2.0** with `tree_method='hist'` + `device='cuda'` (CPU fallback `device='cpu'`); the spec's `gpu_hist` is the deprecated pre‑2.0 spelling.
-6. **Live secrets (P5/P7):** `QA_`‑prefixed **env vars** consumed by `config/production.py` (reusing the override path in `config/base.py`); in P7 sourced from K8s/secret‑manager mounts. Never committed; dev/test use fakes regardless.
-7. **CI (P7):** **≥85% coverage gate**, **CPU‑only runners** with `@pytest.mark.gpu` always skipped in CI; GPU↔CPU reconciliation runs nightly/manual on a GPU box.
+`config/schema.py` + `defaults.yaml`, overlaid by `{development,testing,production}.yaml` (selected via `QA_ENV`), then `QA_`‑prefixed env vars. Live groups: **Data, Feature, Model, Execution, Logging, Fusion, GPU, Tournament, Evaluation, MCP, RAG, News, Dashboard, System, Alpaca.** Rigor‑relevant knobs:
+
+- `features`: `label_horizon`, `label_cost_bps`, `label_method` (`triple_barrier`|`friction`), `label_pt_mult`, `label_sl_mult`; `slippage_constant`, `regime_percentile`, `max_slippage_bps`, `crash_window`.
+- `tournament`: `n_groups`, `test_groups`, `purge_days`, `embargo_days`, `embargo_pct`, `penalty_fp/fn`, `feature_selection_method` (`causal` default | `clustered_permutation`), `causal_alpha`, `causal_granger_lags`, `sample_weighting` (`uniqueness` default | `none`), `tree_method`, `device`, `max_workers`.
+- `evaluation`: `dsr_promotion_threshold` (0.95), `use_effective_trials`, `psr_benchmark_sr`, `pbo_threshold`, `pbo_partitions`, `mt_method` (`bhy`), `enforce_minbtl`, `regime_gate_enabled`, `min_regime_obs`, `thin_regime_policy`, `cpcv_path_gate_enabled` (true), `cpcv_path_min_fraction`, `gauntlet_block_size`.
+
+**Dependencies** are split so the SessionStart hook installs only CPU‑runnable wheels: `requirements.txt` (runtime), `requirements-gpu.txt` (cupy/numba‑CUDA/XGBoost‑GPU), `requirements-fusion.txt` (torch/transformers/spaCy), `requirements-live.txt` (alpaca‑py/edgartools), `requirements-dev.txt`. Live/heavy modules are `coverage`‑omitted and `pytest.importorskip`‑gated.
+
+---
+
+## Remaining goals
+
+1. **Live integrations.** Wire a real **Ollama** client behind `LLMClient` (verdict/grader currently always use the fake); validate the Alpaca market/broker/news, GDELT/EDGAR, FinBERT, and spaCy adapters on an allowlisted networked host (`scripts/live_smoke.py`, `scripts/ingest_training_data.py`).
+2. **Agentic RAG.** Replace the hashing‑bag embedder with a real neural embedder + FAISS/BM25, and wire the **evidence_for / evidence_against / missing_evidence** retrieval loop into the orchestrator (today it is verdict → grader only; `rag_engine.retrieve()` is unused by the graph).
+3. **Monitoring / ops.** Real `MetricsCollector` + health checks, telemetry → Prometheus, alert‑delivery backends (email/Slack/webhook), optional live streaming for the dashboard.
+4. **Phase 7 hardening.** Docker (app/dashboard/mcp), K8s, Terraform; CI enforcing the **≥85 % coverage gate** + golden tests; GPU node images + nightly GPU↔CPU reconciliation; secrets via a manager; chaos/recovery playbooks.
+5. **Deferred rigor refinements.** Cross‑sectional (same‑date, different‑ticker) leakage in pooled per‑sector CPCV; options‑mode payoff labels behind the same label interface; a nonlinear / causal‑discovery feature screen beyond linear Granger (e.g. transfer entropy); meta‑labelling on top of the triple‑barrier primary.
+
+---
+
+## Resolved decisions *(defaults the build runs with — overridable)*
+
+1. **DSR threshold:** gate stays **DSR ≥ 0.95** (Bailey/López de Prado 95 % confidence); config‑driven (`evaluation.dsr_promotion_threshold`); a stricter `0.99` tier can gate live‑capital allocation later.
+2. **Pandas compiler:** kept as a CPU reference oracle; the Polars engine is the default and is golden‑tested against it.
+3. **Universe/sectors:** `adapters/universe_static.py` reads a checked‑in point‑in‑time membership fixture (`data/universe/membership.csv`) + aliases (`aliases.csv`) — offline & survivorship‑safe; a licensed PIT dataset drops into the same interface.
+4. **`target_label` — UPDATED:** the friction‑aware label has been **superseded by the López de Prado triple‑barrier label** (ATR profit‑take/stop matching the execution stop + vertical barrier), which also emits `fwd_ret` and the `label_t1_offset` event span that CPCV purges on. Friction‑aware horizon‑return is retained as the no‑OHLC fallback. Options‑mode payoff stays deferred behind the label interface.
+5. **XGBoost API:** XGBoost ≥ 2.0, `tree_method='hist'` + `device='cuda'` (CPU fallback `device='cpu'`).
+6. **Live secrets:** `QA_`‑prefixed env vars via `config/production.py`; in Phase 7 sourced from K8s/secret‑manager mounts; dev/test use fakes regardless.
+7. **CI:** ≥85 % coverage gate, CPU‑only runners with `@pytest.mark.gpu` skipped; GPU↔CPU reconciliation nightly/manual on a GPU box.
+
+**New decisions taken since the original plan:**
+8. **Causal feature selection is the default selector** (`feature_selection_method='causal'`); the correlational clustered‑permutation selector remains available and is the automatic fallback when a CPCV split is infeasible.
+9. **Uniqueness sample‑weighting is on by default** (`sample_weighting='uniqueness'`); it degrades to unit weights for non‑overlapping labels, so weightless callers are unchanged.
+10. **The CPCV path‑distribution DSR gate is on by default** (`cpcv_path_gate_enabled=true`): a candidate must clear the DSR threshold across a configurable fraction of its reconstructed backtest paths, not just the averaged path.
+11. **CPCV purge is span‑ and ticker‑aware** (by `t1`, capped at ticker runs); the HMM gauntlet uses a **stationary block bootstrap** for feature resampling.
 
 ---
 
@@ -202,20 +120,17 @@ adapters/+seeding (built in P1) ─► consumed by P2,P3,P5,P6
 | Risk | Mitigation |
 |------|-----------|
 | GPU‑only paths untestable in CI | CPU fallback per kernel; `@pytest.mark.gpu` skip‑if‑no‑CUDA; CUDA deps out of the SessionStart hook |
-| LLM/broker nondeterminism | adapters + deterministic fakes; trace_id replay; MCP forbids LLM math |
-| Overfitting / false discovery | DSR deflation + HMM gauntlet + **both** promotion gates + immutable registry |
-| Look‑ahead / leakage (legacy bug class) | purge‑before‑compute; CPCV purge+embargo w/ self‑validation; no in‑sample selection; survivorship‑safe universe; correlation‑preserving bootstrap |
-| Heavy‑dep/weight downloads fail offline | split runtime/gpu/dev reqs; pre‑bake model weights in P7 images; mark download tests offline‑skip |
+| LLM/broker nondeterminism | adapters + deterministic fakes; `trace_id` replay; MCP forbids LLM math |
+| Overfitting / false discovery | DSR + N_eff deflation, PBO/CSCV, haircut SR, MinBTL, per‑regime DSR, **path‑distribution DSR gate**, HMM gauntlet, immutable registry |
+| Look‑ahead / leakage (legacy bug class) | purge‑before‑compute; **CPCV span + ticker purge + embargo w/ self‑validation**; **non‑IID uniqueness weighting**; block‑wise t+1 simulation; no in‑sample selection; survivorship‑safe universe; **golden‑pinned formulas** |
+| Heavy‑dep/weight downloads fail offline | split runtime/gpu/fusion/live/dev reqs; lazy imports; coverage‑omit + importorskip; pre‑bake weights in Phase‑7 images |
 | Shield re‑impl drift (3 call sites) | single `features/shields.py`; shared golden decision‑table test |
-| Scope/timeline (7 phases) | phase gates w/ acceptance + ≥85% coverage; parallelize adapters/P2 streams/P6‑on‑fixtures; ship M1 fast |
+| Live integrations still stubbed | identical adapter interface; mock‑injected unit tests for each live adapter; live smoke script gated to an allowlisted host |
 
 ---
 
 ## Verification
 
-This is a **plan**, so "verification" = the acceptance gates each phase must pass, plus how we'll validate the first increment when we execute it.
-
-- **Per‑phase gates** are listed under each phase above; every phase ends green only when its golden/offline tests pass and coverage ≥85% (e.g., P2 Shield <100 µs + GPU≈CPU; P3 CPCV no‑overlap + reproducible under seed; P4 DSR matches golden + deterministic gate; P5 deterministic fake verdict→veto→ledger; P6 pages render from fixtures).
-- **Cross‑phase:** golden‑file tests (`tests/golden/`) pin quant formulas; `@pytest.mark.gpu` reconciles GPU vs CPU on a real GPU box; the Shield decision‑table test is shared across its 3 call sites.
-- **First‑increment validation (M1):** `python -m pytest new_pipeline/tests` stays green (existing + new); `python new_pipeline/scripts/check_health.py` runs; a structured log line shows JSON + `trace_id`; `QA_ENV=testing` selects the testing overlay; circuit‑breaker + seeding + fakes have unit tests; ruff clean.
-- **End‑to‑end (later):** an **offline** dry run — fixtures → P2 features → P3 candidate → P4 promotion → P5 LangGraph (FakeLLM/FakeBroker) → veto‑ledger/trade‑log parquet → P6 dashboard renders — all with no network, fully seeded/reproducible. Live wiring (Ollama/Alpaca/market data) swaps fakes for real adapters at the P5/P7 cutover.
+- **Offline end‑to‑end (works today, no network):** `python new_pipeline/main.py pipeline` runs fixtures → features + triple‑barrier labels → per‑sector causal selection + CPCV grid search (uniqueness‑weighted) → DSR/PBO/haircut/per‑regime/path‑DSR promotion; `python new_pipeline/main.py trade` drives promoted champions through the LangGraph graph (FakeLLM/FakeBroker) → veto‑ledger/trade‑log parquet → dashboard renders.
+- **Test suite:** `python -m pytest new_pipeline/tests` (333 tests; 3 skipped on optional deps); `ruff check new_pipeline`; `NUMBA_DISABLE_JIT=1 python -m pytest new_pipeline/tests --cov=new_pipeline --cov-fail-under=85`. `tests/golden/` pins every quant formula; live/heavy adapters are mock‑injection tested and coverage‑omitted.
+- **Live cutover (later):** install `requirements-live.txt` / `requirements-fusion.txt` on a networked host, set `run_mode`/`fusion.enabled` + `QA_ALPACA__*` / `news.edgar_identity`, swap the fakes for the live adapters behind the identical interfaces, and validate with `scripts/live_smoke.py`.
