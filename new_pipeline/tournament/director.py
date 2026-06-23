@@ -16,7 +16,10 @@ import numpy as np
 import polars as pl
 
 from new_pipeline.config import get_config
+from new_pipeline.core.exceptions import CPCVSplitError
 from new_pipeline.core.seeding import active_seed
+from new_pipeline.tournament.causal_selection import select_causal_features
+from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
 from new_pipeline.tournament.feature_selection import select_orthogonal_features
 from new_pipeline.tournament.grid_search import run_grid_search
 from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
@@ -57,6 +60,62 @@ def _sharpe_score_fn(labels, prices, cfg):
     return score
 
 
+def _mda_fit_fn(cfg):
+    """fit_fn(train_X, train_y) -> predict(test_X) for purged-CPCV MDA importance."""
+    rounds = min(40, cfg.tournament.num_boost_round)
+    threshold = cfg.execution.confidence_threshold
+
+    def fit(train_x, train_y):
+        booster = train_booster(
+            train_x,
+            train_y,
+            num_boost_round=rounds,
+            penalty_fp=cfg.tournament.penalty_fp,
+            penalty_fn=cfg.tournament.penalty_fn,
+        )
+        return lambda test_x: (predict_proba(booster, test_x) > threshold).astype(np.int64)
+
+    return fit
+
+
+def _select_causal(clean, feature_cols, matrix, labels, prices, t1_offset, cfg):
+    """Granger + purged-CPCV-MDA selection, falling back to the correlational
+    selector if the CPCV split is infeasible (too few rows)."""
+    splitter = CPCVSplitGenerator(
+        n_groups=cfg.tournament.n_groups,
+        test_groups=cfg.tournament.test_groups,
+        purge=cfg.tournament.purge_days,
+        embargo=cfg.tournament.embargo_days,
+        embargo_pct=cfg.tournament.embargo_pct,
+    )
+    try:
+        return select_causal_features(
+            matrix,
+            list(feature_cols),
+            clean["fwd_ret"].to_numpy().astype(np.float64),
+            labels,
+            _mda_fit_fn(cfg),
+            splitter,
+            t1=absolute_t1(t1_offset, len(labels)),
+            lags=cfg.tournament.causal_granger_lags,
+            horizon=cfg.features.label_horizon,
+            causal_alpha=cfg.tournament.causal_alpha,
+            mt_method=cfg.evaluation.mt_method,
+            distance_threshold=cfg.tournament.cfs_distance_threshold,
+            min_importance=cfg.tournament.cfs_min_importance,
+            seed=active_seed(),
+        )
+    except CPCVSplitError:
+        return select_orthogonal_features(
+            matrix,
+            list(feature_cols),
+            _sharpe_score_fn(labels, prices, cfg),
+            distance_threshold=cfg.tournament.cfs_distance_threshold,
+            min_importance=cfg.tournament.cfs_min_importance,
+            seed=active_seed(),
+        )
+
+
 def run_sector_tournament(frame, feature_cols, output_dir, use_cfs=True, max_workers=None):
     """Run the tournament per sector; returns a {sector: result} summary dict."""
     cfg = get_config()
@@ -64,6 +123,8 @@ def run_sector_tournament(frame, feature_cols, output_dir, use_cfs=True, max_wor
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     required = [*feature_cols, "target_label", *_PRICE_COLUMNS]
+    if cfg.tournament.feature_selection_method == "causal":
+        required += [c for c in ("fwd_ret", "label_t1_offset") if c in frame.columns]
 
     sectors = []
     for _, group in frame.group_by("sector", maintain_order=True):
@@ -92,14 +153,17 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
 
     selected = list(feature_cols)
     if use_cfs and matrix.shape[1] > 1:
-        selected = select_orthogonal_features(
-            matrix,
-            list(feature_cols),
-            _sharpe_score_fn(labels, prices, cfg),
-            distance_threshold=cfg.tournament.cfs_distance_threshold,
-            min_importance=cfg.tournament.cfs_min_importance,
-            seed=active_seed(),
-        )
+        if cfg.tournament.feature_selection_method == "causal" and "fwd_ret" in clean.columns:
+            selected = _select_causal(clean, feature_cols, matrix, labels, prices, t1_offset, cfg)
+        else:
+            selected = select_orthogonal_features(
+                matrix,
+                list(feature_cols),
+                _sharpe_score_fn(labels, prices, cfg),
+                distance_threshold=cfg.tournament.cfs_distance_threshold,
+                min_importance=cfg.tournament.cfs_min_importance,
+                seed=active_seed(),
+            )
     selected_matrix = clean.select(selected).to_numpy()
 
     search = run_grid_search(selected_matrix, labels, prices, t1_offset=t1_offset)
