@@ -80,6 +80,9 @@ tournament:
   feature_selection_method: "causal"
   causal_alpha: 0.10
   causal_granger_lags: 3
+  # Down-weight overlapping (non-IID) triple-barrier labels in training:
+  # "uniqueness" (LdP average uniqueness) | "none".
+  sample_weighting: "uniqueness"
   sectors:
     - "Information Technology"
     - "Health Care"

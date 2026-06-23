@@ -89,6 +89,7 @@ class TournamentConfig(BaseModel):
     feature_selection_method: str = "causal"  # | "clustered_permutation"
     causal_alpha: float = 0.10  # BHY-adjusted p-value keep threshold (Granger screen)
     causal_granger_lags: int = 3  # Granger AR / feature lag order
+    sample_weighting: str = "uniqueness"  # | "none" — LdP uniqueness weights for overlapping labels
     sectors: list[str] = Field(default_factory=list)
 
 

@@ -7,17 +7,30 @@ from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
 
 
 class _DMatrix:
-    def __init__(self, labels):
+    def __init__(self, labels, weights=None):
         self._labels = np.asarray(labels, dtype=np.float64)
+        self._weights = np.asarray([] if weights is None else weights, dtype=np.float64)
 
     def get_label(self):
         return self._labels
+
+    def get_weight(self):
+        return self._weights
 
 
 def test_asymmetric_loss_penalizes_false_positives_5x():
     grad, hess = asymmetric_financial_loss(np.array([0.0, 0.0]), _DMatrix([0.0, 1.0]))
     np.testing.assert_allclose(grad, [2.5, -0.5])  # p=0.5: (0.5-0)*5, (0.5-1)*1
     np.testing.assert_allclose(hess, [1.25, 0.25])  # 0.25*5, 0.25*1
+
+
+def test_asymmetric_loss_applies_sample_weights():
+    # Uniqueness weights multiply the class penalty in grad/hess.
+    grad, hess = asymmetric_financial_loss(
+        np.array([0.0, 0.0]), _DMatrix([0.0, 1.0], weights=[2.0, 3.0])
+    )
+    np.testing.assert_allclose(grad, [5.0, -1.5])  # (0.5-0)*5*2, (0.5-1)*1*3
+    np.testing.assert_allclose(hess, [2.5, 0.75])  # 0.25*5*2, 0.25*1*3
 
 
 def test_loss_factory_binds_penalties():

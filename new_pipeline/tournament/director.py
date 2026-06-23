@@ -22,6 +22,7 @@ from new_pipeline.tournament.causal_selection import select_causal_features
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
 from new_pipeline.tournament.feature_selection import select_orthogonal_features
 from new_pipeline.tournament.grid_search import run_grid_search
+from new_pipeline.tournament.sample_weights import uniqueness_sample_weights
 from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
 from new_pipeline.tournament.trainer import predict_proba, save_candidate, train_booster
 
@@ -167,13 +168,18 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
     selected_matrix = clean.select(selected).to_numpy()
 
     search = run_grid_search(selected_matrix, labels, prices, t1_offset=t1_offset)
-    booster = _train_candidate(selected_matrix, labels, cfg)
+    booster = _train_candidate(selected_matrix, labels, cfg, t1_offset)
     return sector, _persist(output, sector, booster, selected, search)
 
 
-def _train_candidate(matrix, labels, cfg):
-    split = int(len(labels) * 0.8)
-    use_eval = len(labels) - split >= 10
+def _train_candidate(matrix, labels, cfg, t1_offset=None):
+    n = len(labels)
+    split = int(n * 0.8)
+    use_eval = n - split >= 10
+    train_n = split if use_eval else n
+    weights = None
+    if t1_offset is not None and cfg.tournament.sample_weighting == "uniqueness":
+        weights = uniqueness_sample_weights(absolute_t1(t1_offset, n))[:train_n]
     return train_booster(
         matrix[:split] if use_eval else matrix,
         labels[:split] if use_eval else labels,
@@ -183,6 +189,7 @@ def _train_candidate(matrix, labels, cfg):
         eval_features=matrix[split:] if use_eval else None,
         eval_labels=labels[split:] if use_eval else None,
         early_stopping_rounds=cfg.tournament.early_stopping_rounds,
+        sample_weight=weights,
     )
 
 

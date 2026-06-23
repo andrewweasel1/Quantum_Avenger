@@ -13,6 +13,7 @@ import numpy as np
 
 from new_pipeline.config import get_config
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
+from new_pipeline.tournament.sample_weights import uniqueness_sample_weights
 from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns
 from new_pipeline.tournament.trainer import default_params, predict_proba, train_booster
 
@@ -49,6 +50,11 @@ def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.
     )
     n = len(labels)
     t1 = absolute_t1(t1_offset, n)
+    weights = (
+        uniqueness_sample_weights(t1)
+        if t1 is not None and cfg.tournament.sample_weighting == "uniqueness"
+        else None
+    )
     folds = splitter.split(n, t1=t1)
     combo_groups = splitter.combinations()
     bounds = splitter.group_bounds(n)
@@ -75,6 +81,7 @@ def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.
                 num_boost_round=cfg.tournament.num_boost_round,
                 penalty_fp=cfg.tournament.penalty_fp,
                 penalty_fn=cfg.tournament.penalty_fn,
+                sample_weight=None if weights is None else weights[train_idx],
             )
             proba = predict_proba(booster, features[test_idx])
             signals = (proba > confidence_threshold).astype(np.int64)
