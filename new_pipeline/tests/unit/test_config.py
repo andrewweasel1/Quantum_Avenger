@@ -9,10 +9,10 @@ def test_config_loads_defaults():
     assert config.logging.level == "INFO"
 
 
-def test_feature_selection_defaults_are_backward_compatible():
+def test_feature_selection_defaults_to_causal():
     tournament = reload_config().tournament
-    # Default stays the correlational selector; causal knobs round-trip from YAML.
-    assert tournament.feature_selection_method == "clustered_permutation"
+    # Causal (Granger + purged-CPCV MDA) is the default selector; knobs round-trip.
+    assert tournament.feature_selection_method == "causal"
     assert tournament.causal_alpha == 0.10
     assert tournament.causal_granger_lags == 3
 
