@@ -173,8 +173,9 @@ def select_causal_features(
 
     ``target`` is the continuous forward return (Granger), ``labels`` the binary
     target (MDA). Never returns empty: an empty Granger screen falls back to all
-    features, and the final result falls back to ``feature_names`` — mirroring
-    :func:`feature_selection.select_orthogonal_features`'s ``or names`` contract.
+    features, and if MDA prunes every survivor the result falls back to the
+    Granger survivors (preserving the causal exclusions rather than readmitting
+    the screened-out decoys).
     """
     matrix = np.asarray(feature_matrix, dtype=np.float64)
     names = list(feature_names)
@@ -193,4 +194,4 @@ def select_causal_features(
         best = max(cluster, key=lambda name: importances[name])
         if importances[best] >= min_importance:
             kept.append(best)
-    return kept or names
+    return kept or survivors  # keep the Granger-causal set if MDA prunes everything

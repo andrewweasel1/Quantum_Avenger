@@ -134,6 +134,28 @@ def test_select_causal_never_crashes_on_degenerate_input():
     assert "const" not in selected  # rank-deficient constant -> Granger p=1.0 -> dropped
 
 
+def test_select_causal_preserves_screen_when_mda_prunes_all():
+    # A lagged-causal feature passes Granger, but the contemporaneous MDA stub
+    # finds no signal (the label is driven by the LAG). The screen's exclusion of
+    # the decoys must still hold -> fall back to the survivors, not all features.
+    rng = np.random.default_rng(11)
+    n = 260
+    causal = rng.normal(size=n)
+    decoy1 = rng.normal(size=n)
+    decoy2 = rng.normal(size=n)
+    fwd = np.zeros(n)
+    fwd[1:] = 0.7 * causal[:-1] + rng.normal(0.0, 0.3, n - 1)
+    labels = (np.r_[0.0, causal[:-1]] > 0.0).astype(np.float64)  # driven by the lag
+    matrix = np.column_stack([causal, decoy1, decoy2])
+
+    selected = select_causal_features(
+        matrix, ["causal", "decoy1", "decoy2"], fwd, labels, _label_corr_predictor,
+        CPCVSplitGenerator(n_groups=6, test_groups=2, purge=5, embargo=5),
+        lags=3, horizon=5, causal_alpha=0.10,
+    )
+    assert selected == ["causal"]  # decoys stay excluded by the Granger screen
+
+
 def test_select_causal_falls_back_when_nothing_is_causal():
     rng = np.random.default_rng(8)
     n = 150
