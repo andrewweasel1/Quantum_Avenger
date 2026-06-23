@@ -26,6 +26,7 @@ import numpy as np
 from scipy import stats
 
 from new_pipeline.evaluation.haircut import multiple_testing_adjust
+from new_pipeline.tournament.feature_selection import cluster_features
 
 
 def _ols_rss(design: np.ndarray, response: np.ndarray) -> tuple[float, int]:
@@ -64,14 +65,16 @@ def granger_pvalue(feature, target, lags: int = 3, horizon: int = 1) -> float:
 
     rss_r, _ = _ols_rss(design_r, response)
     rss_u, rank_u = _ols_rss(design_u, response)
-    if rank_u < design_u.shape[1] or rss_u <= 1e-12 or rss_r <= rss_u:
-        return 1.0
+    if rank_u < design_u.shape[1] or rss_r <= rss_u:
+        return 1.0  # rank-deficient design, or the feature adds no explanatory power
 
     df1 = float(lag)
     df2 = rows / horizon - (2 * lag + 1)  # overlap-deflated effective denominator df
     if df2 < 1.0:
         return 1.0
-    f_stat = ((rss_r - rss_u) / df1) / (rss_u / df2)
+    # Clamp the denominator so a (near-)perfect fit yields F->inf, p->0 (maximally
+    # causal) rather than a divide-by-zero.
+    f_stat = ((rss_r - rss_u) / df1) / (max(rss_u, 1e-300) / df2)
     return float(stats.f.sf(f_stat, df1, df2))
 
 
@@ -147,3 +150,47 @@ def purged_cpcv_mda(
         return {name: 0.0 for name in names}
     means = totals / folds_used
     return {name: float(means[j]) for j, name in enumerate(names)}
+
+
+def select_causal_features(
+    feature_matrix,
+    feature_names: list[str],
+    target,
+    labels,
+    fit_fn: Callable[[np.ndarray, np.ndarray], Callable[[np.ndarray], np.ndarray]],
+    splitter,
+    t1: np.ndarray | None = None,
+    *,
+    lags: int = 3,
+    horizon: int = 1,
+    causal_alpha: float = 0.10,
+    mt_method: str = "bhy",
+    distance_threshold: float = 0.5,
+    min_importance: float = 0.0,
+    seed: int = 0,
+) -> list[str]:
+    """Granger screen -> Ward-cluster survivors -> keep best-MDA per cluster.
+
+    ``target`` is the continuous forward return (Granger), ``labels`` the binary
+    target (MDA). Never returns empty: an empty Granger screen falls back to all
+    features, and the final result falls back to ``feature_names`` — mirroring
+    :func:`feature_selection.select_orthogonal_features`'s ``or names`` contract.
+    """
+    matrix = np.asarray(feature_matrix, dtype=np.float64)
+    names = list(feature_names)
+    survivors, _adjusted = granger_screen(
+        matrix, names, target, lags, horizon, causal_alpha, mt_method
+    )
+    if not survivors:  # nothing cleared the causal screen -> let MDA arbitrate over all
+        survivors = names
+
+    columns = [names.index(name) for name in survivors]
+    sub_matrix = matrix[:, columns]
+    importances = purged_cpcv_mda(sub_matrix, survivors, labels, fit_fn, splitter, t1=t1, seed=seed)
+
+    kept: list[str] = []
+    for cluster in cluster_features(sub_matrix, survivors, distance_threshold):
+        best = max(cluster, key=lambda name: importances[name])
+        if importances[best] >= min_importance:
+            kept.append(best)
+    return kept or names

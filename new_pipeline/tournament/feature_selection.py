@@ -22,7 +22,12 @@ def cluster_features(
     matrix = np.asarray(feature_matrix, dtype=np.float64)
     if matrix.shape[1] <= 1:
         return [list(feature_names)]
-    corr = np.atleast_2d(spearmanr(matrix).statistic)
+    result = spearmanr(matrix).statistic
+    corr = np.atleast_2d(result)
+    if corr.shape != (matrix.shape[1], matrix.shape[1]):
+        # scipy returns a scalar correlation for exactly 2 columns; rebuild the 2x2.
+        r = float(np.asarray(result).reshape(-1)[0])
+        corr = np.array([[1.0, r], [r, 1.0]])
     corr = np.nan_to_num(corr, nan=0.0)
     distance = np.sqrt(np.clip(0.5 * (1.0 - corr), 0.0, None))
     np.fill_diagonal(distance, 0.0)

@@ -4,6 +4,7 @@ from new_pipeline.tournament.causal_selection import (
     granger_pvalue,
     granger_screen,
     purged_cpcv_mda,
+    select_causal_features,
 )
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator
 
@@ -88,3 +89,61 @@ def test_purged_mda_is_deterministic_and_ranks_the_cause_top():
     assert first == second  # determinism under a fixed seed
     assert first["x_true"] > first["x_decoy"]  # permuting the genuine driver hurts accuracy most
     assert first["x_decoy"] == pytest.approx(0.0, abs=1e-9)  # predictor ignores the decoy column
+
+
+# --- end-to-end select_causal_features ---------------------------------------
+def _splitter():
+    return CPCVSplitGenerator(n_groups=4, test_groups=2, purge=0, embargo=0)
+
+
+def test_select_causal_keeps_cause_drops_decoy_collapses_redundant():
+    rng = np.random.default_rng(5)
+    n = 300
+    x_true = rng.normal(size=n)
+    x_redundant = x_true + rng.normal(0.0, 0.01, n)  # collinear with x_true
+    x_decoy = rng.normal(size=n)
+    fwd = np.zeros(n)
+    fwd[1:] = 0.9 * x_true[:-1] + rng.normal(0.0, 0.4, n)[1:]  # Granger target (lagged)
+    labels = (x_true > 0.0).astype(np.float64)  # MDA target (contemporaneous)
+    matrix = np.column_stack([x_true, x_redundant, x_decoy])
+
+    selected = select_causal_features(
+        matrix, ["x_true", "x_redundant", "x_decoy"], fwd, labels,
+        _label_corr_predictor, _splitter(), lags=2, horizon=1, causal_alpha=0.10,
+    )
+    assert "x_decoy" not in selected  # non-causal -> dropped by the Granger screen
+    assert "x_true" in selected or "x_redundant" in selected  # the causal cluster survives
+    assert not ("x_true" in selected and "x_redundant" in selected)  # collinear -> one kept
+
+
+def test_select_causal_never_crashes_on_degenerate_input():
+    rng = np.random.default_rng(6)
+    n = 120
+    const_col = np.ones(n)  # rank-deficient feature: must be dropped, never crash
+    x = rng.normal(size=n)
+    fwd = np.zeros(n)
+    fwd[1:] = x[:-1] + rng.normal(0.0, 0.3, n - 1)  # x leads fwd (with noise, not collinear)
+    labels = (x > 0.0).astype(np.float64)
+    matrix = np.column_stack([const_col, x])
+
+    selected = select_causal_features(
+        matrix, ["const", "x"], fwd, labels, _label_corr_predictor, _splitter(),
+        lags=2, horizon=1,
+    )
+    assert selected  # never empty
+    assert "const" not in selected  # rank-deficient constant -> Granger p=1.0 -> dropped
+
+
+def test_select_causal_falls_back_when_nothing_is_causal():
+    rng = np.random.default_rng(8)
+    n = 150
+    matrix = rng.normal(size=(n, 3))
+    target = rng.normal(size=n)  # nothing leads it
+    labels = (rng.normal(size=n) > 0.0).astype(np.float64)
+
+    selected = select_causal_features(
+        matrix, ["a", "b", "c"], target, labels, _label_corr_predictor, _splitter(),
+        lags=2, horizon=1,
+    )
+    assert selected  # empty screen -> fall back to all, never empty
+    assert set(selected) <= {"a", "b", "c"}
