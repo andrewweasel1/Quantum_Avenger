@@ -67,7 +67,7 @@ def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.
     for combo in combos:
         segments: dict[tuple[int, int], np.ndarray] = {}
         for combo_index, (fold, test_groups) in enumerate(zip(folds, combo_groups, strict=True)):
-            train_idx, test_idx = fold
+            train_idx, _ = fold
             params = default_params(
                 max_depth=combo["max_depth"],
                 learning_rate=combo["learning_rate"],
@@ -83,19 +83,22 @@ def run_grid_search(features, labels, prices, grid=None, confidence_threshold=0.
                 penalty_fn=cfg.tournament.penalty_fn,
                 sample_weight=None if weights is None else weights[train_idx],
             )
-            proba = predict_proba(booster, features[test_idx])
-            signals = (proba > confidence_threshold).astype(np.int64)
-            fold_returns = simulate_t1_returns(
-                signals,
-                prices["close"][test_idx],
-                prices["low"][test_idx],
-                prices["atr"][test_idx],
-                cfg.execution.atr_stop_multiplier,
-                cfg.execution.max_risk_per_trade,
-            )
-            for g in test_groups:  # split the fold's returns back to per-group segments
+            # Simulate each test group on its own contiguous block, so a group's
+            # last bar never uses the next (non-adjacent) group's first bar as its
+            # t+1 — eliminating the cross-group boundary leak.
+            for g in test_groups:
                 gstart, gend = bounds[g]
-                segments[(combo_index, g)] = fold_returns[(test_idx >= gstart) & (test_idx <= gend)]
+                block = slice(gstart, gend + 1)
+                proba = predict_proba(booster, features[block])
+                signals = (proba > confidence_threshold).astype(np.int64)
+                segments[(combo_index, g)] = simulate_t1_returns(
+                    signals,
+                    prices["close"][block],
+                    prices["low"][block],
+                    prices["atr"][block],
+                    cfg.execution.atr_stop_multiplier,
+                    cfg.execution.max_risk_per_trade,
+                )
         paths = splitter.assemble_paths(n, segments)
         oos = paths.mean(axis=0)  # == canonical per-sample OOS average across folds
         rows.append(oos)

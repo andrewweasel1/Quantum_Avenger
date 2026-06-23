@@ -16,6 +16,7 @@ from new_pipeline.evaluation.dsr import compute_deflated_sharpe_ratio
 from new_pipeline.evaluation.hmm_gauntlet import run_hmm_synthetic_gauntlet
 from new_pipeline.evaluation.promotion import PromotionRegistry, assess_promotion
 from new_pipeline.features.polars_engine import add_features
+from new_pipeline.tournament.cpcv import CPCVSplitGenerator
 from new_pipeline.tournament.grid_search import run_grid_search
 from new_pipeline.tournament.trainer import predict_proba, save_candidate, train_booster
 
@@ -62,6 +63,13 @@ def test_offline_end_to_end_pipeline(tmp_path, monkeypatch):
     assert result.path_count == 5
     assert result.paths.shape == (5, features.shape[0])
     np.testing.assert_allclose(result.paths.mean(axis=0), champion_returns, rtol=1e-9, atol=1e-12)
+
+    # No cross-group fold leak: each CPCV group is simulated on its own contiguous
+    # block, so every group's last bar carries 0 return (its true t+1 is purged
+    # away, never borrowed from the next, non-adjacent group).
+    n = features.shape[0]
+    for _gstart, gend in CPCVSplitGenerator().group_bounds(n):
+        assert np.allclose(result.returns_matrix[:, gend], 0.0)
 
     booster = train_booster(features, labels, num_boost_round=20)
     candidate_path = tmp_path / "AAPL_candidate.json"
