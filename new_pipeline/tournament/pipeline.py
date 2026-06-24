@@ -31,6 +31,7 @@ from new_pipeline.evaluation.regime_dsr import (
     RegimeVerdict,
     ThinRegimePolicy,
 )
+from new_pipeline.features.factors import add_cross_sectional_factors, factor_feature_names
 from new_pipeline.features.labels import add_labels
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov_regime_features
 from new_pipeline.features.polars_engine import compile_features
@@ -87,7 +88,12 @@ def build_training_frame(
     sector_df = pl.DataFrame(
         {"ticker": list(sectors), "sector": [sectors[t] for t in sectors]}
     )
-    return labeled.join(sector_df, on="ticker", how="left")
+    joined = labeled.join(sector_df, on="ticker", how="left")
+    if cfg.features.factor_set:
+        joined = add_cross_sectional_factors(
+            joined, cfg.features.factor_set, sector_neutral=cfg.features.factor_sector_neutral
+        )
+    return joined
 
 
 def _attach_sentiment(labeled, symbols, news_source, sentiment_engine, anonymizer) -> pl.DataFrame:
@@ -140,6 +146,8 @@ def run_offline_pipeline(
     feature_cols = list(FEATURE_COLS)
     if cfg.fusion.enabled:
         feature_cols += list(MARKOV_FEATURE_NAMES)
+    if cfg.features.factor_set:
+        feature_cols += factor_feature_names(cfg.features.factor_set)
     results = run_sector_tournament(frame, feature_cols, output_dir)
     promotions = _evaluate_and_promote(frame, results, output_dir, cfg)
     return {"sectors": list(results), "promotions": promotions}

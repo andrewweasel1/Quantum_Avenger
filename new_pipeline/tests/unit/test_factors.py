@@ -1,0 +1,179 @@
+"""Unit tests for cross-sectional alpha factors (offense roadmap P0).
+
+Correctness + mechanics: cross-sectional z-score, sector neutralization, the
+degenerate/null guards, and the per-(ticker) raw signals (momentum, reversal,
+low-vol, causal same-month seasonality). Golden number pins live in
+tests/golden/test_factor_golden.py.
+"""
+
+from datetime import date, timedelta
+
+import numpy as np
+import polars as pl
+import pytest
+from new_pipeline.core.exceptions import SchemaValidationError
+from new_pipeline.features.factors import (
+    _raw_signal,
+    add_cross_sectional_factors,
+    factor_feature_names,
+)
+
+
+def _single_date_frame(vols, sectors=None) -> pl.DataFrame:
+    """One date, one row per ticker, with explicit ``volatility`` (drives low_vol)."""
+    n = len(vols)
+    return pl.DataFrame(
+        {
+            "date": [date(2021, 6, 1)] * n,
+            "ticker": [f"T{i}" for i in range(n)],
+            "close": [100.0] * n,
+            "returns": [0.0] * n,
+            "volatility": list(vols),
+            "sector": list(sectors) if sectors else ["S"] * n,
+        }
+    )
+
+
+def _series_frame(close, ticker="Z") -> pl.DataFrame:
+    n = len(close)
+    return pl.DataFrame(
+        {
+            "ticker": [ticker] * n,
+            "date": [date(2021, 1, 4) + timedelta(days=i) for i in range(n)],
+            "close": list(close),
+        }
+    ).sort(["ticker", "date"])
+
+
+def test_empty_factor_set_is_identity():
+    frame = _single_date_frame([0.1, 0.2, 0.3])
+    out = add_cross_sectional_factors(frame, [])
+    assert out.columns == frame.columns
+    assert out.equals(frame)
+
+
+def test_unknown_factor_raises():
+    with pytest.raises(SchemaValidationError):
+        add_cross_sectional_factors(_single_date_frame([0.1, 0.2]), ["not_a_factor"])
+
+
+def test_raw_signal_unknown_raises():
+    # defensive guard inside the builder (the public API validates names first).
+    with pytest.raises(SchemaValidationError):
+        _raw_signal("bogus")
+
+
+def test_factor_feature_names():
+    assert factor_feature_names(["mom_12_1", "low_vol"]) == ["xf_mom_12_1", "xf_low_vol"]
+
+
+def test_low_vol_cross_sectional_zscore():
+    vols = [0.10, 0.20, 0.30, 0.40]
+    out = add_cross_sectional_factors(
+        _single_date_frame(vols), ["low_vol"], sector_neutral=False
+    ).sort("ticker")
+    raw = -np.array(vols)
+    expected = (raw - raw.mean()) / raw.std(ddof=1)  # polars std defaults to ddof=1
+    assert out["xf_low_vol"].to_numpy() == pytest.approx(expected, rel=1e-12)
+    assert out["xf_low_vol"][0] > out["xf_low_vol"][3]  # lower vol -> higher factor
+
+
+def test_degenerate_date_is_neutral_zero():
+    # zero cross-sectional dispersion (all-equal) -> neutral 0.0, never NaN/inf.
+    out = add_cross_sectional_factors(
+        _single_date_frame([0.2, 0.2, 0.2]), ["low_vol"], sector_neutral=False
+    )
+    assert out["xf_low_vol"].to_list() == [0.0, 0.0, 0.0]
+
+
+def test_single_name_date_is_zero():
+    out = add_cross_sectional_factors(
+        _single_date_frame([0.2]), ["low_vol"], sector_neutral=False
+    )
+    assert out["xf_low_vol"].to_list() == [0.0]
+
+
+def test_null_history_stays_null():
+    frame = _single_date_frame([0.1, 0.2, 0.3]).with_columns(
+        pl.when(pl.col("ticker") == "T0")
+        .then(None)
+        .otherwise(pl.col("volatility"))
+        .alias("volatility")
+    )
+    out = add_cross_sectional_factors(frame, ["low_vol"], sector_neutral=False).sort("ticker")
+    assert out["xf_low_vol"][0] is None  # null raw -> null factor (row drops in the tournament)
+    assert out["xf_low_vol"].drop_nulls().len() == 2
+
+
+def test_sector_neutralization_demeans_within_sector():
+    # within a 2-name sector the demeaned bases are equal & opposite -> z equal & opposite.
+    frame = _single_date_frame([0.10, 0.40, 0.20, 0.60], sectors=["A", "A", "B", "B"])
+    z = add_cross_sectional_factors(frame, ["low_vol"], sector_neutral=True).sort("ticker")[
+        "xf_low_vol"
+    ].to_numpy()
+    assert z[0] == pytest.approx(-z[1], rel=1e-9)
+    assert z[2] == pytest.approx(-z[3], rel=1e-9)
+
+
+def test_reversal_raw_matches_numpy():
+    rng = np.random.default_rng(3)
+    close = 100.0 + np.cumsum(rng.normal(0, 1.0, 40))
+    raw = _series_frame(close).with_columns(_raw_signal("reversal_21").alias("r"))["r"].to_numpy()
+    assert raw[35] == pytest.approx(-(close[35] / close[35 - 21] - 1.0), rel=1e-12)
+
+
+def test_momentum_raw_matches_numpy():
+    rng = np.random.default_rng(5)
+    close = 100.0 + np.cumsum(rng.normal(0, 1.0, 300))
+    raw = _series_frame(close).with_columns(_raw_signal("mom_12_1").alias("m"))["m"].to_numpy()
+    assert raw[280] == pytest.approx(close[280 - 21] / close[280 - 252] - 1.0, rel=1e-12)
+    assert np.isnan(raw[250])  # null before 252 days of history exist (12-1 warmup)
+
+
+def test_low_vol_raw_is_negative_volatility():
+    frame = _single_date_frame([0.1, 0.2, 0.3])
+    raw = frame.with_columns(_raw_signal("low_vol").alias("r")).sort("ticker")["r"].to_numpy()
+    assert raw == pytest.approx([-0.1, -0.2, -0.3], rel=1e-12)
+
+
+def test_seasonality_is_causal_same_month():
+    frame = (
+        pl.DataFrame(
+            {
+                "ticker": ["X"] * 6,
+                "date": [
+                    date(2021, 1, 5), date(2021, 2, 5), date(2022, 1, 5),
+                    date(2022, 2, 5), date(2023, 1, 5), date(2023, 1, 6),
+                ],
+                "returns": [0.10, 0.20, 0.30, 0.40, 0.50, 0.60],
+            }
+        )
+        .with_columns(pl.col("date").dt.month().alias("_xf_month"))
+        .sort(["ticker", "date"])
+    )
+    seas = frame.with_columns(_raw_signal("seasonality").alias("s"))["s"].to_list()
+    assert seas[0] is None and seas[1] is None  # no prior same-month observation
+    assert seas[2] == pytest.approx(0.10)  # prior Jan: mean([0.10])
+    assert seas[3] == pytest.approx(0.20)  # prior Feb: mean([0.20])
+    assert seas[4] == pytest.approx(0.20)  # prior Jan: mean([0.10, 0.30])
+    assert seas[5] == pytest.approx(0.30)  # prior Jan: mean([0.10, 0.30, 0.50])
+
+
+def test_no_scratch_columns_leak():
+    out = add_cross_sectional_factors(
+        _single_date_frame([0.1, 0.2, 0.3]), ["low_vol", "seasonality"], sector_neutral=False
+    )
+    assert "xf_low_vol" in out.columns and "xf_seasonality" in out.columns
+    assert not [c for c in out.columns if c.startswith("_xf_")]
+
+
+def test_row_order_independent():
+    # the stage sorts internally, so a shuffled input yields the same factor values.
+    frame = _single_date_frame([0.10, 0.20, 0.30, 0.40], sectors=["A", "A", "B", "B"])
+    a = add_cross_sectional_factors(frame, ["low_vol"]).sort("ticker")["xf_low_vol"].to_list()
+    b = (
+        add_cross_sectional_factors(frame.reverse(), ["low_vol"])
+        .sort("ticker")["xf_low_vol"]
+        .to_list()
+    )
+    assert a == pytest.approx(b, rel=1e-12)

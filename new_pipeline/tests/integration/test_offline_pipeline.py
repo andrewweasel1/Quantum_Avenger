@@ -7,9 +7,13 @@ seed and a tiny budget.
 import json
 from datetime import date
 
-from new_pipeline.config import reload_config
+from new_pipeline.config import base, reload_config
 from new_pipeline.core.seeding import seed_everything
-from new_pipeline.tournament.pipeline import run_offline_pipeline
+from new_pipeline.tournament.pipeline import (
+    FEATURE_COLS,
+    build_training_frame,
+    run_offline_pipeline,
+)
 
 
 def test_offline_pipeline_runs(tmp_path, monkeypatch):
@@ -43,3 +47,43 @@ def test_offline_pipeline_records_overfitting_diagnostics(tmp_path, monkeypatch)
     assert isinstance(entry["pbo"], float)
     assert isinstance(entry["psr"], float)
     assert 0.0 <= entry["cpcv_path_pass_fraction"] <= 1.0
+
+
+def test_build_training_frame_adds_cross_sectional_factors():
+    """P0 build hook: enabling features.factor_set appends populated xf_* columns."""
+    from new_pipeline.adapters import FakeMarketDataSource, StaticUniverseProvider
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.features.factor_set = ["reversal_21", "low_vol"]
+    universe = StaticUniverseProvider()
+    sectors = universe.sectors()
+    symbols = list(sectors)[:4]
+
+    frame = build_training_frame(
+        symbols, sectors, date(2021, 1, 1), date(2021, 12, 31), FakeMarketDataSource(), cfg
+    )
+    for column in ("xf_reversal_21", "xf_low_vol"):
+        assert column in frame.columns
+        assert frame[column].drop_nulls().len() > 0
+
+
+def test_offline_pipeline_consumes_cross_sectional_factors(tmp_path, monkeypatch):
+    """P0 end-to-end: with factors enabled the tournament runs and the xf_* columns
+    are wired into the selectable feature namespace (no leakage of unexpected cols)."""
+    monkeypatch.setenv("QA_TOURNAMENT__NUM_BOOST_ROUND", "10")
+    reload_config()
+    base.get_config().features.factor_set = ["reversal_21", "low_vol"]
+    seed_everything(0)
+
+    summary = run_offline_pipeline(
+        tmp_path, start=date(2021, 1, 1), end=date(2022, 12, 31), max_symbols=6
+    )
+
+    assert summary["sectors"]
+    manifests = list(tmp_path.glob("*_candidate_features.json"))
+    assert manifests
+    selectable = set(FEATURE_COLS) | {"xf_reversal_21", "xf_low_vol"}
+    for manifest in manifests:
+        selected = set(json.loads(manifest.read_text())["features"])
+        assert selected <= selectable

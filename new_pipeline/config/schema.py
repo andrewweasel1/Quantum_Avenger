@@ -24,6 +24,10 @@ class FeatureConfig(BaseModel):
     label_method: str = "triple_barrier"  # "triple_barrier" | "friction"
     label_pt_mult: float = 2.0  # profit-take barrier in ATR units
     label_sl_mult: float = 2.0  # stop-loss barrier in ATR units (mirrors execution stop)
+    # Cross-sectional alpha factors (offense roadmap P0). Empty => off (pipeline
+    # bit-stable); names from features.factors.SUPPORTED_FACTORS.
+    factor_set: list[str] = Field(default_factory=list)
+    factor_sector_neutral: bool = True  # sector-demean before cross-sectional z-score
 
 
 class ModelConfig(BaseModel):
