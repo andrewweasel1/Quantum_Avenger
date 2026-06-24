@@ -127,6 +127,12 @@ evaluation:
 mcp:
   transport: "stdio"
 
+portfolio:
+  enabled: true
+  method: "hrp"
+  cov_method: "rmt"
+  min_obs: 20
+
 rag:
   embedder: "hashing"
   top_k: 5

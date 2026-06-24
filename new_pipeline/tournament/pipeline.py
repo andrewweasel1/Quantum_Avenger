@@ -38,6 +38,7 @@ from new_pipeline.features.factors import add_cross_sectional_factors, factor_fe
 from new_pipeline.features.labels import add_labels
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov_regime_features
 from new_pipeline.features.polars_engine import compile_features
+from new_pipeline.portfolio.combination import combine_returns
 from new_pipeline.tournament.director import run_sector_tournament
 from new_pipeline.tournament.simulator import sharpe_ratio
 from new_pipeline.tournament.trainer import load_booster, predict_proba
@@ -156,7 +157,49 @@ def run_offline_pipeline(
     summary = {"sectors": list(results), "promotions": promotions}
     if cfg.evaluation.alpha_eval_enabled:
         summary["alpha_eval"] = _write_alpha_eval(frame, feature_cols, cfg, output_dir)
+    if cfg.portfolio.enabled:
+        book = _combine_book(results, output_dir, cfg)
+        if book is not None:
+            summary["portfolio"] = book
     return summary
+
+
+def _combine_book(results: dict, output_dir, cfg) -> dict | None:
+    """Best-effort cross-sector book: combine each sector champion's return stream
+    into one book (HRP on a denoised covariance) -> portfolio.json. Streams are
+    truncated to a common length — approximate; exact calendar alignment lands with
+    date-indexed sleeves (P5). Returns None when fewer than two combinable sleeves."""
+    streams = {}
+    for sector, result in results.items():
+        trials = result["trial_sharpes"]
+        if not trials:
+            continue
+        matrix = pl.read_parquet(
+            result["candidate_path"].replace("_candidate.json", "_returns_matrix.parquet")
+        )
+        streams[sector] = matrix[:, int(np.argmax(trials))].to_numpy()
+    if len(streams) < 2:
+        return None
+    min_len = min(len(stream) for stream in streams.values())
+    if min_len < cfg.portfolio.min_obs:
+        return None
+    sectors = list(streams)
+    panel = np.column_stack([streams[sector][-min_len:] for sector in sectors])
+    weights, book = combine_returns(
+        panel, cfg.portfolio.method, cfg.portfolio.cov_method, cfg.portfolio.min_obs
+    )
+    report = {
+        "sectors": sectors,
+        "weights": {s: float(w) for s, w in zip(sectors, weights, strict=True)},
+        "method": cfg.portfolio.method,
+        "cov_method": cfg.portfolio.cov_method,
+        "book_sharpe": float(sharpe_ratio(book)),
+        "n_obs": int(min_len),
+    }
+    (Path(output_dir) / "portfolio.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
+    return report
 
 
 def _write_alpha_eval(frame: pl.DataFrame, feature_cols, cfg, output_dir) -> dict:

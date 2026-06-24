@@ -134,6 +134,15 @@ class EvaluationConfig(BaseModel):
     reality_check_block: int = 10  # stationary-bootstrap avg block length
 
 
+class PortfolioConfig(BaseModel):
+    """Cross-sleeve combination layer (offense roadmap P4)."""
+
+    enabled: bool = True
+    method: str = "hrp"  # hrp | inverse_variance | equal
+    cov_method: str = "rmt"  # rmt | ledoit_wolf | sample
+    min_obs: int = 20  # min common stream length to combine sleeves
+
+
 class MCPConfig(BaseModel):
     transport: str = "stdio"
 
@@ -196,6 +205,7 @@ class AppConfig(BaseModel):
     tournament: TournamentConfig = Field(default_factory=TournamentConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)

@@ -7,6 +7,8 @@ seed and a tiny budget.
 import json
 from datetime import date
 
+import pytest
+
 from new_pipeline.config import base, reload_config
 from new_pipeline.core.seeding import seed_everything
 from new_pipeline.tournament.pipeline import (
@@ -95,6 +97,12 @@ def test_offline_pipeline_consumes_cross_sectional_factors(tmp_path, monkeypatch
     ic = summary["alpha_eval"]["ic"]
     assert {"xf_reversal_21", "xf_low_vol"} <= set(ic)
     assert {"xf_reversal_21", "xf_low_vol"} <= set(summary["alpha_eval"]["decay"])
+    # P4: the per-sector champions are combined into one book (default-on portfolio).
+    assert (tmp_path / "portfolio.json").exists()
+    book = summary["portfolio"]
+    assert set(book["weights"]) <= set(summary["sectors"])
+    assert sum(book["weights"].values()) == pytest.approx(1.0)
+    assert book["method"] == "hrp"
 
 
 def test_offline_pipeline_records_reality_check_when_enabled(tmp_path, monkeypatch):
