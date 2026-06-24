@@ -87,6 +87,10 @@ tournament:
   # Down-weight overlapping (non-IID) triple-barrier labels in training:
   # "uniqueness" (LdP average uniqueness) | "none".
   sample_weighting: "uniqueness"
+  # Meta-labeling (P3): secondary act/size model on the fired primary signal (default off).
+  enable_meta_labeling: false
+  meta_threshold: 0.5
+  meta_criterion: "f1"
   sectors:
     - "Information Technology"
     - "Health Care"

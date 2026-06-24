@@ -94,6 +94,11 @@ class TournamentConfig(BaseModel):
     causal_alpha: float = 0.10  # BHY-adjusted p-value keep threshold (Granger screen)
     causal_granger_lags: int = 3  # Granger AR / feature lag order
     sample_weighting: str = "uniqueness"  # | "none" — LdP uniqueness weights for overlapping labels
+    # Meta-labeling (offense roadmap P3): a secondary model on the fired primary
+    # signal; records an OOS primary-vs-meta verdict. Default off (diagnostic).
+    enable_meta_labeling: bool = False
+    meta_threshold: float = 0.5  # meta P(win) cutoff to act on a fired primary signal
+    meta_criterion: str = "f1"  # | "precision" — what "improved" means for the verdict
     sectors: list[str] = Field(default_factory=list)
 
 

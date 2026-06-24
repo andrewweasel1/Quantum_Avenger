@@ -10,6 +10,7 @@ run in parallel on a thread pool (XGBoost releases the GIL during training) when
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -22,12 +23,18 @@ from new_pipeline.tournament.causal_selection import select_causal_features
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
 from new_pipeline.tournament.feature_selection import select_orthogonal_features
 from new_pipeline.tournament.grid_search import run_grid_search
+from new_pipeline.tournament.meta_labeling import (
+    MIN_FIRED_TEST,
+    primary_signal,
+    run_meta_labeling,
+)
 from new_pipeline.tournament.sample_weights import uniqueness_sample_weights
 from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns_blockwise
 from new_pipeline.tournament.trainer import predict_proba, save_candidate, train_booster
 
 _PRICE_COLUMNS = ("close", "low", "atr")
 _MIN_ROWS = 40
+_META_MIN_TRAIN = 30  # need a workable 80/20 split before meta-labeling
 
 
 def _slug(sector: str) -> str:
@@ -79,6 +86,58 @@ def _mda_fit_fn(cfg):
         return lambda test_x: (predict_proba(booster, test_x) > threshold).astype(np.int64)
 
     return fit
+
+
+def _meta_fit_fn(cfg):
+    """fit(X, y, sample_weight) -> predict(X) -> P(win): the secondary meta model."""
+    rounds = min(40, cfg.tournament.num_boost_round)
+
+    def fit(features, outcomes, weight=None):
+        booster = train_booster(
+            features,
+            outcomes,
+            num_boost_round=rounds,
+            penalty_fp=cfg.tournament.penalty_fp,
+            penalty_fn=cfg.tournament.penalty_fn,
+            sample_weight=weight,
+        )
+        return lambda test_x: predict_proba(booster, test_x)
+
+    return fit
+
+
+def _meta_labeling(matrix, labels, t1_offset, block_ids, cfg):
+    """Train a primary on the train split, a meta model on its fired bars, and return
+    the OOS primary-vs-meta verdict (+ fired counts), or None when the split is too thin."""
+    n = len(labels)
+    split = int(n * 0.8)
+    if split < _META_MIN_TRAIN or n - split < MIN_FIRED_TEST:
+        return None
+    rounds = min(40, cfg.tournament.num_boost_round)
+    threshold = cfg.execution.confidence_threshold
+    train_x, test_x = matrix[:split], matrix[split:]
+    train_y, test_y = labels[:split], labels[split:]
+    primary = train_booster(
+        train_x, train_y, num_boost_round=rounds,
+        penalty_fp=cfg.tournament.penalty_fp, penalty_fn=cfg.tournament.penalty_fn,
+    )
+    train_sig = primary_signal(predict_proba(primary, train_x), threshold)
+    test_sig = primary_signal(predict_proba(primary, test_x), threshold)
+    weights = None
+    if t1_offset is not None and cfg.tournament.sample_weighting == "uniqueness":
+        weights = uniqueness_sample_weights(absolute_t1(t1_offset, n, block_ids))[:split]
+    result = run_meta_labeling(
+        train_x, train_y, test_x, test_y, train_sig, test_sig,
+        _meta_fit_fn(cfg), cfg.tournament.meta_threshold, cfg.tournament.meta_criterion, weights,
+    )
+    if result is None:
+        return None
+    verdict, _ = result
+    return {
+        **asdict(verdict),
+        "n_fired_train": int((train_sig == 1).sum()),
+        "n_fired_test": int((test_sig == 1).sum()),
+    }
 
 
 def _select_causal(clean, feature_cols, matrix, labels, prices, t1_offset, cfg, block_ids=None):
@@ -177,7 +236,12 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
         selected_matrix, labels, prices, t1_offset=t1_offset, block_ids=block_ids
     )
     booster = _train_candidate(selected_matrix, labels, cfg, t1_offset, block_ids)
-    return sector, _persist(output, sector, booster, selected, search)
+    meta = (
+        _meta_labeling(selected_matrix, labels, t1_offset, block_ids, cfg)
+        if cfg.tournament.enable_meta_labeling
+        else None
+    )
+    return sector, _persist(output, sector, booster, selected, search, meta)
 
 
 def _train_candidate(matrix, labels, cfg, t1_offset=None, block_ids=None):
@@ -201,7 +265,7 @@ def _train_candidate(matrix, labels, cfg, t1_offset=None, block_ids=None):
     )
 
 
-def _persist(output: Path, sector: str, booster, selected, search) -> dict:
+def _persist(output: Path, sector: str, booster, selected, search, meta=None) -> dict:
     slug = _slug(sector)
     candidate_path = output / f"{slug}_candidate.json"
     features_path = output / f"{slug}_candidate_features.json"
@@ -210,7 +274,12 @@ def _persist(output: Path, sector: str, booster, selected, search) -> dict:
     save_candidate(booster, candidate_path)
     features_path.write_text(
         json.dumps(
-            {"features": selected, "metadata": {"sector": sector, "params": search.best_params}},
+            {
+                "features": selected,
+                "metadata": {
+                    "sector": sector, "params": search.best_params, "meta_labeling": meta
+                },
+            },
             indent=2,
         ),
         encoding="utf-8",
@@ -231,4 +300,5 @@ def _persist(output: Path, sector: str, booster, selected, search) -> dict:
         "best_sharpe": search.best_sharpe,
         "trial_sharpes": search.trial_sharpes,
         "candidate_path": str(candidate_path),
+        "meta_labeling": meta,
     }
