@@ -89,7 +89,7 @@ Promote only if **all** clear: (1) DSR ≥ threshold (N_eff‑deflated); (2) syn
 
 # PART II — Alpha & quant toolbox (offense + candidate library)
 
-The menu for widening the signal surface. **Status:** `[implemented]` (with its Part I §/file) or `[candidate]`. **Integration point** names where it would plug in. Citations: López de Prado, *Advances in Financial ML* (AFML); Harvey–Liu; Bailey et al.
+The menu for widening the signal surface. **Status:** `[implemented]` (with its Part I §/file) or `[candidate]`. **Integration point** names where it would plug in. For the *architecture and phased sequencing* that ships these candidates — the three missing axes (cross‑sectional stage, IC/ICIR alpha eval, multi‑sleeve combination) and the P0→P5 plan — see **`OFFENSE_ROADMAP.md`**. Citations: López de Prado, *Advances in Financial ML* (AFML); Harvey–Liu; Bailey et al.
 
 ## A. Data representation & sampling *(foundational — better bars ⇒ better everything downstream)*
 

@@ -1,6 +1,6 @@
 # Quantum Avenger — Implementation Status & Remaining Work
 
-> **Where the project is, and exactly what remains to fully realize it.** Companion to `ARCHITECTURE_ROADMAP.md` (current‑state architecture) and `quantitative_math.md` (the rigor reference). The `PHASE_*_SPECIFICATION.md` files are the original build specs — historical; this doc + the roadmap are the current source of truth.
+> **Where the project is, and exactly what remains to fully realize it.** Companion to `ARCHITECTURE_ROADMAP.md` (current‑state architecture), `quantitative_math.md` (the rigor reference), and `OFFENSE_ROADMAP.md` (the signal‑generation / alpha build‑forward plan). The `PHASE_*_SPECIFICATION.md` files are the original build specs — historical; this doc + the roadmap are the current source of truth.
 
 **Snapshot.** ~115 modules under `new_pipeline/`; **333 tests** (330 pass / 3 skip on optional `torch`/`spaCy`/`alpaca` + 1 GPU); **~93 % branch coverage**; `ruff` clean; fully seeded/deterministic. The whole pipeline runs **offline with no network** (`python new_pipeline/main.py pipeline` / `trade`). What remains is **live integration, the agentic‑RAG depth, monitoring backends, and Phase‑7 hardening** — not core quant logic.
 
@@ -62,7 +62,7 @@ Legend: **✅ Stable** · **◐ Offline‑complete, live deferred** · **○ Sca
 - **Meta‑labelling:** a secondary model sizing/filtering the triple‑barrier primary (the sequential bootstrap utility is already in place for bagged meta‑models).
 
 ### 8. Alpha research roadmap (signal generation)
-The pipeline's *defenses* are deep but its *offense* is thin — ~11 microstructure/technical features → one XGBoost classifier per sector. `quantitative_math.md` Part II is the full toolbox; these are the **top‑6, prioritized by alpha‑per‑effort**, each of which must pass the existing CPCV + DSR/PBO/haircut/path‑DSR gauntlet before promotion.
+The pipeline's *defenses* are deep but its *offense* is thin — ~11 microstructure/technical features → one XGBoost classifier per sector. `quantitative_math.md` Part II is the full toolbox; these are the **top‑6, prioritized by alpha‑per‑effort**, each of which must pass the existing CPCV + DSR/PBO/haircut/path‑DSR gauntlet before promotion. **`OFFENSE_ROADMAP.md` is the architecture + phased sequencing** that turns this list into shipped code (the three missing axes — cross‑sectional stage, IC/ICIR alpha eval, multi‑sleeve combination — and the P0→P5 plan).
 
 1. **Cross‑sectional factor library + IC/ICIR eval** (Part II §B,§H) — momentum/reversal/value/quality/low‑vol/BAB/seasonality, ranked + sector/beta‑neutralized; evaluate with Information Coefficient / ICIR. *New `features/factors.py` + a fundamentals adapter.* **Done when:** ≥1 factor sleeve clears DSR on the OOS paths and its IC is golden‑pinned. *Biggest expected lift — most equity alpha lives here.*
 2. **Information bars + fractional differentiation** (§A) — dollar/volume/imbalance bars upstream of the feature engine; min‑`d` frac‑diff for stationary‑with‑memory features. **Done when:** bar resampler + `fracdiff` transform are config‑flagged, golden‑tested, and pass an ADF stationarity assertion.
