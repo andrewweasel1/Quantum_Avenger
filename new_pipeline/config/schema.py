@@ -127,6 +127,11 @@ class EvaluationConfig(BaseModel):
     # diagnostics written to alpha_eval.json. Read-only — never gates promotion.
     alpha_eval_enabled: bool = True
     alpha_eval_min_names: int = 5  # min cross-sectional breadth for a usable IC date
+    # White's Reality Check across the grid-search trials (offense roadmap P4 §J):
+    # a multiple-testing p-value recorded per sector. Default off (bootstrap cost).
+    reality_check_enabled: bool = False
+    reality_check_bootstrap: int = 500
+    reality_check_block: int = 10  # stationary-bootstrap avg block length
 
 
 class MCPConfig(BaseModel):

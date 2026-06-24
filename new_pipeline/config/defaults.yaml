@@ -120,6 +120,9 @@ evaluation:
   gauntlet_block_size: 10
   alpha_eval_enabled: true
   alpha_eval_min_names: 5
+  reality_check_enabled: false
+  reality_check_bootstrap: 500
+  reality_check_block: 10
 
 mcp:
   transport: "stdio"

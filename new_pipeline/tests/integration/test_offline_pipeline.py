@@ -95,3 +95,19 @@ def test_offline_pipeline_consumes_cross_sectional_factors(tmp_path, monkeypatch
     ic = summary["alpha_eval"]["ic"]
     assert {"xf_reversal_21", "xf_low_vol"} <= set(ic)
     assert {"xf_reversal_21", "xf_low_vol"} <= set(summary["alpha_eval"]["decay"])
+
+
+def test_offline_pipeline_records_reality_check_when_enabled(tmp_path, monkeypatch):
+    """P4 §J: enabling the reality check records a White's RC p-value per sector."""
+    monkeypatch.setenv("QA_TOURNAMENT__NUM_BOOST_ROUND", "10")
+    monkeypatch.setenv("QA_EVALUATION__REALITY_CHECK_ENABLED", "true")
+    monkeypatch.setenv("QA_EVALUATION__REALITY_CHECK_BOOTSTRAP", "100")
+    reload_config()
+    seed_everything(0)
+
+    run_offline_pipeline(tmp_path, start=date(2021, 1, 1), end=date(2021, 6, 30), max_symbols=2)
+
+    registry = json.loads((tmp_path / "promotion_registry.json").read_text())
+    assert registry["promotions"]
+    pvalue = registry["promotions"][0]["reality_check_pvalue"]
+    assert pvalue is not None and 0.0 < pvalue <= 1.0

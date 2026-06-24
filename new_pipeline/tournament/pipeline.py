@@ -28,6 +28,7 @@ from new_pipeline.evaluation.hmm_gauntlet import run_hmm_synthetic_gauntlet
 from new_pipeline.evaluation.minbtl import backtest_length_is_sufficient
 from new_pipeline.evaluation.pbo import probability_of_backtest_overfitting
 from new_pipeline.evaluation.promotion import PromotionRegistry, assess_promotion
+from new_pipeline.evaluation.reality_check import whites_reality_check
 from new_pipeline.evaluation.regime_dsr import (
     QuantitativeEvaluator,
     RegimeVerdict,
@@ -203,6 +204,15 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             minbtl_ok = backtest_length_is_sufficient(
                 champion_returns.size, len(trials), champion_sharpe
             )
+        reality_check_p = (
+            whites_reality_check(
+                returns_matrix.to_numpy(),
+                cfg.evaluation.reality_check_bootstrap,
+                cfg.evaluation.reality_check_block,
+            )
+            if cfg.evaluation.reality_check_enabled
+            else None
+        )
         decision = assess_promotion(
             sector, dsr, synthetic_sr,
             cfg.evaluation.dsr_promotion_threshold, cfg.evaluation.synthetic_sr_min,
@@ -212,6 +222,7 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             path_fraction_threshold=cfg.evaluation.cpcv_path_min_fraction,
             path_dsr_median=path_dsr_median,
             path_gate_enabled=cfg.evaluation.cpcv_path_gate_enabled,
+            reality_check_pvalue=reality_check_p,
         )
         if cfg.evaluation.regime_gate_enabled and decision.promoted:
             if not _regime_verdict(champion_returns, trials, cfg).promoted:

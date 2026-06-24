@@ -27,6 +27,7 @@ class PromotionDecision:
     haircut_sharpe: float | None = None
     cpcv_path_pass_fraction: float | None = None
     cpcv_path_dsr_median: float | None = None
+    reality_check_pvalue: float | None = None
 
 
 def assess_promotion(
@@ -44,6 +45,7 @@ def assess_promotion(
     path_fraction_threshold=0.5,
     path_dsr_median=None,
     path_gate_enabled=False,
+    reality_check_pvalue=None,
 ) -> PromotionDecision:
     """Apply every promotion gate; the first failure names the rejection reason.
 
@@ -77,6 +79,7 @@ def assess_promotion(
         haircut_sharpe=haircut_sharpe,
         cpcv_path_pass_fraction=path_pass_fraction,
         cpcv_path_dsr_median=path_dsr_median,
+        reality_check_pvalue=reality_check_pvalue,
     )
 
 
@@ -102,6 +105,7 @@ class PromotionRegistry:
             "haircut_sharpe": decision.haircut_sharpe,
             "cpcv_path_pass_fraction": decision.cpcv_path_pass_fraction,
             "cpcv_path_dsr_median": decision.cpcv_path_dsr_median,
+            "reality_check_pvalue": decision.reality_check_pvalue,
             "promoted": decision.promoted,
             "reason": decision.reason,
             "timestamp": datetime.now(UTC).isoformat(),

@@ -26,6 +26,7 @@ from .hmm_gauntlet import fit_regime_hmm, run_hmm_synthetic_gauntlet
 from .minbtl import backtest_length_is_sufficient, min_backtest_length
 from .pbo import CSCVResult, evaluate_cscv, probability_of_backtest_overfitting
 from .promotion import PromotionDecision, PromotionRegistry, assess_promotion
+from .reality_check import hansens_spa, whites_reality_check
 from .regime_dsr import QuantitativeEvaluator, RegimeVerdict, ThinRegimePolicy
 from .tearsheet import summary_metrics, write_html_tearsheet
 
@@ -54,6 +55,7 @@ __all__ = [
     "expected_max_sharpe",
     "fit_regime_hmm",
     "haircut_sharpe_ratio",
+    "hansens_spa",
     "interpret_dsr",
     "min_backtest_length",
     "min_track_record_length",
@@ -64,5 +66,6 @@ __all__ = [
     "probability_of_backtest_overfitting",
     "run_hmm_synthetic_gauntlet",
     "summary_metrics",
+    "whites_reality_check",
     "write_html_tearsheet",
 ]
