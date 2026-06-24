@@ -133,6 +133,17 @@ portfolio:
   cov_method: "rmt"
   min_obs: 20
 
+# Statistical arbitrage (P5): cointegration + OU mean reversion (new family, default off).
+stat_arb:
+  enabled: false
+  adf_threshold: -2.86
+  adf_lags: 1
+  entry_z: 2.0
+  exit_z: 0.5
+  zscore_window: 20
+  min_obs: 60
+  max_pairs_per_sector: 3
+
 rag:
   embedder: "hashing"
   top_k: 5

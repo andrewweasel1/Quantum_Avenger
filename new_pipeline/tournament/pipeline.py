@@ -41,6 +41,11 @@ from new_pipeline.features.polars_engine import compile_features
 from new_pipeline.portfolio.combination import combine_returns
 from new_pipeline.tournament.director import run_sector_tournament
 from new_pipeline.tournament.simulator import sharpe_ratio
+from new_pipeline.tournament.stat_arb import (
+    engle_granger,
+    find_cointegrated_pairs,
+    mean_reversion_returns,
+)
 from new_pipeline.tournament.trainer import load_booster, predict_proba
 
 FEATURE_COLS = [
@@ -161,7 +166,67 @@ def run_offline_pipeline(
         book = _combine_book(results, output_dir, cfg)
         if book is not None:
             summary["portfolio"] = book
+    if cfg.stat_arb.enabled:
+        stat_arb = _run_stat_arb(frame, output_dir, cfg)
+        if stat_arb is not None:
+            summary["stat_arb"] = stat_arb
     return summary
+
+
+def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
+    """Find cointegrated within-sector pairs, trade each spread (causal mean
+    reversion), and combine the date-indexed sleeves into a stat-arb book via the
+    portfolio layer -> stat_arb.json. Returns None when no pair cointegrates."""
+    if "ticker" not in frame.columns or "sector" not in frame.columns:
+        return None
+    panel_df = (
+        frame.select(["date", "ticker", "close"])
+        .pivot(on="ticker", index="date", values="close")
+        .sort("date")
+        .drop_nulls()
+    )
+    panel_tickers = [c for c in panel_df.columns if c != "date"]
+    if panel_df.height < cfg.stat_arb.min_obs or len(panel_tickers) < 2:
+        return None
+    col_index = {ticker: i for i, ticker in enumerate(panel_tickers)}
+    panel = panel_df.select(panel_tickers).to_numpy()
+    sector_tickers: dict[str, list[str]] = {}
+    for ticker, sector in frame.select("ticker", "sector").unique().iter_rows():
+        if ticker in col_index:
+            sector_tickers.setdefault(sector, []).append(ticker)
+
+    pairs_report, sleeves = [], []
+    for sector, tickers in sector_tickers.items():
+        cols = [t for t in tickers if t in col_index]
+        if len(cols) < 2:
+            continue
+        found = find_cointegrated_pairs(
+            panel[:, [col_index[t] for t in cols]], cols,
+            cfg.stat_arb.adf_lags, cfg.stat_arb.adf_threshold,
+        )
+        for pair in found[: cfg.stat_arb.max_pairs_per_sector]:
+            _, spread = engle_granger(
+                panel[:, col_index[pair["y"]]],
+                panel[:, col_index[pair["x"]]],
+                cfg.stat_arb.adf_lags,
+            )
+            returns = mean_reversion_returns(
+                spread, cfg.stat_arb.entry_z, cfg.stat_arb.exit_z, cfg.stat_arb.zscore_window
+            )
+            sleeves.append(returns)
+            pairs_report.append({**pair, "sector": sector, "sharpe": float(sharpe_ratio(returns))})
+    if not pairs_report:
+        return None
+    report = {"pairs": pairs_report, "n_pairs": len(pairs_report)}
+    if len(sleeves) >= 2:  # date-indexed sleeves -> exact HRP combination
+        _, book = combine_returns(
+            np.column_stack(sleeves),
+            cfg.portfolio.method, cfg.portfolio.cov_method, cfg.portfolio.min_obs,
+        )
+        report["book_sharpe"] = float(sharpe_ratio(book))
+        report["n_sleeves"] = len(sleeves)
+    (Path(output_dir) / "stat_arb.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report
 
 
 def _combine_book(results: dict, output_dir, cfg) -> dict | None:

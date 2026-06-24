@@ -143,6 +143,19 @@ class PortfolioConfig(BaseModel):
     min_obs: int = 20  # min common stream length to combine sleeves
 
 
+class StatArbConfig(BaseModel):
+    """Cointegration / OU mean-reversion strategy family (offense roadmap P5)."""
+
+    enabled: bool = False  # new family; default off keeps the suite/runtime stable
+    adf_threshold: float = -2.86  # ADF 5% critical value — spread stationary below it
+    adf_lags: int = 1
+    entry_z: float = 2.0
+    exit_z: float = 0.5
+    zscore_window: int = 20
+    min_obs: int = 60
+    max_pairs_per_sector: int = 3
+
+
 class MCPConfig(BaseModel):
     transport: str = "stdio"
 
@@ -206,6 +219,7 @@ class AppConfig(BaseModel):
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
+    stat_arb: StatArbConfig = Field(default_factory=StatArbConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
