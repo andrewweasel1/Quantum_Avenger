@@ -61,6 +61,16 @@ Legend: **✅ Stable** · **◐ Offline‑complete, live deferred** · **○ Sca
 - **Nonlinear causal screen:** a transfer‑entropy / causal‑discovery alternative to the linear Granger screen (the selector already keys off a `feature_selection_method` switch).
 - **Meta‑labelling:** a secondary model sizing/filtering the triple‑barrier primary (the sequential bootstrap utility is already in place for bagged meta‑models).
 
+### 8. Alpha research roadmap (signal generation)
+The pipeline's *defenses* are deep but its *offense* is thin — ~11 microstructure/technical features → one XGBoost classifier per sector. `quantitative_math.md` Part II is the full toolbox; these are the **top‑6, prioritized by alpha‑per‑effort**, each of which must pass the existing CPCV + DSR/PBO/haircut/path‑DSR gauntlet before promotion.
+
+1. **Cross‑sectional factor library + IC/ICIR eval** (Part II §B,§H) — momentum/reversal/value/quality/low‑vol/BAB/seasonality, ranked + sector/beta‑neutralized; evaluate with Information Coefficient / ICIR. *New `features/factors.py` + a fundamentals adapter.* **Done when:** ≥1 factor sleeve clears DSR on the OOS paths and its IC is golden‑pinned. *Biggest expected lift — most equity alpha lives here.*
+2. **Information bars + fractional differentiation** (§A) — dollar/volume/imbalance bars upstream of the feature engine; min‑`d` frac‑diff for stationary‑with‑memory features. **Done when:** bar resampler + `fracdiff` transform are config‑flagged, golden‑tested, and pass an ADF stationarity assertion.
+3. **Meta‑labeling** (§G) — a secondary model deciding whether to *act on* / how to *size* the triple‑barrier primary. *New classifier in `tournament/` consuming the primary's proba + features.* **Done when:** precision/F1 improve OOS vs the primary alone, under CPCV.
+4. **Stat‑arb: cointegration / Ornstein‑Uhlenbeck** (§C) — Johansen/Engle‑Granger spreads + OU half‑life sizing; a market‑neutral second strategy family. *New `tournament` strategy path.* **Done when:** a cointegrated basket's spread strategy clears the gate stack.
+5. **Portfolio layer: HRP/NCO + RMT/Ledoit‑Wolf denoising** (§H,§F) — combine per‑sector/-factor signals into target weights on a denoised covariance. *New `portfolio/` package.* **Done when:** the combined book's DSR ≥ the best single sleeve, with lower drawdown.
+6. **Data‑snooping guards: White's Reality Check / Hansen's SPA** (§J) — multiple‑*strategy* bootstrap tests complementing per‑strategy DSR/PBO. *Extend `evaluation/`.* **Done when:** a noise‑only universe of N strategies is rejected and the suite is golden‑pinned.
+
 ---
 
 ## Definition of done (wholly‑realized system)
