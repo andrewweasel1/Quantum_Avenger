@@ -1,3 +1,10 @@
+from .alpha_eval import (
+    ICReport,
+    alpha_eval_report,
+    evaluate_signals,
+    ic_decay,
+    information_coefficient,
+)
 from .cscv import cscv_partition_indices, cscv_splits, n_cscv_splits
 from .dsr import (
     DSRResult,
@@ -26,12 +33,17 @@ __all__ = [
     "CSCVResult",
     "DSRResult",
     "HaircutResult",
+    "ICReport",
     "PromotionDecision",
     "PromotionRegistry",
     "QuantitativeEvaluator",
     "RegimeVerdict",
     "ThinRegimePolicy",
+    "alpha_eval_report",
     "assess_promotion",
+    "evaluate_signals",
+    "ic_decay",
+    "information_coefficient",
     "backtest_length_is_sufficient",
     "compute_deflated_sharpe_ratio",
     "cscv_partition_indices",

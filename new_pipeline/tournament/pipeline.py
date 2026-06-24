@@ -5,6 +5,7 @@ features -> sector join + friction labels -> per-sector tournament -> Deflated
 Sharpe + HMM promotion. The legacy multi-phase ``main`` flow, rebuilt offline.
 """
 
+import json
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -15,6 +16,7 @@ import polars as pl
 
 from new_pipeline.adapters import FakeMarketDataSource, StaticUniverseProvider
 from new_pipeline.config import get_config
+from new_pipeline.evaluation.alpha_eval import alpha_eval_report
 from new_pipeline.evaluation.dsr import (
     compute_deflated_sharpe_ratio,
     deflated_sharpe_report,
@@ -150,7 +152,24 @@ def run_offline_pipeline(
         feature_cols += factor_feature_names(cfg.features.factor_set)
     results = run_sector_tournament(frame, feature_cols, output_dir)
     promotions = _evaluate_and_promote(frame, results, output_dir, cfg)
-    return {"sectors": list(results), "promotions": promotions}
+    summary = {"sectors": list(results), "promotions": promotions}
+    if cfg.evaluation.alpha_eval_enabled:
+        summary["alpha_eval"] = _write_alpha_eval(frame, feature_cols, cfg, output_dir)
+    return summary
+
+
+def _write_alpha_eval(frame: pl.DataFrame, feature_cols, cfg, output_dir) -> dict:
+    """Universe-wide per-signal IC/ICIR diagnostics -> alpha_eval.json (read-only;
+    never gates promotion). Decay is reported for the cross-sectional factor subset."""
+    factor_cols = factor_feature_names(cfg.features.factor_set) if cfg.features.factor_set else []
+    report = alpha_eval_report(
+        frame, feature_cols, factor_signals=factor_cols,
+        min_names=cfg.evaluation.alpha_eval_min_names,
+    )
+    (Path(output_dir) / "alpha_eval.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
+    return report
 
 
 def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -> dict:

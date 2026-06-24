@@ -114,6 +114,8 @@ evaluation:
   cpcv_path_gate_enabled: true
   cpcv_path_min_fraction: 0.5
   gauntlet_block_size: 10
+  alpha_eval_enabled: true
+  alpha_eval_min_names: 5
 
 mcp:
   transport: "stdio"

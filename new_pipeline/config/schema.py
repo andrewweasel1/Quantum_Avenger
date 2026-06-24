@@ -118,6 +118,10 @@ class EvaluationConfig(BaseModel):
     cpcv_path_gate_enabled: bool = True
     cpcv_path_min_fraction: float = 0.5
     gauntlet_block_size: int = 10  # stationary-bootstrap avg block len for the HMM gauntlet
+    # Per-signal alpha evaluation (offense roadmap P2): universe-wide IC/ICIR
+    # diagnostics written to alpha_eval.json. Read-only — never gates promotion.
+    alpha_eval_enabled: bool = True
+    alpha_eval_min_names: int = 5  # min cross-sectional breadth for a usable IC date
 
 
 class MCPConfig(BaseModel):

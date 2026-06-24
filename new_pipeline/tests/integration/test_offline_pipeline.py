@@ -28,6 +28,9 @@ def test_offline_pipeline_runs(tmp_path, monkeypatch):
     assert summary["sectors"]  # at least one sector produced a candidate
     assert set(summary["promotions"]).issubset(set(summary["sectors"]))
     assert (tmp_path / "promotion_registry.json").exists()
+    # P2 alpha-eval diagnostics are written by default (read-only; never gates).
+    assert (tmp_path / "alpha_eval.json").exists()
+    assert "alpha_eval" in summary
 
 
 def test_offline_pipeline_records_overfitting_diagnostics(tmp_path, monkeypatch):
@@ -87,3 +90,8 @@ def test_offline_pipeline_consumes_cross_sectional_factors(tmp_path, monkeypatch
     for manifest in manifests:
         selected = set(json.loads(manifest.read_text())["features"])
         assert selected <= selectable
+    # P2: universe-wide IC is reported for the factor signals, with horizon decay.
+    assert (tmp_path / "alpha_eval.json").exists()
+    ic = summary["alpha_eval"]["ic"]
+    assert {"xf_reversal_21", "xf_low_vol"} <= set(ic)
+    assert {"xf_reversal_21", "xf_low_vol"} <= set(summary["alpha_eval"]["decay"])
