@@ -73,6 +73,25 @@ def test_build_training_frame_adds_cross_sectional_factors():
         assert frame[column].drop_nulls().len() > 0
 
 
+def test_build_training_frame_adds_extended_features():
+    """P1 build hook: enabling features.extended_features appends populated columns."""
+    from new_pipeline.adapters import FakeMarketDataSource, StaticUniverseProvider
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.features.extended_features = ["vol_estimators", "microstructure"]
+    universe = StaticUniverseProvider()
+    sectors = universe.sectors()
+    symbols = list(sectors)[:4]
+
+    frame = build_training_frame(
+        symbols, sectors, date(2021, 1, 1), date(2021, 12, 31), FakeMarketDataSource(), cfg
+    )
+    for column in ("parkinson_vol", "yang_zhang_vol", "roll_measure", "kyle_lambda"):
+        assert column in frame.columns
+        assert frame[column].drop_nulls().len() > 0
+
+
 def test_offline_pipeline_consumes_cross_sectional_factors(tmp_path, monkeypatch):
     """P0 end-to-end: with factors enabled the tournament runs and the xf_* columns
     are wired into the selectable feature namespace (no leakage of unexpected cols)."""

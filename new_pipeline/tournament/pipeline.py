@@ -34,6 +34,7 @@ from new_pipeline.evaluation.regime_dsr import (
     RegimeVerdict,
     ThinRegimePolicy,
 )
+from new_pipeline.features.extended import add_extended_features, extended_feature_names
 from new_pipeline.features.factors import add_cross_sectional_factors, factor_feature_names
 from new_pipeline.features.labels import add_labels
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov_regime_features
@@ -82,6 +83,12 @@ def build_training_frame(
         for bar in source.history(symbol, start, end)
     ]
     features = compile_features(pl.DataFrame(rows))
+    if cfg.features.extended_features:
+        features = add_extended_features(
+            features, cfg.features.extended_features,
+            fracdiff_d=cfg.features.fracdiff_d, fracdiff_threshold=cfg.features.fracdiff_threshold,
+            vol_window=cfg.features.vol_window, micro_window=cfg.features.micro_window,
+        )
     labeled = add_labels(
         features,
         cfg.features.label_horizon,
@@ -157,6 +164,8 @@ def run_offline_pipeline(
         feature_cols += list(MARKOV_FEATURE_NAMES)
     if cfg.features.factor_set:
         feature_cols += factor_feature_names(cfg.features.factor_set)
+    if cfg.features.extended_features:
+        feature_cols += extended_feature_names(cfg.features.extended_features)
     results = run_sector_tournament(frame, feature_cols, output_dir)
     promotions = _evaluate_and_promote(frame, results, output_dir, cfg)
     summary = {"sectors": list(results), "promotions": promotions}

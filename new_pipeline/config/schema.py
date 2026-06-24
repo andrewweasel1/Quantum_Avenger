@@ -28,6 +28,13 @@ class FeatureConfig(BaseModel):
     # bit-stable); names from features.factors.SUPPORTED_FACTORS.
     factor_set: list[str] = Field(default_factory=list)
     factor_sector_neutral: bool = True  # sector-demean before cross-sectional z-score
+    # Extended per-ticker feature families (offense roadmap P1). Empty => off.
+    # Available: fracdiff, vol_estimators, microstructure.
+    extended_features: list[str] = Field(default_factory=list)
+    fracdiff_d: float = 0.4  # fractional-differencing order
+    fracdiff_threshold: float = 1e-3  # weight-truncation threshold (sets the window width)
+    vol_window: int = 20  # range vol-estimator rolling window
+    micro_window: int = 20  # microstructure rolling window
 
 
 class ModelConfig(BaseModel):
