@@ -1,5 +1,7 @@
 # Phase 4: Statistical Evaluation & Model Promotion - Detailed Specification
 
+> **Implementation status: ✅ DONE (substantially extended).** Implemented in `new_pipeline/evaluation/`. **Beyond the DSR‑only spec**, the promotion gate stack now also includes N_eff/PSR/MinTRL, **PBO via CSCV**, **Harvey–Liu haircut Sharpe**, **MinBTL**, **per‑regime DSR**, and the **CPCV path‑distribution DSR gate** (a fraction of the φ backtest paths must individually clear DSR). The HMM synthetic gauntlet now resamples features with a **stationary block bootstrap** (preserving cross‑feature *and* temporal autocorrelation), replacing the original IID whole‑row bootstrap. See `quantitative_math.md` §7–§10. *Original build spec; current state in `ARCHITECTURE_ROADMAP.md`.*
+
 **Duration**: 2 weeks  
 **Target Date**: Complete by mid-July (after Phase 3)  
 **Success Criteria**: DSR computation validated; HMM synthetic tests passing; promotion gates working; 85%+ test coverage

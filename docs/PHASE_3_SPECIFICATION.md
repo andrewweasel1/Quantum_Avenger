@@ -1,5 +1,7 @@
 # Phase 3: Tournament Backtesting & Model Selection - Detailed Specification
 
+> **Implementation status: ✅ DONE (substantially evolved past spec).** CPCV, the XGBoost trainer, grid search and the per‑sector director are implemented in `new_pipeline/tournament/`. **The hygiene grew well past the fixed‑purge spec:** span‑based purge by the label event‑span `t1` (getTrainTimes), **ticker/block‑aware** span clamping, fractional embargo, and reconstruction of the **φ = C(N−1,k−1) combinatorial backtest paths**; plus **causal feature selection** (Granger screen + purged‑CPCV MDA, default) and **sample‑uniqueness weighting** — none of which were in the original spec. See `quantitative_math.md` §2–§5. *Original build spec; current state in `ARCHITECTURE_ROADMAP.md`.*
+
 **Duration**: 2 weeks  
 **Target Date**: Complete by end of June (after Phase 2)  
 **Success Criteria**: CPCV backtests passing; XGBoost models trained; 85%+ out-of-sample test coverage; model promotion logic validated

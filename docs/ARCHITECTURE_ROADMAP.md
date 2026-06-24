@@ -8,6 +8,8 @@ Quantum Avenger is a hybrid **LLM + ML quantitative trading system**: unstructur
 
 - **Test posture:** ~115 modules under `new_pipeline/`; **333 tests** (330 pass, 3 skipped on optional `torch`/`spaCy`/`alpaca` + 1 GPU), **~93 % branch coverage**, `ruff` clean (E/F/I/W/B/UP), reproducible under a single seed.
 
+**Document map (source of truth).** This file is the current‑state architecture. Its companions: **`quantitative_math.md`** — the math/rigor reference (labels, CPCV, weighting, causal selection, the DSR/PBO/haircut/MinBTL/per‑regime/path‑DSR stack); **`IMPLEMENTATION_STATUS.md`** — the maturity matrix + detailed remaining work + definition of done. `ROADMAP_2026.md` (module/API + diagrams) and `FULL_SYSTEM_INTEGRATION_GUIDE.md` (operational contracts) are supporting references; `PHASE_1..7_SPECIFICATION.md` are the original build specs (historical — each carries a current status banner).
+
 **Two standing decisions (unchanged):**
 - **Compute:** **target a CUDA GPU directly** as the production runtime (`@cuda.jit`, CuPy, XGBoost `device='cuda'`). CPU fallback is one branch away and is the default in this CPU‑only sandbox; GPU paths are written but exercised on a real GPU box / skipped in CI.
 - **Integrations:** the dev/sandbox is **fully offline** — every external dependency (LLM, broker, market data/news, universe, sentiment, anonymizer) sits behind an **adapter interface + deterministic fake/fixture**, so the whole system is unit‑testable with no network. Live clients are wired in behind the identical interface.

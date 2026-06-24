@@ -1,5 +1,7 @@
 # Phase 5: Live Execution & LangGraph Orchestration - Detailed Specification
 
+> **Implementation status: ◐ OFFLINE‑COMPLETE, live deferred.** Implemented & offline‑testable in `new_pipeline/execution/`: the LangGraph Verdict→Grader→Risk‑Veto(Shield)→Execute graph, the deterministic FastMCP tools, the entity anonymizer (offline **gazetteer** `entity_anonymizer.py` + live **spaCy** `anonymizer_spacy.py`), the verdict/grader, and the append‑only veto/trade ledgers. **Genuinely remaining:** (1) wire a **live Ollama `LLMClient`** — today the verdict path uses `FakeLLMClient`; (2) the RAG engine uses a **hashing‑bag embedder placeholder** and `retrieve()` is **not yet wired into the graph**, so the agentic **evidence_for / evidence_against / missing_evidence** loop is unbuilt. See IMPLEMENTATION_STATUS §1–§2. *Original build spec; current state in `ARCHITECTURE_ROADMAP.md`.*
+
 **Duration**: 2.5 weeks  
 **Target Date**: Complete by early August (after Phase 4)  
 **Success Criteria**: FastMCP server running; LangGraph state machine working; end-to-end verdict flow; LLM + quant fusion; 85%+ test coverage
