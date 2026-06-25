@@ -252,7 +252,8 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
         if cfg.tournament.enable_meta_labeling
         else None
     )
-    return sector, _persist(output, sector, booster, selected, search, meta)
+    sample_dates = clean["date"] if "date" in clean.columns else None
+    return sector, _persist(output, sector, booster, selected, search, meta, sample_dates)
 
 
 def _train_candidate(matrix, labels, cfg, t1_offset=None, block_ids=None):
@@ -276,7 +277,9 @@ def _train_candidate(matrix, labels, cfg, t1_offset=None, block_ids=None):
     )
 
 
-def _persist(output: Path, sector: str, booster, selected, search, meta=None) -> dict:
+def _persist(
+    output: Path, sector: str, booster, selected, search, meta=None, sample_dates=None
+) -> dict:
     slug = _slug(sector)
     candidate_path = output / f"{slug}_candidate.json"
     features_path = output / f"{slug}_candidate_features.json"
@@ -299,6 +302,8 @@ def _persist(output: Path, sector: str, booster, selected, search, meta=None) ->
     pl.DataFrame(
         matrix.T, schema=[f"trial_{i}" for i in range(matrix.shape[0])]
     ).write_parquet(returns_path)
+    if sample_dates is not None:  # per-sample dates -> exact cross-sector book (B3)
+        pl.DataFrame({"date": sample_dates}).write_parquet(output / f"{slug}_sample_dates.parquet")
     if search.paths is not None and search.paths.size:
         paths = search.paths
         pl.DataFrame(

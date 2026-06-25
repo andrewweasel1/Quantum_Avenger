@@ -40,7 +40,7 @@ from new_pipeline.features.factors import add_cross_sectional_factors, factor_fe
 from new_pipeline.features.labels import add_labels
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov_regime_features
 from new_pipeline.features.polars_engine import compile_features
-from new_pipeline.portfolio.combination import combine_returns, portfolio_weights
+from new_pipeline.portfolio.combination import combine_returns
 from new_pipeline.tournament.director import run_sector_tournament
 from new_pipeline.tournament.simulator import sharpe_ratio
 from new_pipeline.tournament.stat_arb import engle_granger, mean_reversion_returns
@@ -275,40 +275,53 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
 
 
 def _combine_book(results: dict, output_dir, cfg) -> dict | None:
-    """Cross-sector **risk allocation** over the per-sector champions -> portfolio.json.
+    """Exact cross-sector book over the per-sector champions -> portfolio.json.
 
-    The champion return streams are per-sample (ticker-stacked), NOT a shared calendar,
-    so a cross-sleeve covariance / combined-series Sharpe would be meaningless. We
-    therefore use **inverse-variance** weighting (depends only on each sleeve's own
-    variance — well-defined regardless of alignment) and report each champion's own
-    Sharpe. This is a defensible risk allocation, not a portfolio backtest; an exact
-    date-aligned HRP book lands once per-sector sleeves are date-indexed. Returns None
-    when fewer than two combinable sleeves."""
-    streams = {}
+    Each champion's per-sample returns are aggregated to a **daily sector return**
+    (mean across the sector's tickers per date), the sectors are date-aligned (outer
+    join, missing -> 0), and combined on the real cross-sector covariance via the
+    portfolio layer (HRP by default). Returns None when fewer than two sectors have
+    the per-sample dates needed (or the aligned panel is too short)."""
+    daily = {}
     for sector, result in results.items():
         trials = result["trial_sharpes"]
         if not trials:
             continue
-        matrix = pl.read_parquet(
-            result["candidate_path"].replace("_candidate.json", "_returns_matrix.parquet")
+        base = result["candidate_path"].replace("_candidate.json", "")
+        dates_path = Path(base + "_sample_dates.parquet")
+        if not dates_path.exists():
+            continue
+        champion = pl.read_parquet(base + "_returns_matrix.parquet")[
+            :, int(np.argmax(trials))
+        ].to_numpy()
+        dates = pl.read_parquet(dates_path)["date"]
+        daily[sector] = (
+            pl.DataFrame({"date": dates, sector: champion})
+            .group_by("date")
+            .agg(pl.col(sector).mean())  # equal-weight sector daily return
+            .sort("date")
         )
-        streams[sector] = matrix[:, int(np.argmax(trials))].to_numpy()
-    if len(streams) < 2:
+    if len(daily) < 2:
         return None
-    min_len = min(len(stream) for stream in streams.values())
-    if min_len < cfg.portfolio.min_obs:
+    sectors = list(daily)
+    book_df = daily[sectors[0]]
+    for sector in sectors[1:]:
+        book_df = book_df.join(daily[sector], on="date", how="full", coalesce=True)
+    book_df = book_df.sort("date").fill_null(0.0)
+    if book_df.height < cfg.portfolio.min_obs:
         return None
-    sectors = list(streams)
-    panel = np.column_stack([streams[sector][-min_len:] for sector in sectors])
-    weights = portfolio_weights(panel, method="inverse_variance", cov_method="sample")
+    panel = book_df.select(sectors).to_numpy()
+    weights, book = combine_returns(
+        panel, cfg.portfolio.method, cfg.portfolio.cov_method, cfg.portfolio.min_obs
+    )
     report = {
         "sectors": sectors,
         "weights": {s: float(w) for s, w in zip(sectors, weights, strict=True)},
-        "method": "inverse_variance",
-        "sector_sharpe": {s: float(sharpe_ratio(streams[s])) for s in sectors},
-        "n_obs": int(min_len),
-        "note": "risk allocation only — champions are not calendar-aligned, "
-        "so no combined-book Sharpe is reported",
+        "method": cfg.portfolio.method,
+        "cov_method": cfg.portfolio.cov_method,
+        "book_sharpe": float(sharpe_ratio(book)),
+        "sector_sharpe": {s: float(sharpe_ratio(book_df[s].to_numpy())) for s in sectors},
+        "n_obs": int(book_df.height),
     }
     (Path(output_dir) / "portfolio.json").write_text(
         json.dumps(report, indent=2), encoding="utf-8"

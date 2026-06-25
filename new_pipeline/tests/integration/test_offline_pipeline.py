@@ -121,8 +121,8 @@ def test_offline_pipeline_consumes_cross_sectional_factors(tmp_path, monkeypatch
     book = summary["portfolio"]
     assert set(book["weights"]) <= set(summary["sectors"])
     assert sum(book["weights"].values()) == pytest.approx(1.0)
-    assert book["method"] == "inverse_variance"  # champions aren't calendar-aligned
-    assert set(book["sector_sharpe"]) == set(book["weights"])
+    assert book["method"] == "hrp"  # exact: champions aggregated to date-aligned sector returns
+    assert "book_sharpe" in book and set(book["sector_sharpe"]) == set(book["weights"])
 
 
 def test_offline_pipeline_records_reality_check_when_enabled(tmp_path, monkeypatch):
