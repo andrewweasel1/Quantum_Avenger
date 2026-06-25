@@ -233,7 +233,9 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
     selected_matrix = clean.select(selected).to_numpy()
 
     search = run_grid_search(
-        selected_matrix, labels, prices, t1_offset=t1_offset, block_ids=block_ids
+        selected_matrix, labels, prices,
+        confidence_threshold=cfg.execution.confidence_threshold,
+        t1_offset=t1_offset, block_ids=block_ids,
     )
     booster = _train_candidate(selected_matrix, labels, cfg, t1_offset, block_ids)
     meta = (
