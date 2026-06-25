@@ -35,6 +35,7 @@ class FeatureConfig(BaseModel):
     fracdiff_threshold: float = 1e-3  # weight-truncation threshold (sets the window width)
     vol_window: int = 20  # range vol-estimator rolling window
     micro_window: int = 20  # microstructure rolling window
+    garch_fit_window: int = 252  # in-sample window for the GARCH(1,1) MLE fit
 
 
 class ModelConfig(BaseModel):

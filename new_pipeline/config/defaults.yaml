@@ -30,6 +30,7 @@ features:
   fracdiff_threshold: 0.001
   vol_window: 20
   micro_window: 20
+  garch_fit_window: 252
 
 models:
   prod_models_dir: "./models/prod"

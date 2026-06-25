@@ -92,6 +92,7 @@ def build_training_frame(
             features, cfg.features.extended_features,
             fracdiff_d=cfg.features.fracdiff_d, fracdiff_threshold=cfg.features.fracdiff_threshold,
             vol_window=cfg.features.vol_window, micro_window=cfg.features.micro_window,
+            garch_fit_window=cfg.features.garch_fit_window,
         )
     labeled = add_labels(
         features,
