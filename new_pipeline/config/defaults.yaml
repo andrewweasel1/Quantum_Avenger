@@ -171,6 +171,11 @@ news:
     - "10-K"
   edgar_identity: ""
 
+# Point-in-time fundamentals for value/quality factors. Empty fixture_path -> fake.
+fundamentals:
+  fixture_path: ""
+  edgar_identity: ""
+
 dashboard:
   veto_ledger_path: "./data/ledger/veto_ledger.parquet"
   trade_log_path: "./data/ledger/trade_log.parquet"

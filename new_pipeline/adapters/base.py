@@ -59,6 +59,18 @@ class Bar:
 
 
 @dataclass(frozen=True)
+class FundamentalSnapshot:
+    """Point-in-time fundamentals: the values knowable on/after ``as_of`` (the filing
+    date), used for value/quality cross-sectional factors. Per-share so they divide
+    cleanly into price."""
+
+    as_of: date
+    book_value_per_share: float
+    earnings_per_share: float
+    return_on_equity: float
+
+
+@dataclass(frozen=True)
 class UniverseMember:
     ticker: str
     gics_sector: str
@@ -121,6 +133,17 @@ class NewsSource(ABC):
         if as_of is not None:
             items = [item for item in items if item.timestamp <= as_of]
         return items
+
+
+class FundamentalsSource(ABC):
+    """Point-in-time fundamentals feed for value/quality factors."""
+
+    @abstractmethod
+    def history(self, symbol: str, start: date, end: date) -> list[FundamentalSnapshot]:
+        """Fundamental snapshots for ``symbol`` knowable within ``[start, end]``,
+        ascending by ``as_of`` (each carries the filing date so a consumer can join
+        point-in-time)."""
+        raise NotImplementedError
 
 
 class UniverseProvider(ABC):

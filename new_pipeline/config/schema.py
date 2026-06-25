@@ -188,6 +188,13 @@ class NewsConfig(BaseModel):
     edgar_identity: str = ""  # SEC requires a "Name email" User-Agent identity
 
 
+class FundamentalsConfig(BaseModel):
+    """Point-in-time fundamentals for value/quality cross-sectional factors."""
+
+    fixture_path: str = ""  # offline StaticFundamentalsSource; "" -> deterministic fake
+    edgar_identity: str = ""  # SEC "Name email" User-Agent for the live EDGAR source
+
+
 class DashboardConfig(BaseModel):
     veto_ledger_path: str = "./data/ledger/veto_ledger.parquet"
     trade_log_path: str = "./data/ledger/trade_log.parquet"
@@ -231,5 +238,6 @@ class AppConfig(BaseModel):
     stat_arb: StatArbConfig = Field(default_factory=StatArbConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
+    fundamentals: FundamentalsConfig = Field(default_factory=FundamentalsConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     alpaca: AlpacaConfig = Field(default_factory=AlpacaConfig)

@@ -19,6 +19,7 @@ from new_pipeline.adapters.base import (
 )
 from new_pipeline.adapters.fakes import (
     FakeBroker,
+    FakeFundamentalsSource,
     FakeLLMClient,
     FakeMarketDataSource,
     FakeNewsSource,
@@ -113,6 +114,24 @@ def _build_fusion(cfg, universe):  # pragma: no cover - heavy ML deps (torch/tra
         FinBERTSentimentEngine(model_name=cfg.fusion.sentiment_model),
         SpacyNewsAnonymizer(universe.aliases(), spacy_model=cfg.fusion.spacy_model),
     )
+
+
+def build_fundamentals_source(cfg, universe=None):
+    """Point-in-time fundamentals for the value/quality factors: a deterministic fake
+    (or a checked-in fixture when ``fundamentals.fixture_path`` is set) offline, the
+    live EDGAR source otherwise."""
+    mode = (cfg.system.run_mode or "offline").lower()
+    if mode in OFFLINE_MODES:
+        if cfg.fundamentals.fixture_path:
+            from new_pipeline.adapters.fundamentals_static import StaticFundamentalsSource
+
+            return StaticFundamentalsSource(cfg.fundamentals.fixture_path)
+        return FakeFundamentalsSource()
+    from new_pipeline.adapters.fundamentals_edgar import (  # pragma: no cover - egress
+        EdgarFundamentalsSource,
+    )
+
+    return EdgarFundamentalsSource(identity=cfg.fundamentals.edgar_identity)  # pragma: no cover
 
 
 def build_news_source(cfg, universe):

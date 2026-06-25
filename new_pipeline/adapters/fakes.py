@@ -10,6 +10,8 @@ from datetime import date, datetime, timedelta
 
 from new_pipeline.adapters.base import (
     Bar,
+    FundamentalSnapshot,
+    FundamentalsSource,
     LLMClient,
     MarketDataSource,
     NewsItem,
@@ -113,6 +115,36 @@ class FakeSentimentEngine(SentimentEngine):
                 )
             )
         return scores
+
+
+def _quarter_dates(start_year: int, end_year: int) -> list[date]:
+    return [date(y, m, 1) for y in range(start_year, end_year + 1) for m in (1, 4, 7, 10)]
+
+
+class FakeFundamentalsSource(FundamentalsSource):
+    """Deterministic synthetic fundamentals: quarterly snapshots whose values are a
+    pure function of the symbol and quarter (no RNG)."""
+
+    def history(self, symbol: str, start: date, end: date) -> list[FundamentalSnapshot]:
+        if end < start:
+            return []
+        seed = sum(ord(char) for char in symbol)
+        bvps0 = 10.0 + (seed % 40)  # book value per share, 10..50
+        eps0 = 1.0 + (seed % 8)  # earnings per share, 1..9
+        roe0 = 0.05 + (seed % 25) / 100.0  # return on equity, 0.05..0.30
+        snapshots: list[FundamentalSnapshot] = []
+        for i, as_of in enumerate(_quarter_dates(start.year - 1, end.year)):
+            if as_of > end:
+                break
+            snapshots.append(
+                FundamentalSnapshot(
+                    as_of=as_of,
+                    book_value_per_share=round(bvps0 * (1.0 + 0.01 * i), 4),
+                    earnings_per_share=round(eps0 * (1.0 + 0.005 * i), 4),
+                    return_on_equity=round(roe0, 4),
+                )
+            )
+        return snapshots
 
 
 class FakeBroker(BrokerAdapter):
