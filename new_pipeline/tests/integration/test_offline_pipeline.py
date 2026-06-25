@@ -92,6 +92,27 @@ def test_build_training_frame_adds_extended_features():
         assert frame[column].drop_nulls().len() > 0
 
 
+def test_build_training_frame_adds_value_quality_factors():
+    """Phase C: a fundamentals source + value/quality factors -> populated xf_* columns."""
+    from new_pipeline.adapters import FakeMarketDataSource, StaticUniverseProvider
+    from new_pipeline.adapters.fakes import FakeFundamentalsSource
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.features.factor_set = ["book_to_market", "roe"]
+    universe = StaticUniverseProvider()
+    sectors = universe.sectors()
+    symbols = list(sectors)[:4]
+
+    frame = build_training_frame(
+        symbols, sectors, date(2021, 1, 1), date(2021, 12, 31), FakeMarketDataSource(), cfg,
+        fundamentals_source=FakeFundamentalsSource(),
+    )
+    for column in ("xf_book_to_market", "xf_roe"):
+        assert column in frame.columns
+        assert frame[column].drop_nulls().len() > 0
+
+
 def test_offline_pipeline_consumes_cross_sectional_factors(tmp_path, monkeypatch):
     """P0 end-to-end: with factors enabled the tournament runs and the xf_* columns
     are wired into the selectable feature namespace (no leakage of unexpected cols)."""

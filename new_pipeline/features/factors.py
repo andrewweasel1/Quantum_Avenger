@@ -27,7 +27,12 @@ MOMENTUM_LOOKBACK = 252  # 12 months
 MOMENTUM_SKIP = 21  # skip the most recent month (12-1 momentum)
 REVERSAL_WINDOW = 21  # short-term (one-month) reversal
 
-SUPPORTED_FACTORS = ("mom_12_1", "reversal_21", "low_vol", "seasonality")
+SUPPORTED_FACTORS = (
+    "mom_12_1", "reversal_21", "low_vol", "seasonality",  # price-derived
+    "book_to_market", "earnings_yield", "roe",  # fundamental (value / quality)
+)
+# Factors needing point-in-time fundamentals joined onto the frame first.
+FUNDAMENTAL_FACTORS = frozenset({"book_to_market", "earnings_yield", "roe"})
 
 
 def factor_feature_names(factor_set) -> list[str]:
@@ -53,6 +58,15 @@ def _raw_signal(name: str) -> pl.Expr:
         return -pl.col("volatility")
     if name == "seasonality":
         return _seasonality_raw()
+    if name == "book_to_market":
+        # value: high book value per dollar of price ⇒ cheap.
+        return pl.col("book_value_per_share") / close
+    if name == "earnings_yield":
+        # value: earnings per dollar of price.
+        return pl.col("earnings_per_share") / close
+    if name == "roe":
+        # quality: return on equity (higher ⇒ more profitable).
+        return pl.col("return_on_equity")
     raise SchemaValidationError(f"Unknown cross-sectional factor: {name!r}")
 
 
@@ -150,6 +164,18 @@ def _factor_metadata() -> dict[str, FeatureMetadata]:
             "Cross-sectional same-month seasonality (z-scored).",
             "price",
             "annual",
+        ),
+        "book_to_market": FeatureMetadata(
+            "xf_book_to_market", "Cross-sectional book-to-market value (z-scored).",
+            "fundamental", "quarterly",
+        ),
+        "earnings_yield": FeatureMetadata(
+            "xf_earnings_yield", "Cross-sectional earnings yield (z-scored).",
+            "fundamental", "quarterly",
+        ),
+        "roe": FeatureMetadata(
+            "xf_roe", "Cross-sectional return-on-equity quality (z-scored).",
+            "fundamental", "quarterly",
         ),
     }
 

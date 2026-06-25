@@ -44,3 +44,33 @@ def test_cross_sectional_factor_golden():
     aaa = out.filter(pl.col("ticker") == "AAA").sort("date")
     assert aaa["xf_reversal_21"][27] == pytest.approx(1.1507534709728335, rel=1e-9)
     assert aaa["xf_low_vol"][27] == pytest.approx(-0.09123467206638575, rel=1e-9)
+
+
+def _fundamental_fixture():
+    from new_pipeline.adapters.fakes import FakeFundamentalsSource
+    from new_pipeline.data.fundamentals import attach_fundamentals
+
+    tickers = ["AAA", "BBB", "CCC", "DDD"]
+    n = 60
+    rng = np.random.default_rng(3)
+    rows = []
+    for ticker in tickers:
+        close = 100.0 + np.cumsum(rng.normal(0, 1.0, n))
+        for i in range(n):
+            rows.append(
+                {"date": date(2021, 1, 4) + timedelta(days=i), "ticker": ticker, "close": close[i]}
+            )
+    frame = pl.DataFrame(rows).join(
+        pl.DataFrame({"ticker": tickers, "sector": ["Tech", "Tech", "Fin", "Fin"]}),
+        on="ticker", how="left",
+    )
+    return attach_fundamentals(frame, FakeFundamentalsSource())
+
+
+def test_value_quality_factor_golden():
+    out = add_cross_sectional_factors(
+        _fundamental_fixture(), ["book_to_market", "roe"], sector_neutral=False
+    )
+    aaa = out.filter(pl.col("ticker") == "AAA").sort("date")
+    assert aaa["xf_book_to_market"][40] == pytest.approx(0.7333665031188208, rel=1e-9)
+    assert aaa["xf_roe"][40] == pytest.approx(0.7203602702251969, rel=1e-9)

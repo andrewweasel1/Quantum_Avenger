@@ -54,3 +54,21 @@ def test_static_fundamentals_fixture():
 def test_build_fundamentals_source_offline_is_fake():
     reload_config()
     assert isinstance(build_fundamentals_source(get_config()), FakeFundamentalsSource)
+
+
+def test_edgar_fundamentals_maps_injected_records():
+    from new_pipeline.adapters.fundamentals_edgar import EdgarFundamentalsSource
+
+    records = [
+        {"as_of": date(2021, 6, 30), "book_value_per_share": 4.2,
+         "earnings_per_share": 1.6, "return_on_equity": 0.31},
+        {"as_of": date(2021, 3, 31), "book_value_per_share": 4.0,
+         "earnings_per_share": 1.5, "return_on_equity": 0.30},
+        {"as_of": "2022-06-30", "book_value_per_share": 9.9,
+         "earnings_per_share": 9.9, "return_on_equity": 0.9},  # after `end` -> dropped
+    ]
+    source = EdgarFundamentalsSource(fetch=lambda symbol, start, end: records)
+    snaps = source.history("X", date(2021, 1, 1), date(2021, 12, 31))
+    assert len(snaps) == 2  # the 2022 record is excluded
+    assert snaps[0].as_of < snaps[1].as_of  # sorted ascending
+    assert snaps[0].earnings_per_share == 1.5

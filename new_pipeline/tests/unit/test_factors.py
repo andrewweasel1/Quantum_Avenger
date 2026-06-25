@@ -130,6 +130,38 @@ def test_momentum_raw_matches_numpy():
     assert np.isnan(raw[250])  # null before 252 days of history exist (12-1 warmup)
 
 
+def _fundamental_frame():
+    return pl.DataFrame(
+        {
+            "date": [date(2021, 6, 1)] * 3,
+            "ticker": ["A", "B", "C"],
+            "close": [100.0, 50.0, 200.0],
+            "book_value_per_share": [10.0, 10.0, 10.0],
+            "earnings_per_share": [5.0, 5.0, 5.0],
+            "return_on_equity": [0.10, 0.20, 0.30],
+            "sector": ["S"] * 3,
+        }
+    )
+
+
+def test_value_quality_raw_signals():
+    frame = _fundamental_frame()
+    bm = frame.with_columns(_raw_signal("book_to_market").alias("r")).sort("ticker")["r"].to_numpy()
+    assert bm == pytest.approx([0.10, 0.20, 0.05])  # bvps/close
+    ey = frame.with_columns(_raw_signal("earnings_yield").alias("r")).sort("ticker")["r"].to_numpy()
+    assert ey == pytest.approx([0.05, 0.10, 0.025])  # eps/close
+    roe = frame.with_columns(_raw_signal("roe").alias("r")).sort("ticker")["r"].to_numpy()
+    assert roe == pytest.approx([0.10, 0.20, 0.30])  # return_on_equity directly
+
+
+def test_value_factor_cross_sectional_zscore_ranks_cheap_higher():
+    out = add_cross_sectional_factors(
+        _fundamental_frame(), ["book_to_market"], sector_neutral=False
+    ).sort("ticker")
+    z = out["xf_book_to_market"].to_numpy()
+    assert z[1] > z[0] > z[2]  # B (B/M .20) > A (.10) > C (.05)
+
+
 def test_low_vol_raw_is_negative_volatility():
     frame = _single_date_frame([0.1, 0.2, 0.3])
     raw = frame.with_columns(_raw_signal("low_vol").alias("r")).sort("ticker")["r"].to_numpy()

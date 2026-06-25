@@ -17,6 +17,7 @@ import polars as pl
 
 from new_pipeline.adapters import FakeMarketDataSource, StaticUniverseProvider
 from new_pipeline.config import get_config
+from new_pipeline.data.fundamentals import attach_fundamentals
 from new_pipeline.evaluation.alpha_eval import alpha_eval_report
 from new_pipeline.evaluation.dsr import (
     compute_deflated_sharpe_ratio,
@@ -36,7 +37,11 @@ from new_pipeline.evaluation.regime_dsr import (
     ThinRegimePolicy,
 )
 from new_pipeline.features.extended import add_extended_features, extended_feature_names
-from new_pipeline.features.factors import add_cross_sectional_factors, factor_feature_names
+from new_pipeline.features.factors import (
+    FUNDAMENTAL_FACTORS,
+    add_cross_sectional_factors,
+    factor_feature_names,
+)
 from new_pipeline.features.labels import add_labels
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov_regime_features
 from new_pipeline.features.polars_engine import compile_features
@@ -62,6 +67,7 @@ def build_training_frame(
     news_source=None,
     sentiment_engine=None,
     anonymizer=None,
+    fundamentals_source=None,
 ) -> pl.DataFrame:
     """Synthetic OHLCV -> features -> sector join + target_label, one frame.
 
@@ -103,6 +109,10 @@ def build_training_frame(
     )
     joined = labeled.join(sector_df, on="ticker", how="left")
     if cfg.features.factor_set:
+        if fundamentals_source is not None and any(
+            factor in FUNDAMENTAL_FACTORS for factor in cfg.features.factor_set
+        ):
+            joined = attach_fundamentals(joined, fundamentals_source)  # point-in-time
         joined = add_cross_sectional_factors(
             joined, cfg.features.factor_set, sector_neutral=cfg.features.factor_sector_neutral
         )
@@ -152,9 +162,15 @@ def run_offline_pipeline(
         news_source = build_news_source(cfg, universe)  # PIT fixture offline
         sentiment_engine, anonymizer = bundle.sentiment_engine, bundle.anonymizer
         source = source or bundle.market_data
+    fundamentals_source = None
+    if cfg.features.factor_set and any(f in FUNDAMENTAL_FACTORS for f in cfg.features.factor_set):
+        from new_pipeline.adapters.factory import build_fundamentals_source
+
+        fundamentals_source = build_fundamentals_source(cfg, universe)
     frame = build_training_frame(
         symbols, sectors, start, end, source, cfg,
         news_source=news_source, sentiment_engine=sentiment_engine, anonymizer=anonymizer,
+        fundamentals_source=fundamentals_source,
     )
     feature_cols = list(FEATURE_COLS)
     if cfg.fusion.enabled:
