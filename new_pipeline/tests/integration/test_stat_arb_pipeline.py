@@ -42,18 +42,23 @@ def _cointegrated_frame(n=200) -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
-def test_run_stat_arb_finds_pairs_and_combines_book(tmp_path):
+def test_run_stat_arb_validates_and_books(tmp_path):
     reload_config()
     cfg = get_config()
     cfg.stat_arb.min_obs = 50
+    cfg.evaluation.reality_check_bootstrap = 100  # keep the test fast
+    cfg.evaluation.dsr_promotion_threshold = 0.0  # accept any non-negative DSR so the book builds
 
     report = _run_stat_arb(_cointegrated_frame(), tmp_path, cfg)
 
     assert report is not None
-    assert report["n_pairs"] >= 2  # one cointegrated pair per sector
+    assert report["n_pairs"] >= 2 and report["n_candidates"] >= 2
     found = {frozenset((p["y"], p["x"])) for p in report["pairs"]}
     assert frozenset(("TY", "TX")) in found and frozenset(("FY", "FX")) in found
-    assert report["n_sleeves"] >= 2 and "book_sharpe" in report  # date-aligned -> exact book
+    for pair in report["pairs"]:  # every sleeve carries its validation
+        assert "dsr" in pair and isinstance(pair["validated"], bool)
+    assert 0.0 < report["reality_check_pvalue"] <= 1.0  # family multiple-testing guard
+    assert report["n_validated"] >= 2 and "book_sharpe" in report  # validated -> exact book
     assert (tmp_path / "stat_arb.json").exists()
 
 

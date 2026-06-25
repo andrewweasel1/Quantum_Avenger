@@ -203,7 +203,8 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
         if ticker in available:
             sector_tickers.setdefault(sector, []).append(ticker)
 
-    pairs_report, sleeves = [], []
+    n_candidates = 0
+    pairs_report, sleeves, sleeve_returns = [], [], []
     for sector, tickers in sector_tickers.items():
         for y_name, x_name in itertools.combinations(tickers, 2):
             aligned = panel.select(["date", y_name, x_name]).drop_nulls()  # per-pair overlap
@@ -211,6 +212,7 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
             oos_len = aligned.height - split
             if split < cfg.stat_arb.min_obs or oos_len < cfg.stat_arb.zscore_window + 5:
                 continue  # need enough to fit in-sample AND to trade out-of-sample
+            n_candidates += 1  # a pair actually tested for cointegration (the search space)
             y = aligned[y_name].to_numpy()
             x = aligned[x_name].to_numpy()
             # Select the pair + fit the hedge ratio IN-SAMPLE only (no look-ahead),
@@ -229,6 +231,7 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
                     pl.Series(f"{y_name}__{x_name}", oos_returns)
                 )
             )
+            sleeve_returns.append(oos_returns)
             pairs_report.append({
                 "y": y_name, "x": x_name, "sector": sector,
                 "hedge_ratio": result.hedge_ratio, "adf_tstat": result.adf_tstat,
@@ -236,17 +239,37 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
             })
     if not pairs_report:
         return None
-    report = {"pairs": pairs_report, "n_pairs": len(pairs_report)}
-    if len(sleeves) >= 2:  # date-align the OOS sleeves, then combine into one book
-        book_df = sleeves[0]
-        for sleeve in sleeves[1:]:
-            book_df = book_df.join(sleeve, on="date", how="full", coalesce=True)
-        panel_returns = book_df.sort("date").drop("date").fill_null(0.0).to_numpy()
+    # Validate each sleeve: Deflated Sharpe of its OOS returns, deflated by the number
+    # of pairs *searched* (multiple-testing). Only validated sleeves feed the book.
+    for pair, returns in zip(pairs_report, sleeve_returns, strict=True):
+        dsr = deflated_sharpe_report(returns, max(n_candidates, 1)).dsr
+        pair["dsr"] = float(dsr)
+        pair["validated"] = bool(dsr >= cfg.evaluation.dsr_promotion_threshold)
+    report = {"pairs": pairs_report, "n_pairs": len(pairs_report), "n_candidates": n_candidates}
+
+    # Date-align every sleeve onto one calendar (missing -> 0) for the family-level
+    # reality check and the validated-sleeve book.
+    book_df = sleeves[0]
+    for sleeve in sleeves[1:]:
+        book_df = book_df.join(sleeve, on="date", how="full", coalesce=True)
+    book_df = book_df.sort("date").fill_null(0.0)
+    panel_returns = book_df.select([f"{p['y']}__{p['x']}" for p in pairs_report]).to_numpy()
+    # White's Reality Check over the searched pair sleeves (multiple-strategy guard).
+    report["reality_check_pvalue"] = float(
+        whites_reality_check(
+            panel_returns,
+            cfg.evaluation.reality_check_bootstrap,
+            cfg.evaluation.reality_check_block,
+        )
+    )
+    validated = [i for i, pair in enumerate(pairs_report) if pair["validated"]]
+    report["n_validated"] = len(validated)
+    if len(validated) >= 2:  # exact date-aligned HRP book of the validated sleeves
         _, book = combine_returns(
-            panel_returns, cfg.portfolio.method, cfg.portfolio.cov_method, cfg.portfolio.min_obs
+            panel_returns[:, validated],
+            cfg.portfolio.method, cfg.portfolio.cov_method, cfg.portfolio.min_obs,
         )
         report["book_sharpe"] = float(sharpe_ratio(book))
-        report["n_sleeves"] = len(sleeves)
     (Path(output_dir) / "stat_arb.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
 
