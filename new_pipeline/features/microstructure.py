@@ -33,11 +33,11 @@ def _rolling_mean(values, window) -> np.ndarray:
 def roll_measure(close, window=20) -> np.ndarray:
     """Roll (1984) effective spread from the serial covariance of price changes."""
     close = np.asarray(close, dtype=np.float64)
-    delta = np.diff(close, prepend=close[0])
+    delta = np.diff(close)  # real price changes only (no prepend artifact)
     out = np.full(close.size, np.nan)
-    for t in range(window, close.size):
-        current = delta[t - window + 1 : t + 1]
-        lagged = delta[t - window : t]
+    for t in range(window + 1, close.size):
+        current = delta[t - window : t]  # the window changes ending into close[t]
+        lagged = delta[t - window - 1 : t - 1]
         cov = float(np.cov(current, lagged)[0, 1])
         out[t] = 2.0 * np.sqrt(-cov) if cov < 0.0 else 0.0
     return out
@@ -70,8 +70,8 @@ def kyle_lambda(close, volume, window=20) -> np.ndarray:
     for t in range(window, close.size):
         x = signed_volume[t - window + 1 : t + 1]
         y = delta[t - window + 1 : t + 1]
-        var_x = float(np.var(x))
-        out[t] = float(np.cov(x, y)[0, 1] / var_x) if var_x > 0.0 else 0.0
+        cov = np.cov(x, y)  # slope = Cov(x,y)/Var(x), both ddof=1 (consistent)
+        out[t] = float(cov[0, 1] / cov[0, 0]) if cov[0, 0] > 0.0 else 0.0
     return out
 
 

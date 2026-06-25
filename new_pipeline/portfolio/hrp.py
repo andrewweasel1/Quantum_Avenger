@@ -18,9 +18,15 @@ from new_pipeline.portfolio.covariance import cov_to_corr
 
 
 def inverse_variance_weights(cov):
-    """Inverse-variance portfolio weights (diagonal only — no correlation)."""
-    ivp = 1.0 / np.diag(np.asarray(cov, dtype=np.float64))
-    return ivp / ivp.sum()
+    """Inverse-variance portfolio weights (diagonal only — no correlation).
+
+    Zero-variance sleeves (a flat return stream) get zero weight rather than
+    poisoning the book with ``1/0 = inf`` → NaN; an all-flat set falls back to equal.
+    """
+    diag = np.diag(np.asarray(cov, dtype=np.float64))
+    ivp = np.where(diag > 0.0, 1.0 / np.where(diag > 0.0, diag, 1.0), 0.0)
+    total = ivp.sum()
+    return ivp / total if total > 0.0 else np.full(ivp.size, 1.0 / ivp.size)
 
 
 def _quasi_diag(link, n_items):

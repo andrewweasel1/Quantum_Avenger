@@ -43,4 +43,4 @@ def test_vol_estimators_golden():
 def test_microstructure_golden():
     frame = add_microstructure(_fixture(), window=20)
     assert frame["corwin_schultz"][250] == pytest.approx(0.0006116746276739036, rel=1e-9)
-    assert frame["kyle_lambda"][250] == pytest.approx(8.02925816004307e-07, rel=1e-9)
+    assert frame["kyle_lambda"][250] == pytest.approx(7.627795252040916e-07, rel=1e-9)

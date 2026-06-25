@@ -90,6 +90,31 @@ def test_cov_to_corr_roundtrip():
     assert np.allclose(corr * np.outer(std, std), cov)
 
 
+def test_flat_sleeve_dropped_no_nan():
+    # a zero-variance (dead) sleeve must not poison the book: it gets 0 weight.
+    real = np.random.default_rng(0).normal(0, 0.01, 200)
+    weights, book = combine_returns(
+        np.column_stack([real, np.zeros(200)]), method="hrp", cov_method="sample"
+    )
+    assert np.isfinite(book).all()
+    assert weights[1] == 0.0 and weights[0] == pytest.approx(1.0)
+
+
+def test_kyle_lambda_ddof_consistent():
+    # slope = Cov(x,y)/Var(x) with matched ddof — equals an independent OLS fit.
+    from new_pipeline.features.microstructure import kyle_lambda
+
+    rng = np.random.default_rng(1)
+    close = 100 + np.cumsum(rng.normal(0, 0.5, 120))
+    volume = 1e6 + rng.integers(0, 5e5, 120).astype(float)
+    lam = kyle_lambda(close, volume, 20)
+    delta = np.diff(close, prepend=close[0])
+    signed = np.sign(delta) * volume
+    t = 119
+    expected = np.polyfit(signed[t - 19 : t + 1], delta[t - 19 : t + 1], 1)[0]
+    assert lam[t] == pytest.approx(expected, rel=1e-9)
+
+
 def test_combine_returns_single_column_is_identity():
     col = np.array([0.1, -0.2, 0.3])
     weights, book = combine_returns(col)

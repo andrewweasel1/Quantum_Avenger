@@ -32,10 +32,18 @@ def portfolio_weights(returns_matrix, method="hrp", cov_method="rmt", min_obs=20
         return np.ones(1)
     if method == "equal":
         return np.full(k, 1.0 / k)
-    cov = clean_covariance(matrix, cov_method, min_obs)
-    if method == "inverse_variance":
-        return inverse_variance_weights(cov)
-    return hrp_weights(cov)
+    # Drop flat (zero-variance) sleeves — a dead return stream is not a strategy, and
+    # HRP would otherwise route all weight to it as the "lowest-risk" asset.
+    active = matrix.var(axis=0) > 0.0
+    if active.sum() <= 1:
+        weights = np.zeros(k)
+        weights[np.argmax(active) if active.any() else 0] = 1.0
+        return weights
+    cov = clean_covariance(matrix[:, active], cov_method, min_obs)
+    sub = inverse_variance_weights(cov) if method == "inverse_variance" else hrp_weights(cov)
+    weights = np.zeros(k)
+    weights[active] = sub
+    return weights
 
 
 def combine_returns(returns_matrix, method="hrp", cov_method="rmt", min_obs=20):
