@@ -90,6 +90,36 @@ def test_run_stat_arb_per_pair_null_alignment(tmp_path):
     assert frozenset(("TY", "TX")) in found  # full-history pair survives the late listing
 
 
+def test_run_stat_arb_johansen_basket(tmp_path):
+    # a sector with a cointegrated TRIPLE (TZ = TX + TY + stationary spread) yields a
+    # Johansen basket sleeve when use_johansen is on.
+    reload_config()
+    cfg = get_config()
+    cfg.stat_arb.min_obs = 50
+    cfg.stat_arb.use_johansen = True
+    cfg.stat_arb.min_basket = 3
+    cfg.evaluation.reality_check_bootstrap = 100
+    cfg.evaluation.dsr_promotion_threshold = 0.0
+    rng = np.random.default_rng(0)
+    n = 250
+    dates = [date(2021, 1, 1) + timedelta(days=i) for i in range(n)]
+    w1, w2 = np.cumsum(rng.normal(0, 1, n)), np.cumsum(rng.normal(0, 1, n))
+    series = {"TX": 100 + w1, "TY": 100 + w2, "TZ": 100 + w1 + w2 + _ar1_spread(rng, n)}
+    rows = [
+        {"date": dates[i], "ticker": ticker, "sector": "Tech", "close": float(values[i])}
+        for ticker, values in series.items()
+        for i in range(n)
+    ]
+
+    report = _run_stat_arb(pl.DataFrame(rows), tmp_path, cfg)
+
+    assert report is not None
+    names = {sleeve["name"] for sleeve in report["pairs"]}
+    assert "basket__Tech" in names  # the Johansen multivariate basket sleeve
+    basket = next(s for s in report["pairs"] if s["name"] == "basket__Tech")
+    assert set(basket["basket"]) == {"TX", "TY", "TZ"} and basket["adf_tstat"] < -2.86
+
+
 def test_run_stat_arb_none_when_panel_too_short(tmp_path):
     # fewer observations than min_obs -> graceful None (deterministic guard).
     reload_config()

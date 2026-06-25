@@ -163,6 +163,8 @@ class StatArbConfig(BaseModel):
     zscore_window: int = 20
     min_obs: int = 60
     max_pairs_per_sector: int = 3
+    use_johansen: bool = False  # also trade a Johansen multivariate basket per sector
+    min_basket: int = 3  # min sector tickers for a Johansen basket
 
 
 class MCPConfig(BaseModel):

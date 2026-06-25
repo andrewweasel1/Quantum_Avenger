@@ -47,8 +47,9 @@ from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov
 from new_pipeline.features.polars_engine import compile_features
 from new_pipeline.portfolio.combination import combine_returns
 from new_pipeline.tournament.director import run_sector_tournament
+from new_pipeline.tournament.johansen import johansen_basket
 from new_pipeline.tournament.simulator import sharpe_ratio
-from new_pipeline.tournament.stat_arb import engle_granger, mean_reversion_returns
+from new_pipeline.tournament.stat_arb import adf_tstat, engle_granger, mean_reversion_returns
 from new_pipeline.tournament.trainer import load_booster, predict_proba
 
 FEATURE_COLS = [
@@ -195,11 +196,36 @@ def run_offline_pipeline(
     return summary
 
 
+def _johansen_sleeve(panel, tickers, sector, cfg):
+    """Fit a Johansen cointegrating basket of the sector's tickers IN-SAMPLE, then trade
+    its OOS spread under the fixed in-sample vector. Returns (dates, oos_returns, entry),
+    or None when the basket is too thin or not cointegrated in-sample (ADF on the spread)."""
+    aligned = panel.select(["date", *tickers]).drop_nulls()
+    split = int(aligned.height * cfg.stat_arb.insample_frac)
+    if split < cfg.stat_arb.min_obs or aligned.height - split < cfg.stat_arb.zscore_window + 5:
+        return None
+    prices = aligned.select(tickers).to_numpy()
+    vector = johansen_basket(prices[:split], cfg.stat_arb.adf_lags)
+    tstat = adf_tstat(prices[:split] @ vector, cfg.stat_arb.adf_lags)
+    if tstat >= cfg.stat_arb.adf_threshold:  # in-sample basket spread not stationary
+        return None
+    oos_returns = mean_reversion_returns(
+        prices[split:] @ vector,  # fixed in-sample vector applied out-of-sample
+        cfg.stat_arb.entry_z, cfg.stat_arb.exit_z, cfg.stat_arb.zscore_window,
+    )
+    entry = {
+        "name": f"basket__{sector}", "basket": list(tickers),
+        "sector": sector, "adf_tstat": float(tstat),
+    }
+    return aligned[split:].select("date"), oos_returns, entry
+
+
 def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
-    """Select within-sector cointegrated pairs and fit each hedge ratio IN-SAMPLE,
-    trade the spread OUT-OF-SAMPLE (causal mean reversion), and combine the
-    date-aligned OOS sleeves into a stat-arb book via the portfolio layer ->
-    stat_arb.json. Returns None when no pair cointegrates in-sample."""
+    """Select within-sector cointegrated pairs (Engle-Granger) — and, when
+    ``use_johansen``, a multivariate Johansen basket per sector — fit each IN-SAMPLE,
+    trade the spread OUT-OF-SAMPLE (causal mean reversion), validate each sleeve by a
+    Deflated Sharpe, and combine the validated date-aligned OOS sleeves into a stat-arb
+    book via the portfolio layer -> stat_arb.json. None when nothing cointegrates."""
     if "ticker" not in frame.columns or "sector" not in frame.columns:
         return None
     # Pivot to a close panel WITHOUT a universe-wide drop_nulls: a single gappy /
@@ -221,6 +247,13 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
 
     n_candidates = 0
     pairs_report, sleeves, sleeve_returns = [], [], []
+
+    def _add_sleeve(dates, oos_returns, entry):  # one date-indexed OOS sleeve (pair or basket)
+        entry["sharpe"] = float(sharpe_ratio(oos_returns))
+        sleeves.append(dates.with_columns(pl.Series(entry["name"], oos_returns)))
+        sleeve_returns.append(oos_returns)
+        pairs_report.append(entry)
+
     for sector, tickers in sector_tickers.items():
         for y_name, x_name in itertools.combinations(tickers, 2):
             aligned = panel.select(["date", y_name, x_name]).drop_nulls()  # per-pair overlap
@@ -229,8 +262,7 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
             if split < cfg.stat_arb.min_obs or oos_len < cfg.stat_arb.zscore_window + 5:
                 continue  # need enough to fit in-sample AND to trade out-of-sample
             n_candidates += 1  # a pair actually tested for cointegration (the search space)
-            y = aligned[y_name].to_numpy()
-            x = aligned[x_name].to_numpy()
+            y, x = aligned[y_name].to_numpy(), aligned[x_name].to_numpy()
             # Select the pair + fit the hedge ratio IN-SAMPLE only (no look-ahead),
             result, _ = engle_granger(
                 y[:split], x[:split], cfg.stat_arb.adf_lags, cfg.stat_arb.adf_threshold
@@ -239,20 +271,24 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
                 continue
             # then trade the OOS spread under that fixed in-sample hedge ratio.
             oos_spread = y[split:] - (result.intercept + result.hedge_ratio * x[split:])
-            oos_returns = mean_reversion_returns(
-                oos_spread, cfg.stat_arb.entry_z, cfg.stat_arb.exit_z, cfg.stat_arb.zscore_window
+            _add_sleeve(
+                aligned[split:].select("date"),
+                mean_reversion_returns(
+                    oos_spread, cfg.stat_arb.entry_z, cfg.stat_arb.exit_z,
+                    cfg.stat_arb.zscore_window,
+                ),
+                {
+                    "name": f"{y_name}__{x_name}", "y": y_name, "x": x_name, "sector": sector,
+                    "hedge_ratio": result.hedge_ratio, "adf_tstat": result.adf_tstat,
+                    "half_life": result.half_life,
+                },
             )
-            sleeves.append(
-                aligned[split:].select("date").with_columns(
-                    pl.Series(f"{y_name}__{x_name}", oos_returns)
-                )
-            )
-            sleeve_returns.append(oos_returns)
-            pairs_report.append({
-                "y": y_name, "x": x_name, "sector": sector,
-                "hedge_ratio": result.hedge_ratio, "adf_tstat": result.adf_tstat,
-                "half_life": result.half_life, "sharpe": float(sharpe_ratio(oos_returns)),
-            })
+        # Johansen multivariate basket of the whole sector (>= min_basket tickers).
+        if cfg.stat_arb.use_johansen and len(tickers) >= cfg.stat_arb.min_basket:
+            n_candidates += 1
+            basket = _johansen_sleeve(panel, tickers, sector, cfg)
+            if basket is not None:
+                _add_sleeve(*basket)
     if not pairs_report:
         return None
     # Validate each sleeve: Deflated Sharpe of its OOS returns, deflated by the number
@@ -269,7 +305,7 @@ def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
     for sleeve in sleeves[1:]:
         book_df = book_df.join(sleeve, on="date", how="full", coalesce=True)
     book_df = book_df.sort("date").fill_null(0.0)
-    panel_returns = book_df.select([f"{p['y']}__{p['x']}" for p in pairs_report]).to_numpy()
+    panel_returns = book_df.select([sleeve["name"] for sleeve in pairs_report]).to_numpy()
     # White's Reality Check over the searched pair sleeves (multiple-strategy guard).
     report["reality_check_pvalue"] = float(
         whites_reality_check(

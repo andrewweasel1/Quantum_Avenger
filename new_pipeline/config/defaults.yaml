@@ -151,6 +151,8 @@ stat_arb:
   zscore_window: 20
   min_obs: 60
   max_pairs_per_sector: 3
+  use_johansen: false
+  min_basket: 3
 
 rag:
   embedder: "hashing"
