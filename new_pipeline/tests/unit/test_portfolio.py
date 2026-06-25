@@ -12,7 +12,9 @@ from new_pipeline.portfolio import (
     cov_to_corr,
     denoise_covariance,
     hrp_weights,
+    ic_weights,
     inverse_variance_weights,
+    nco_weights,
     portfolio_weights,
 )
 
@@ -138,6 +140,41 @@ def test_portfolio_weights_inverse_variance():
     w = portfolio_weights(_two_cluster_returns(), method="inverse_variance", cov_method="sample")
     assert w.sum() == pytest.approx(1.0)
     assert w[0] > w[1]  # lower-vol asset gets more weight
+
+
+def test_nco_weights_sum_to_one_and_minimize_variance():
+    cov = np.cov(_two_cluster_returns(), rowvar=False)
+    w = nco_weights(cov)
+    assert w.sum() == pytest.approx(1.0)
+    equal = np.full(cov.shape[0], 1.0 / cov.shape[0])
+    assert w @ cov @ w < equal @ cov @ equal  # min-variance beats equal-weight
+
+
+def test_nco_degenerate_sizes():
+    assert nco_weights(np.zeros((0, 0))).shape == (0,)
+    assert nco_weights(np.array([[0.04]])) == pytest.approx([1.0])
+
+
+def test_ic_weights_by_realized_skill():
+    rng = np.random.default_rng(1)
+    sleeves = np.column_stack(
+        [rng.normal(0.005, 0.01, 300), rng.normal(0.0, 0.01, 300), rng.normal(-0.004, 0.01, 300)]
+    )
+    w = ic_weights(sleeves)
+    assert w.sum() == pytest.approx(1.0)
+    assert w[0] > w[1] and w[2] == 0.0  # skilled > noise; losing sleeve gets nothing
+
+
+def test_ic_weights_all_losing_falls_back_to_equal():
+    losing = np.random.default_rng(2).normal(-0.002, 0.01, (200, 3))
+    assert ic_weights(losing) == pytest.approx([1 / 3, 1 / 3, 1 / 3])
+
+
+def test_portfolio_weights_nco_and_ic_dispatch():
+    returns = _two_cluster_returns()
+    for method in ("nco", "ic_weighted"):
+        w, book = combine_returns(returns, method=method, cov_method="sample")
+        assert w.sum() == pytest.approx(1.0) and book.shape == (500,)
 
 
 def test_portfolio_weights_1d_input_is_single_sleeve():
