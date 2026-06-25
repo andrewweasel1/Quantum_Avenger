@@ -27,13 +27,7 @@ from scipy import stats
 
 from new_pipeline.evaluation.haircut import multiple_testing_adjust
 from new_pipeline.tournament.feature_selection import cluster_features
-
-
-def _ols_rss(design: np.ndarray, response: np.ndarray) -> tuple[float, int]:
-    """Residual sum of squares + design rank from a least-squares fit."""
-    coef, _residuals, rank, _sv = np.linalg.lstsq(design, response, rcond=None)
-    resid = response - design @ coef
-    return float(resid @ resid), int(rank)
+from new_pipeline.tournament.ols import ols
 
 
 def granger_pvalue(feature, target, lags: int = 3, horizon: int = 1) -> float:
@@ -63,8 +57,8 @@ def granger_pvalue(feature, target, lags: int = 3, horizon: int = 1) -> float:
     design_r = np.hstack([const, target_lags])
     design_u = np.hstack([const, target_lags, _lagmat(x)])
 
-    rss_r, _ = _ols_rss(design_r, response)
-    rss_u, rank_u = _ols_rss(design_u, response)
+    _, rss_r, _ = ols(design_r, response)
+    _, rss_u, rank_u = ols(design_u, response)
     if rank_u < design_u.shape[1] or rss_r <= rss_u:
         return 1.0  # rank-deficient design, or the feature adds no explanatory power
 

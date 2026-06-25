@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from new_pipeline.tournament.ols import ols, with_intercept
+
 # Asymptotic ADF 5% critical value (constant, no trend): spread is stationary below it.
 ADF_CRITICAL_5PCT = -2.86
 
@@ -33,16 +35,13 @@ def adf_tstat(series, lags=1) -> float:
     if n < 8:
         return 0.0
     response = diff[lags:]
-    columns = [y[lags:-1], np.ones(n)]  # lagged level + intercept
-    for lag in range(1, lags + 1):
-        columns.append(diff[lags - lag : diff.size - lag])  # lagged differences
-    design = np.column_stack(columns)
-    beta, _, rank, _ = np.linalg.lstsq(design, response, rcond=None)
+    lag_diffs = [diff[lags - lag : diff.size - lag] for lag in range(1, lags + 1)]
+    design = with_intercept(y[lags:-1], *lag_diffs)  # lagged level is column 0
+    beta, rss, rank = ols(design, response)
     if rank < design.shape[1]:
         return 0.0
-    resid = response - design @ beta
     dof = n - design.shape[1]
-    sigma2 = float(resid @ resid) / dof if dof > 0 else 0.0
+    sigma2 = rss / dof if dof > 0 else 0.0
     try:
         cov = sigma2 * np.linalg.inv(design.T @ design)
     except np.linalg.LinAlgError:  # pragma: no cover - rank check above guards this
@@ -68,9 +67,8 @@ def engle_granger(y, x, lags=1, adf_threshold=ADF_CRITICAL_5PCT):
     """
     y = np.asarray(y, dtype=np.float64)
     x = np.asarray(x, dtype=np.float64)
-    design = np.column_stack([x, np.ones(x.size)])
-    beta, *_ = np.linalg.lstsq(design, y, rcond=None)
-    hedge, intercept = float(beta[0]), float(beta[1])
+    coef, _, _ = ols(with_intercept(x), y)
+    hedge, intercept = float(coef[0]), float(coef[1])
     spread = y - (intercept + hedge * x)
     tstat = adf_tstat(spread, lags)
     result = CointegrationResult(
@@ -89,9 +87,8 @@ def ou_half_life(spread) -> float:
     s = np.asarray(spread, dtype=np.float64)
     if s.size < 3:
         return float("inf")
-    design = np.column_stack([s[:-1], np.ones(s.size - 1)])
-    beta, *_ = np.linalg.lstsq(design, np.diff(s), rcond=None)
-    b = float(beta[0])
+    coef, _, _ = ols(with_intercept(s[:-1]), np.diff(s))
+    b = float(coef[0])
     return -np.log(2.0) / b if b < 0.0 else float("inf")
 
 
