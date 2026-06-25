@@ -367,7 +367,7 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
                 cfg.evaluation.reality_check_bootstrap,
                 cfg.evaluation.reality_check_block,
             )
-            if cfg.evaluation.reality_check_enabled
+            if cfg.evaluation.reality_check_enabled or cfg.evaluation.reality_check_gate_enabled
             else None
         )
         decision = assess_promotion(
@@ -380,6 +380,8 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             path_dsr_median=path_dsr_median,
             path_gate_enabled=cfg.evaluation.cpcv_path_gate_enabled,
             reality_check_pvalue=reality_check_p,
+            reality_check_gate_enabled=cfg.evaluation.reality_check_gate_enabled,
+            reality_check_threshold=cfg.evaluation.reality_check_threshold,
         )
         if cfg.evaluation.regime_gate_enabled and decision.promoted:
             if not _regime_verdict(champion_returns, trials, cfg).promoted:

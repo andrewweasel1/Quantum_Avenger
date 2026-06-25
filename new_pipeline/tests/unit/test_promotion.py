@@ -15,6 +15,22 @@ def test_reject_low_dsr():
     assert decision.reason == "low DSR"
 
 
+def test_reality_check_gate_opt_in():
+    # gate off (default): a high RC p-value is recorded but ignored.
+    assert assess_promotion("Energy", 0.97, 0.2, reality_check_pvalue=0.8).promoted is True
+    # gate on + high p (best trial indistinguishable from luck) -> rejected.
+    snooped = assess_promotion(
+        "Energy", 0.97, 0.2, reality_check_pvalue=0.8,
+        reality_check_gate_enabled=True, reality_check_threshold=0.05,
+    )
+    assert snooped.promoted is False and "reality check" in snooped.reason
+    # gate on + low p -> passes.
+    assert assess_promotion(
+        "Energy", 0.97, 0.2, reality_check_pvalue=0.01,
+        reality_check_gate_enabled=True, reality_check_threshold=0.05,
+    ).promoted is True
+
+
 def test_reject_failed_gauntlet():
     decision = assess_promotion("Energy", 0.97, -0.1)
     assert decision.promoted is False

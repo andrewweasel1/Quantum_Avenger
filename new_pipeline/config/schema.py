@@ -138,6 +138,8 @@ class EvaluationConfig(BaseModel):
     reality_check_enabled: bool = False
     reality_check_bootstrap: int = 500
     reality_check_block: int = 10  # stationary-bootstrap avg block length
+    reality_check_gate_enabled: bool = False  # gate promotion on the RC p-value (opt-in)
+    reality_check_threshold: float = 0.05  # reject when the best-trial RC p-value exceeds this
 
 
 class PortfolioConfig(BaseModel):

@@ -45,7 +45,9 @@ def assess_promotion(
     path_fraction_threshold=0.5,
     path_dsr_median=None,
     path_gate_enabled=False,
-    reality_check_pvalue=None,  # recorded diagnostic only (like psr/haircut) — never gates
+    reality_check_pvalue=None,  # recorded; gates only when reality_check_gate_enabled
+    reality_check_gate_enabled=False,
+    reality_check_threshold=0.05,
 ) -> PromotionDecision:
     """Apply every promotion gate; the first failure names the rejection reason.
 
@@ -65,6 +67,11 @@ def assess_promotion(
         "overfit (high PBO)": pbo is not None and pbo > pbo_threshold,
         "backtest shorter than MinBTL": minbtl_satisfied is False,
         "unstable across CPCV paths": path_gate,
+        "data-snooped (reality check)": (
+            reality_check_gate_enabled
+            and reality_check_pvalue is not None
+            and reality_check_pvalue > reality_check_threshold
+        ),
     }
     failed = [reason for reason, tripped in gates.items() if tripped]
     promoted = not failed
