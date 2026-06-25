@@ -61,6 +61,14 @@ def test_evaluate_meta_precision_criterion():
     assert verdict.improved is True  # precision 0.5 -> 1.0 with recall still > 0
 
 
+def test_evaluate_meta_precision_criterion_empty_filter_not_improved():
+    # precision is vacuously "up" for an empty filter; the recall>0 guard must veto it.
+    verdict = evaluate_meta_labeling(
+        _OUT, _SIG, [0.1] * 6, meta_threshold=0.5, criterion="precision"
+    )
+    assert verdict.improved is False
+
+
 def test_evaluate_meta_no_improvement_when_filter_empties():
     # every meta proba below threshold -> meta acts never -> f1 0 < primary.
     verdict = evaluate_meta_labeling(_OUT, _SIG, [0.1] * 6, meta_threshold=0.5)

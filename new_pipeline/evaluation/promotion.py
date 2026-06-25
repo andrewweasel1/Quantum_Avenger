@@ -45,7 +45,7 @@ def assess_promotion(
     path_fraction_threshold=0.5,
     path_dsr_median=None,
     path_gate_enabled=False,
-    reality_check_pvalue=None,
+    reality_check_pvalue=None,  # recorded diagnostic only (like psr/haircut) — never gates
 ) -> PromotionDecision:
     """Apply every promotion gate; the first failure names the rejection reason.
 

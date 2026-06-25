@@ -37,7 +37,7 @@ def adf_tstat(series, lags=1) -> float:
     for lag in range(1, lags + 1):
         columns.append(diff[lags - lag : diff.size - lag])  # lagged differences
     design = np.column_stack(columns)
-    beta, residuals, rank, _ = np.linalg.lstsq(design, response, rcond=None)
+    beta, _, rank, _ = np.linalg.lstsq(design, response, rcond=None)
     if rank < design.shape[1]:
         return 0.0
     resid = response - design @ beta

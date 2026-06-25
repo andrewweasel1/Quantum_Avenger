@@ -112,7 +112,6 @@ class TournamentConfig(BaseModel):
 class EvaluationConfig(BaseModel):
     dsr_promotion_threshold: float = 0.95
     hmm_states: int = 3
-    hmm_n_iter: int = 100
     synthetic_sr_min: float = 0.0
     registry_path: str = "./models/prod/promotion_registry.json"
     psr_benchmark_sr: float = 0.0

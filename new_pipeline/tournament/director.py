@@ -197,6 +197,9 @@ def run_sector_tournament(frame, feature_cols, output_dir, use_cfs=True, max_wor
     sectors = []
     for _, group in frame.group_by("sector", maintain_order=True):
         # Polars treats NaN as distinct from null; coerce so rolling/label NaNs drop.
+        # NOTE: drop_nulls requires ALL feature cols non-null, so enabling a long-warmup
+        # feature (e.g. xf_mom_12_1 ~273d, fracdiff ~55d) drops that many leading rows
+        # from every sector and can push thin sectors under _MIN_ROWS.
         clean = group.with_columns(pl.col(required).fill_nan(None)).drop_nulls(subset=required)
         if clean.height >= _MIN_ROWS:
             sectors.append(clean)

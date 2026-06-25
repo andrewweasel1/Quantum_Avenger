@@ -113,7 +113,6 @@ tournament:
 evaluation:
   dsr_promotion_threshold: 0.95
   hmm_states: 3
-  hmm_n_iter: 100
   synthetic_sr_min: 0.0
   registry_path: "./models/prod/promotion_registry.json"
   psr_benchmark_sr: 0.0

@@ -94,8 +94,8 @@ def test_find_cointegrated_pairs_isolates_the_true_pair():
     y, x = _cointegrated_pair()
     noise = np.cumsum(np.random.default_rng(99).normal(0, 1, 400))  # independent of the pair
     pairs = find_cointegrated_pairs(np.column_stack([y, x, noise]), ["Y", "X", "Z"])
-    # the strongest (most stationary) pair is the true one; any spurious noise pair
-    # (a 5%-level false positive) is strictly weaker.
-    assert pairs and pairs[0]["y"] == "Y" and pairs[0]["x"] == "X"
-    spurious = [p for p in pairs if "Z" in (p["y"], p["x"])]
-    assert all(p["adf_tstat"] > pairs[0]["adf_tstat"] for p in spurious)
+    # the strongest (most stationary) pair is the genuinely-cointegrated one — it ranks
+    # first by a wide margin (ADF ~-4.6) over any 5%-level spurious noise pair (~-2.9).
+    assert pairs
+    assert pairs[0]["y"] == "Y" and pairs[0]["x"] == "X"
+    assert pairs[0]["adf_tstat"] < ADF_CRITICAL_5PCT
