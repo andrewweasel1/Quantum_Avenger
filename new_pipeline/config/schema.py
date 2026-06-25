@@ -156,6 +156,7 @@ class StatArbConfig(BaseModel):
     enabled: bool = False  # new family; default off keeps the suite/runtime stable
     adf_threshold: float = -2.86  # ADF 5% critical value — spread stationary below it
     adf_lags: int = 1
+    insample_frac: float = 0.6  # fraction used to select pairs + fit the hedge (rest is OOS)
     entry_z: float = 2.0
     exit_z: float = 0.5
     zscore_window: int = 20

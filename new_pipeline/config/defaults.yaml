@@ -144,6 +144,7 @@ stat_arb:
   enabled: false
   adf_threshold: -2.86
   adf_lags: 1
+  insample_frac: 0.6
   entry_z: 2.0
   exit_z: 0.5
   zscore_window: 20

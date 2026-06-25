@@ -5,6 +5,7 @@ features -> sector join + friction labels -> per-sector tournament -> Deflated
 Sharpe + HMM promotion. The legacy multi-phase ``main`` flow, rebuilt offline.
 """
 
+import itertools
 import json
 from dataclasses import replace
 from datetime import date
@@ -42,11 +43,7 @@ from new_pipeline.features.polars_engine import compile_features
 from new_pipeline.portfolio.combination import combine_returns
 from new_pipeline.tournament.director import run_sector_tournament
 from new_pipeline.tournament.simulator import sharpe_ratio
-from new_pipeline.tournament.stat_arb import (
-    engle_granger,
-    find_cointegrated_pairs,
-    mean_reversion_returns,
-)
+from new_pipeline.tournament.stat_arb import engle_granger, mean_reversion_returns
 from new_pipeline.tournament.trainer import load_booster, predict_proba
 
 FEATURE_COLS = [
@@ -183,54 +180,70 @@ def run_offline_pipeline(
 
 
 def _run_stat_arb(frame: pl.DataFrame, output_dir, cfg) -> dict | None:
-    """Find cointegrated within-sector pairs, trade each spread (causal mean
-    reversion), and combine the date-indexed sleeves into a stat-arb book via the
-    portfolio layer -> stat_arb.json. Returns None when no pair cointegrates."""
+    """Select within-sector cointegrated pairs and fit each hedge ratio IN-SAMPLE,
+    trade the spread OUT-OF-SAMPLE (causal mean reversion), and combine the
+    date-aligned OOS sleeves into a stat-arb book via the portfolio layer ->
+    stat_arb.json. Returns None when no pair cointegrates in-sample."""
     if "ticker" not in frame.columns or "sector" not in frame.columns:
         return None
-    panel_df = (
+    # Pivot to a close panel WITHOUT a universe-wide drop_nulls: a single gappy /
+    # late-listing ticker must not truncate every other pair's history. Each pair
+    # aligns its own two legs below.
+    panel = (
         frame.select(["date", "ticker", "close"])
         .pivot(on="ticker", index="date", values="close")
         .sort("date")
-        .drop_nulls()
     )
-    panel_tickers = [c for c in panel_df.columns if c != "date"]
-    if panel_df.height < cfg.stat_arb.min_obs or len(panel_tickers) < 2:
+    panel_tickers = [c for c in panel.columns if c != "date"]
+    if panel.height < cfg.stat_arb.min_obs or len(panel_tickers) < 2:
         return None
-    col_index = {ticker: i for i, ticker in enumerate(panel_tickers)}
-    panel = panel_df.select(panel_tickers).to_numpy()
+    available = set(panel_tickers)
     sector_tickers: dict[str, list[str]] = {}
     for ticker, sector in frame.select("ticker", "sector").unique().iter_rows():
-        if ticker in col_index:
+        if ticker in available:
             sector_tickers.setdefault(sector, []).append(ticker)
 
     pairs_report, sleeves = [], []
     for sector, tickers in sector_tickers.items():
-        cols = [t for t in tickers if t in col_index]
-        if len(cols) < 2:
-            continue
-        found = find_cointegrated_pairs(
-            panel[:, [col_index[t] for t in cols]], cols,
-            cfg.stat_arb.adf_lags, cfg.stat_arb.adf_threshold,
-        )
-        for pair in found[: cfg.stat_arb.max_pairs_per_sector]:
-            _, spread = engle_granger(
-                panel[:, col_index[pair["y"]]],
-                panel[:, col_index[pair["x"]]],
-                cfg.stat_arb.adf_lags,
+        for y_name, x_name in itertools.combinations(tickers, 2):
+            aligned = panel.select(["date", y_name, x_name]).drop_nulls()  # per-pair overlap
+            split = int(aligned.height * cfg.stat_arb.insample_frac)
+            oos_len = aligned.height - split
+            if split < cfg.stat_arb.min_obs or oos_len < cfg.stat_arb.zscore_window + 5:
+                continue  # need enough to fit in-sample AND to trade out-of-sample
+            y = aligned[y_name].to_numpy()
+            x = aligned[x_name].to_numpy()
+            # Select the pair + fit the hedge ratio IN-SAMPLE only (no look-ahead),
+            result, _ = engle_granger(
+                y[:split], x[:split], cfg.stat_arb.adf_lags, cfg.stat_arb.adf_threshold
             )
-            returns = mean_reversion_returns(
-                spread, cfg.stat_arb.entry_z, cfg.stat_arb.exit_z, cfg.stat_arb.zscore_window
+            if not result.cointegrated:
+                continue
+            # then trade the OOS spread under that fixed in-sample hedge ratio.
+            oos_spread = y[split:] - (result.intercept + result.hedge_ratio * x[split:])
+            oos_returns = mean_reversion_returns(
+                oos_spread, cfg.stat_arb.entry_z, cfg.stat_arb.exit_z, cfg.stat_arb.zscore_window
             )
-            sleeves.append(returns)
-            pairs_report.append({**pair, "sector": sector, "sharpe": float(sharpe_ratio(returns))})
+            sleeves.append(
+                aligned[split:].select("date").with_columns(
+                    pl.Series(f"{y_name}__{x_name}", oos_returns)
+                )
+            )
+            pairs_report.append({
+                "y": y_name, "x": x_name, "sector": sector,
+                "hedge_ratio": result.hedge_ratio, "adf_tstat": result.adf_tstat,
+                "half_life": result.half_life, "sharpe": float(sharpe_ratio(oos_returns)),
+            })
     if not pairs_report:
         return None
     report = {"pairs": pairs_report, "n_pairs": len(pairs_report)}
-    if len(sleeves) >= 2:  # date-indexed sleeves -> exact HRP combination
+    if len(sleeves) >= 2:  # date-align the OOS sleeves, then combine into one book
+        book_df = sleeves[0]
+        for sleeve in sleeves[1:]:
+            book_df = book_df.join(sleeve, on="date", how="full", coalesce=True)
+        panel_returns = book_df.sort("date").drop("date").fill_null(0.0).to_numpy()
         _, book = combine_returns(
-            np.column_stack(sleeves),
-            cfg.portfolio.method, cfg.portfolio.cov_method, cfg.portfolio.min_obs,
+            panel_returns, cfg.portfolio.method, cfg.portfolio.cov_method, cfg.portfolio.min_obs
         )
         report["book_sharpe"] = float(sharpe_ratio(book))
         report["n_sleeves"] = len(sleeves)

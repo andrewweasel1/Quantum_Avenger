@@ -57,6 +57,34 @@ def test_run_stat_arb_finds_pairs_and_combines_book(tmp_path):
     assert (tmp_path / "stat_arb.json").exists()
 
 
+def test_run_stat_arb_per_pair_null_alignment(tmp_path):
+    # a late-listing ticker (front-gap nulls) must NOT truncate a full-history pair:
+    # under a universe-wide drop_nulls the panel would shrink to LATE's 55-row window
+    # and the full TY/TX pair would fall below min_obs and be skipped.
+    reload_config()
+    cfg = get_config()
+    cfg.stat_arb.min_obs = 50
+    rng = np.random.default_rng(0)
+    n = 200
+    dates = [date(2021, 1, 1) + timedelta(days=i) for i in range(n)]
+    tx = 100 + np.cumsum(rng.normal(0, 1, n))
+    ty = 1.5 * tx + _ar1_spread(rng, n)
+    late = 100 + np.cumsum(rng.normal(0, 1, n))  # independent; "listed" only last 55 days
+    rows = []
+    for i in range(n):
+        rows.append({"date": dates[i], "ticker": "TX", "sector": "Tech", "close": float(tx[i])})
+        rows.append({"date": dates[i], "ticker": "TY", "sector": "Tech", "close": float(ty[i])})
+        if i >= n - 55:
+            rows.append(
+                {"date": dates[i], "ticker": "LATE", "sector": "Tech", "close": float(late[i])}
+            )
+
+    report = _run_stat_arb(pl.DataFrame(rows), tmp_path, cfg)
+    assert report is not None
+    found = {frozenset((p["y"], p["x"])) for p in report["pairs"]}
+    assert frozenset(("TY", "TX")) in found  # full-history pair survives the late listing
+
+
 def test_run_stat_arb_none_when_panel_too_short(tmp_path):
     # fewer observations than min_obs -> graceful None (deterministic guard).
     reload_config()
