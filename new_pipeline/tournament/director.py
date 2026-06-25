@@ -108,15 +108,21 @@ def _meta_fit_fn(cfg):
 
 def _meta_labeling(matrix, labels, t1_offset, block_ids, cfg):
     """Train a primary on the train split, a meta model on its fired bars, and return
-    the OOS primary-vs-meta verdict (+ fired counts), or None when the split is too thin."""
+    the OOS primary-vs-meta verdict (+ fired counts), or None when the split is too thin.
+
+    A purge gap of ``label_horizon`` bars is dropped between train and test: the
+    triple-barrier labels are forward-looking (first touch within the horizon), so
+    without it the last training bars' outcomes leak into the test region."""
     n = len(labels)
     split = int(n * 0.8)
-    if split < _META_MIN_TRAIN or n - split < MIN_FIRED_TEST:
+    purge = cfg.features.label_horizon
+    train_end = split - purge  # purge the boundary bars whose labels reach into test
+    if train_end < _META_MIN_TRAIN or n - split < MIN_FIRED_TEST:
         return None
     rounds = min(40, cfg.tournament.num_boost_round)
     threshold = cfg.execution.confidence_threshold
-    train_x, test_x = matrix[:split], matrix[split:]
-    train_y, test_y = labels[:split], labels[split:]
+    train_x, test_x = matrix[:train_end], matrix[split:]
+    train_y, test_y = labels[:train_end], labels[split:]
     primary = train_booster(
         train_x, train_y, num_boost_round=rounds,
         penalty_fp=cfg.tournament.penalty_fp, penalty_fn=cfg.tournament.penalty_fn,
@@ -125,7 +131,7 @@ def _meta_labeling(matrix, labels, t1_offset, block_ids, cfg):
     test_sig = primary_signal(predict_proba(primary, test_x), threshold)
     weights = None
     if t1_offset is not None and cfg.tournament.sample_weighting == "uniqueness":
-        weights = uniqueness_sample_weights(absolute_t1(t1_offset, n, block_ids))[:split]
+        weights = uniqueness_sample_weights(absolute_t1(t1_offset, n, block_ids))[:train_end]
     result = run_meta_labeling(
         train_x, train_y, test_x, test_y, train_sig, test_sig,
         _meta_fit_fn(cfg), cfg.tournament.meta_threshold, cfg.tournament.meta_criterion, weights,
