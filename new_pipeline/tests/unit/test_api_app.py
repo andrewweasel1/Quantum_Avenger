@@ -142,3 +142,34 @@ def test_monitor_endpoints_with_seeded_ledgers(tmp_path, monkeypatch):
 
     alerts = client.get("/api/monitor/alerts").json()
     assert any(a["severity"] == "critical" for a in alerts)  # drawdown breach fired
+
+
+def test_json_safe_coerces_non_finite_floats():
+    from new_pipeline.api.json_response import json_safe
+
+    cleaned = json_safe(
+        {"a": float("inf"), "b": float("-inf"), "c": float("nan"), "d": 1.5,
+         "nested": [float("inf"), {"e": float("nan")}], "s": "ok", "i": 3}
+    )
+    assert cleaned == {"a": None, "b": None, "c": None, "d": 1.5,
+                       "nested": [None, {"e": None}], "s": "ok", "i": 3}
+
+
+def test_results_with_infinite_metric_serialises_to_null(client, tmp_path):
+    # A real run can record haircut_sharpe == inf; Starlette's default JSONResponse
+    # would 500 on that. SafeJSONResponse must turn it into null and return 200.
+    run_dir = tmp_path / "runs" / "infrun"
+    (run_dir / "output").mkdir(parents=True)
+    (run_dir / "status.json").write_text(json.dumps({"run_id": "infrun", "status": "done"}))
+    (run_dir / "spec.json").write_text(json.dumps({"run_id": "infrun", "params": {}}))
+    (run_dir / "output" / "promotion_registry.json").write_text(
+        json.dumps({"promotions": [{"sector": "Tech", "haircut_sharpe": float("inf"),
+                                    "dsr": float("nan"), "pbo": 0.0}],
+                    "active_champions": {}})
+    )
+    response = client.get("/api/runs/infrun/results")
+    assert response.status_code == 200
+    promo = response.json()["promotions"][0]
+    assert promo["haircut_sharpe"] is None
+    assert promo["dsr"] is None
+    assert promo["pbo"] == 0.0

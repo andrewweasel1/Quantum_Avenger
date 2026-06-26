@@ -1,9 +1,15 @@
-import { Activity, LayoutDashboard, type LucideIcon, SlidersHorizontal } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  LayoutDashboard,
+  type LucideIcon,
+  SlidersHorizontal,
+} from "lucide-react";
 import { type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type PageKey = "overview" | "control";
+export type PageKey = "overview" | "analytics" | "control";
 
 interface NavItem {
   key: PageKey;
@@ -13,6 +19,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
+  { key: "analytics", label: "Analytics", icon: BarChart3 },
   { key: "control", label: "Engine Control", icon: SlidersHorizontal },
 ];
 

@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from new_pipeline.api.jobs import RunManager
+from new_pipeline.api.json_response import SafeJSONResponse
 from new_pipeline.api.routers import config, monitor, runs
 
 _DEFAULT_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -29,7 +30,11 @@ def _cors_origins() -> list[str]:
 
 
 def create_app(runs_dir: str | Path | None = None) -> FastAPI:
-    app = FastAPI(title="Quantum Avenger API", version="0.1.0")
+    app = FastAPI(
+        title="Quantum Avenger API",
+        version="0.1.0",
+        default_response_class=SafeJSONResponse,  # coerce inf/NaN floats -> null
+    )
     app.state.run_manager = RunManager(runs_dir)
 
     app.add_middleware(
