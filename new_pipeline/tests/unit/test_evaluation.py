@@ -40,9 +40,11 @@ def test_stationary_bootstrap_preserves_autocorrelation():
 
 def test_summary_metrics_on_known_series():
     metrics = summary_metrics(np.array([0.1, -0.05, 0.2, 0.0, -0.1]))
-    assert set(metrics) == {"sharpe", "max_drawdown", "win_rate", "profit_factor"}
+    assert set(metrics) == {"sharpe", "sortino", "max_drawdown", "win_rate", "profit_factor"}
     assert metrics["win_rate"] == 0.5  # 2 wins out of 4 traded bars
     assert metrics["max_drawdown"] <= 0.0
+    # Downside deviation <= total stdev for this positive-mean series -> Sortino >= Sharpe > 0.
+    assert metrics["sortino"] >= metrics["sharpe"] > 0.0
 
 
 def test_write_html_tearsheet_degrades_without_quantstats():
