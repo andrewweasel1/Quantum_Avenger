@@ -199,6 +199,35 @@ export interface Alert {
   message: string;
 }
 
+export interface TradeRow {
+  symbol: string;
+  side: string;
+  qty: number;
+  limit_price: number;
+  status: string;
+  order_id: string;
+  fill_price: number;
+  pnl: number;
+  timestamp?: string | null;
+}
+
+export interface VetoRow {
+  symbol: string;
+  signal: string;
+  entry_price: number;
+  veto_reason: string;
+  veto_gate: string;
+  dsr: number | null;
+  position_size: number;
+  execution_id: string;
+  timestamp?: string | null;
+}
+
+export interface Registry {
+  active_champions: Record<string, string>;
+  promotions: PromotionEntry[];
+}
+
 export interface CreateRunRequest {
   params: RunParams;
   overrides: ConfigValues;
@@ -239,4 +268,7 @@ export const api = {
   vetoes: () => request<VetoSummary>("/api/monitor/vetoes"),
   risk: () => request<RiskView>("/api/monitor/risk"),
   alerts: () => request<Alert[]>("/api/monitor/alerts"),
+  trades: () => request<TradeRow[]>("/api/monitor/trades"),
+  vetoLog: () => request<VetoRow[]>("/api/monitor/veto-log"),
+  registry: () => request<Registry>("/api/monitor/registry"),
 };

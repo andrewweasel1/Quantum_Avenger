@@ -114,6 +114,7 @@ def test_monitor_endpoints_empty_are_graceful(client):
     }
     assert client.get("/api/monitor/alerts").json() == []
     assert client.get("/api/monitor/trades").json() == []
+    assert client.get("/api/monitor/veto-log").json() == []
 
 
 def test_monitor_endpoints_with_seeded_ledgers(tmp_path, monkeypatch):
@@ -139,6 +140,10 @@ def test_monitor_endpoints_with_seeded_ledgers(tmp_path, monkeypatch):
     assert len(client.get("/api/monitor/trades").json()) == 3
     assert client.get("/api/monitor/performance").json()["total_pnl"] == pytest.approx(-0.12)
     assert client.get("/api/monitor/vetoes").json()["by_gate"] == {"shield": 1, "grader": 1}
+
+    veto_rows = client.get("/api/monitor/veto-log").json()
+    assert len(veto_rows) == 3
+    assert {r["veto_gate"] for r in veto_rows} == {"none", "shield", "grader"}
 
     alerts = client.get("/api/monitor/alerts").json()
     assert any(a["severity"] == "critical" for a in alerts)  # drawdown breach fired

@@ -3,13 +3,14 @@ import {
   BarChart3,
   LayoutDashboard,
   type LucideIcon,
+  Radio,
   SlidersHorizontal,
 } from "lucide-react";
 import { type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type PageKey = "overview" | "analytics" | "control";
+export type PageKey = "overview" | "analytics" | "monitor" | "control";
 
 interface NavItem {
   key: PageKey;
@@ -20,6 +21,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "analytics", label: "Analytics", icon: BarChart3 },
+  { key: "monitor", label: "Live Monitor", icon: Radio },
   { key: "control", label: "Engine Control", icon: SlidersHorizontal },
 ];
 

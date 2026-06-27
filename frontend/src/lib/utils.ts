@@ -16,6 +16,18 @@ export function formatNumber(value: number | null | undefined, digits = 2): stri
   return value.toFixed(digits);
 }
 
+export function formatTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** Underwater curve: each point's fractional drop from the running-max equity. */
 export function drawdownSeries(equity: number[]): number[] {
   let peak = -Infinity;

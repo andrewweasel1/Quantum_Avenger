@@ -52,3 +52,9 @@ export const useRisk = () =>
   useQuery({ queryKey: ["monitor", "risk"], queryFn: api.risk, ...monitorOptions });
 export const useAlerts = () =>
   useQuery({ queryKey: ["monitor", "alerts"], queryFn: api.alerts, ...monitorOptions });
+export const useTrades = () =>
+  useQuery({ queryKey: ["monitor", "trades"], queryFn: api.trades, ...monitorOptions });
+export const useVetoLog = () =>
+  useQuery({ queryKey: ["monitor", "veto-log"], queryFn: api.vetoLog, ...monitorOptions });
+export const useRegistry = () =>
+  useQuery({ queryKey: ["monitor", "registry"], queryFn: api.registry, ...monitorOptions });

@@ -7,6 +7,7 @@ endpoints are safe to call before any live trading has happened.
 """
 
 from dataclasses import asdict
+from pathlib import Path
 
 import pyarrow.parquet as pq
 from fastapi import APIRouter
@@ -18,7 +19,14 @@ from new_pipeline.monitoring.dashboard.views import model_registry_view, risk_vi
 
 router = APIRouter(prefix="/api/monitor", tags=["monitor"])
 
-_MAX_TRADES = 500  # cap rows sent to the trade-log table
+_MAX_ROWS = 500  # cap rows sent to the ledger tables
+
+
+def _recent_rows(path) -> list[dict]:
+    """The most recent rows of a ledger parquet (newest last), or [] if absent."""
+    if not Path(path).exists():
+        return []
+    return pq.read_table(path).to_pylist()[-_MAX_ROWS:]
 
 
 def _manager() -> RealtimeDataManager:
@@ -73,11 +81,11 @@ def alerts() -> list[dict]:
 @router.get("/trades")
 def trades() -> list[dict]:
     """The most recent trade-log rows (capped), newest last; empty if no log."""
-    path = get_config().dashboard.trade_log_path
-    from pathlib import Path
+    return _recent_rows(get_config().dashboard.trade_log_path)
 
-    if not Path(path).exists():
-        return []
-    table = pq.read_table(path)
-    rows = table.to_pylist()
-    return rows[-_MAX_TRADES:]
+
+@router.get("/veto-log")
+def veto_log() -> list[dict]:
+    """The most recent veto-ledger rows (capped) — per-decision detail for the
+    veto-analysis table (symbol, signal, gate, reason, DSR, size). Empty if none."""
+    return _recent_rows(get_config().dashboard.veto_ledger_path)
