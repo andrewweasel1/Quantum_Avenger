@@ -14,6 +14,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from new_pipeline.monitoring.metrics import get_metrics
+
 DEFAULT_RUNS_DIR = Path(os.environ.get("QA_API_RUNS_DIR", "./data/api_runs"))
 
 
@@ -47,6 +49,7 @@ class RunManager:
             )
         finally:
             log.close()  # the child holds its own dup of the fd
+        get_metrics().increment("api_runs_launched_total")
         return run_id
 
     def status(self, run_id: str) -> dict | None:

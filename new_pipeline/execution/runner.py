@@ -29,6 +29,8 @@ from new_pipeline.execution.orchestrator import TradeOrchestrator, TradeRequest
 from new_pipeline.execution.trade_log import TradeLog, TradeRecord
 from new_pipeline.execution.veto_ledger import VetoLedger
 from new_pipeline.features.polars_engine import compile_features
+from new_pipeline.monitoring.alerting import dispatch_current_alerts
+from new_pipeline.monitoring.metrics import get_metrics
 from new_pipeline.tournament.simulator import simulate_t1_returns
 from new_pipeline.tournament.trainer import load_booster, predict_proba
 
@@ -87,6 +89,8 @@ def run_trading_session(
                 adapters, orchestrator, trade_log, start, end, cfg, counters,
             )
 
+    get_metrics().increment("trading_sessions_total")
+    dispatch_current_alerts(cfg)
     return SessionSummary(
         sectors=list(champions),
         decisions=counters["decisions"],

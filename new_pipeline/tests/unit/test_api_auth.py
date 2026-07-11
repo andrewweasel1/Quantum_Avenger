@@ -41,6 +41,13 @@ def test_health_probe_stays_open(secured_client):
     assert secured_client.get("/api/health").status_code == 200
 
 
+def test_metrics_is_gated_when_auth_enabled(secured_client):
+    # Prometheus must present the bearer token once auth is on.
+    assert secured_client.get("/metrics").status_code == 401
+    good = {"Authorization": "Bearer s3cret-token"}
+    assert secured_client.get("/metrics", headers=good).status_code == 200
+
+
 def test_enabled_without_token_env_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setenv("QA_DASHBOARD__AUTH_ENABLED", "true")
     monkeypatch.delenv("QA_API_TOKEN", raising=False)

@@ -149,6 +149,17 @@ def test_monitor_endpoints_with_seeded_ledgers(tmp_path, monkeypatch):
     assert any(a["severity"] == "critical" for a in alerts)  # drawdown breach fired
 
 
+def test_metrics_endpoint_serves_prometheus_exposition(client):
+    # Launch a run so the process counter moves, then scrape.
+    client.post("/api/runs", json={"params": {"max_symbols": 1}})
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    body = response.text
+    assert "# TYPE quantum_avenger_veto_rate gauge" in body  # ledger KPI gauge
+    assert "quantum_avenger_api_runs_launched_total 1.0" in body  # process counter
+
+
 def test_json_safe_coerces_non_finite_floats():
     from new_pipeline.api.json_response import json_safe
 

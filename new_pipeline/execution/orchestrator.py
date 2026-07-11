@@ -19,6 +19,7 @@ from new_pipeline.execution.grader import Grader
 from new_pipeline.execution.verdict_engine import VerdictEngine
 from new_pipeline.execution.veto_ledger import VetoLedger, VetoRecord
 from new_pipeline.features.shields import evaluate_risk_veto_gates
+from new_pipeline.monitoring.metrics import get_metrics
 
 
 @dataclass
@@ -144,6 +145,9 @@ class TradeOrchestrator:
                 execution_id=execution_id,
             )
         )
+        metrics = get_metrics()
+        metrics.increment("decisions_total")
+        metrics.increment("executed_total")
         return {"execution_id": execution_id, "outcome": "executed"}
 
     def _fallback_node(self, state: _State) -> dict:
@@ -164,6 +168,10 @@ class TradeOrchestrator:
                 execution_id="",
             )
         )
+        metrics = get_metrics()
+        metrics.increment("decisions_total")
+        metrics.increment("vetoed_total")
+        metrics.increment(f"vetoed_{gate}_total")
         return {"outcome": "vetoed"}
 
     # --- routers -----------------------------------------------------------

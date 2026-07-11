@@ -206,6 +206,8 @@ class DashboardConfig(BaseModel):
     min_sharpe_alert: float = 0.0
     max_veto_rate_alert: float = 0.5
     auth_enabled: bool = False
+    alert_channels: list[str] = []  # push delivery: "console" and/or "webhook"; [] = off
+    alert_webhook_url: str = ""
 
 
 class SystemConfig(BaseModel):

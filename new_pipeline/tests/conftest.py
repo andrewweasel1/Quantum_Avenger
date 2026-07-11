@@ -19,6 +19,16 @@ def _reset_config_singleton():
 
 
 @pytest.fixture(autouse=True)
+def _reset_metrics_singleton():
+    """Zero the process-wide metrics collector so counter assertions are isolated."""
+    from new_pipeline.monitoring.metrics import reset_metrics
+
+    reset_metrics()
+    yield
+    reset_metrics()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_feature_registry(tmp_path):
     """Redirect the feature-registry singleton to a throwaway path so no test
     mutates the tracked data/metadata/feature_registry.yaml artifact."""

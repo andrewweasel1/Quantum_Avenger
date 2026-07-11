@@ -186,6 +186,10 @@ dashboard:
   max_drawdown_alert: 0.15
   min_sharpe_alert: 0.0
   max_veto_rate_alert: 0.5
+  # Push alert delivery at trading-session end: "console" and/or "webhook".
+  # Empty (default) = alerts are computed for the UI but not pushed anywhere.
+  alert_channels: []
+  alert_webhook_url: ""
 
 alpaca:
   # Credentials are injected via QA_ALPACA__API_KEY / QA_ALPACA__SECRET_KEY env

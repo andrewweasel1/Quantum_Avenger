@@ -24,6 +24,49 @@ def render_prometheus(metrics: dict[str, float], prefix: str = DEFAULT_PREFIX) -
     return "\n".join(lines) + "\n" if lines else ""
 
 
+def runtime_metrics(cfg=None) -> dict[str, float]:
+    """The ``/metrics`` payload: process counters + ledger KPIs + champion DSR.
+
+    Counters come from the process-wide collector (decisions/executions/vetoes,
+    API run launches); the KPI gauges (veto_rate, total_pnl, sharpe,
+    max_drawdown, win_rate, profit_factor, …) are computed from the ledgers at
+    scrape time so any process serving this — the API or a standalone exporter —
+    reports the same book state; ``dsr_value`` is the weakest active champion's
+    promoted DSR (the alert-relevant one), omitted until something promotes.
+    """
+    from new_pipeline.config import get_config
+    from new_pipeline.monitoring.dashboard.realtime import RealtimeDataManager
+    from new_pipeline.monitoring.metrics import get_metrics
+
+    cfg = cfg or get_config()
+    manager = RealtimeDataManager(cfg.dashboard.veto_ledger_path, cfg.dashboard.trade_log_path)
+    payload: dict[str, float] = dict(get_metrics().counters)
+    payload.update(manager.kpis())
+    dsr = _min_promoted_dsr(cfg.evaluation.registry_path)
+    if dsr is not None:
+        payload["dsr_value"] = dsr
+    return payload
+
+
+def _min_promoted_dsr(registry_path) -> float | None:
+    """Min over each sector's most recent promoted DSR (append-only registry)."""
+    import json
+    from pathlib import Path
+
+    file = Path(registry_path)
+    if not file.exists():
+        return None
+    try:
+        data = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    latest: dict[str, float] = {}
+    for entry in data.get("promotions", []):
+        if entry.get("promoted") and isinstance(entry.get("dsr"), (int, float)):
+            latest[entry.get("sector", "?")] = float(entry["dsr"])
+    return min(latest.values()) if latest else None
+
+
 class TelemetryExporter:
     def __init__(self, prefix: str = DEFAULT_PREFIX) -> None:
         self._prefix = prefix

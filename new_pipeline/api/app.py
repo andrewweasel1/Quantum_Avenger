@@ -56,6 +56,17 @@ def create_app(runs_dir: str | Path | None = None) -> FastAPI:
     def health() -> dict:
         return {"status": "ok"}
 
+    @app.get("/metrics", tags=["health"], dependencies=protected)
+    def metrics():
+        # Prometheus text exposition: process counters + ledger KPI gauges.
+        # When auth is enabled, configure the scraper with the bearer token.
+        from starlette.responses import PlainTextResponse
+
+        from new_pipeline.monitoring.telemetry import TelemetryExporter, runtime_metrics
+
+        body = TelemetryExporter().export(runtime_metrics())
+        return PlainTextResponse(body, media_type="text/plain; version=0.0.4")
+
     if _STATIC_DIR.exists():  # pragma: no cover - only when the React app is built
         from fastapi.staticfiles import StaticFiles
 
