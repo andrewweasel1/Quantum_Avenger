@@ -13,9 +13,10 @@ Prod: ``python -m new_pipeline.api.app``             (serves the built SPA + API
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from new_pipeline.api.auth import require_auth
 from new_pipeline.api.jobs import RunManager
 from new_pipeline.api.json_response import SafeJSONResponse
 from new_pipeline.api.routers import config, monitor, runs
@@ -44,9 +45,12 @@ def create_app(runs_dir: str | Path | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(config.router)
-    app.include_router(runs.router)
-    app.include_router(monitor.router)
+    # Data/control routers sit behind the (config-gated) bearer-token check; the
+    # health probe and the SPA's static assets stay open for load balancers/browsers.
+    protected = [Depends(require_auth)]
+    app.include_router(config.router, dependencies=protected)
+    app.include_router(runs.router, dependencies=protected)
+    app.include_router(monitor.router, dependencies=protected)
 
     @app.get("/api/health", tags=["health"])
     def health() -> dict:

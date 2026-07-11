@@ -234,11 +234,47 @@ export interface CreateRunRequest {
   seed?: number;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+// --- Bearer-token support (only needed when the API runs with auth_enabled) ---
+// The token is provisioned once via localStorage, a `#token=...` URL fragment
+// (stored then stripped from the address bar), or a prompt on the first 401.
+const TOKEN_KEY = "qa_api_token";
+
+(function bootstrapTokenFromHash() {
+  const match = window.location.hash.match(/token=([^&]+)/);
+  if (match) {
+    localStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1]));
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+  }
+})();
+
+let tokenPrompt: Promise<string | null> | null = null;
+
+function askForToken(): Promise<string | null> {
+  // Single-flight: many queries can 401 at once; only one prompt should appear.
+  if (!tokenPrompt) {
+    tokenPrompt = Promise.resolve().then(() => {
+      const entered = window.prompt("This dashboard requires an API token (QA_API_TOKEN):");
+      const token = entered?.trim() || null;
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+      return token;
+    });
+    tokenPrompt.finally(() => {
+      tokenPrompt = null;
+    });
+  }
+  return tokenPrompt;
+}
+
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(path, { ...init, headers: { ...headers, ...init?.headers } });
+  if (response.status === 401 && !retried) {
+    if (token) localStorage.removeItem(TOKEN_KEY); // stored token is stale — re-ask
+    const supplied = await askForToken();
+    if (supplied) return request<T>(path, init, true);
+  }
   if (!response.ok) {
     let detail: unknown;
     try {
