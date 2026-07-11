@@ -30,39 +30,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: quantum-avenger-dashboard
-  labels: {app: quantum-avenger, component: dashboard}
-spec:
-  replicas: 1
-  selector:
-    matchLabels: {app: quantum-avenger, component: dashboard}
-  template:
-    metadata:
-      labels: {app: quantum-avenger, component: dashboard}
-    spec:
-      securityContext: {runAsNonRoot: true, runAsUser: 10001}
-      containers:
-        - name: dashboard
-          image: quantum-avenger-dashboard:latest
-          ports:
-            - containerPort: 8501
-          envFrom:
-            - configMapRef: {name: quantum-avenger-config}
-          resources:
-            requests: {cpu: "250m", memory: "512Mi"}
-            limits: {cpu: "1", memory: "1Gi"}
-          readinessProbe:
-            httpGet: {path: /_stcore/health, port: 8501}
-            initialDelaySeconds: 10
-            periodSeconds: 15
-          livenessProbe:
-            httpGet: {path: /_stcore/health, port: 8501}
-            initialDelaySeconds: 20
-            periodSeconds: 30
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
   name: quantum-avenger-mcp
   labels: {app: quantum-avenger, component: mcp}
 spec:

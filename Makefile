@@ -4,7 +4,7 @@ export PYTHONPATH := $(CURDIR)
 .PHONY: install lint test coverage docker compose-up
 
 install:
-	$(PYTHON) -m pip install -r new_pipeline/requirements.txt -r new_pipeline/requirements-dev.txt
+	$(PYTHON) -m pip install -r new_pipeline/requirements.txt -r new_pipeline/requirements-dev.txt -r new_pipeline/requirements-api.txt
 
 lint:
 	ruff check new_pipeline
@@ -17,7 +17,6 @@ coverage:
 
 docker:
 	docker build -f new_pipeline/hardening/docker/Dockerfile.app -t quantum-avenger-app .
-	docker build -f new_pipeline/hardening/docker/Dockerfile.dashboard -t quantum-avenger-dashboard .
 	docker build -f new_pipeline/hardening/docker/Dockerfile.mcp -t quantum-avenger-mcp .
 
 compose-up:

@@ -9,6 +9,3 @@ scrape_configs:
   - job_name: quantum-avenger-app
     static_configs:
       - targets: ["app:9090"]
-  - job_name: quantum-avenger-dashboard
-    static_configs:
-      - targets: ["dashboard:8501"]

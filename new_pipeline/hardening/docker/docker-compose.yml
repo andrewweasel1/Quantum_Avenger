@@ -10,15 +10,9 @@ services:
       QA_ENV: production
     command: ["health"]
 
-  dashboard:
-    build:
-      context: ../../..
-      dockerfile: new_pipeline/hardening/docker/Dockerfile.dashboard
-    image: quantum-avenger-dashboard
-    environment:
-      QA_ENV: production
-    ports:
-      - "8501:8501"
+  # NOTE: the web dashboard (React SPA + FastAPI — see /frontend and
+  # new_pipeline/api/) is not containerized yet; its image + service land with
+  # the deployment phase. The old Streamlit dashboard container was removed.
 
   mcp:
     build:
