@@ -29,6 +29,14 @@ python -m new_pipeline.api.app          # serves /api + frontend/dist at :8000
 cd frontend && npm install && npm run dev
 ```
 
+Going live (paper trading / real ingest) starts with the preflight — it reports
+SDKs, credentials, and per-host egress, and exits 0 when the Alpaca path is ready:
+
+```bash
+pip install -r new_pipeline/requirements-live.txt
+python -m new_pipeline.scripts.live_preflight   # then: live_smoke, ingest_training_data
+```
+
 Tests / lint (CI enforces all of these plus a frontend build and `pip-audit`):
 
 ```bash
