@@ -2,7 +2,7 @@
 
 > **Where the project is, and exactly what remains to fully realize it.** Companion to `ARCHITECTURE_ROADMAP.md` (current‑state architecture), `quantitative_math.md` (the rigor reference), and `OFFENSE_ROADMAP.md` (the signal‑generation / alpha build‑forward plan). The `PHASE_*_SPECIFICATION.md` files are the original build specs — historical; this doc + the roadmap are the current source of truth.
 
-**Snapshot.** ~115 modules under `new_pipeline/`; **333 tests** (330 pass / 3 skip on optional `torch`/`spaCy`/`alpaca` + 1 GPU); **~93 % branch coverage**; `ruff` clean; fully seeded/deterministic. The whole pipeline runs **offline with no network** (`python new_pipeline/main.py pipeline` / `trade`). What remains is **live integration, the agentic‑RAG depth, monitoring backends, and Phase‑7 hardening** — not core quant logic.
+**Snapshot (audited 2026‑07‑10).** ~142 modules under `new_pipeline/` + a React SPA under `frontend/`; **495 tests pass / 5 skip** (optional `alpaca`/`torch`/`spaCy` + CUDA); **~94 % branch coverage**; `ruff` clean; fully seeded/deterministic. The whole pipeline runs **offline with no network** (`python new_pipeline/main.py pipeline` / `trade`), and the **React + FastAPI dashboard** (Overview / Analytics / Live Monitor / Engine Control) replaced Streamlit entirely. What remains is **operational**: live integration (incl. building the missing Ollama LLM client), the agentic‑RAG depth, the observability spine, and packaging/deploy — not core quant logic. The forward plan is phased for least backtracking: **(1) truth & contracts → (2) observability → (3) live data → (4) LLM + RAG → (5) paper trading → (6) package & deploy.**
 
 ---
 
@@ -15,53 +15,53 @@ Legend: **✅ Stable** · **◐ Offline‑complete, live deferred** · **○ Sca
 | Config / core (exceptions, logging, circuit breaker, seeding) | ✅ | Pydantic schema + env overlays; JSON logs + `trace_id`; deterministic seeding. |
 | Data layer (vaults, ingestion, validation, news vault, sentiment builder) | ✅ | Out‑of‑core PyArrow; PIT news vault; causal sentiment feature builder. |
 | Feature engine (`features/`) | ✅ | Polars engine, Shield + slippage, markov/regime fusion, **triple‑barrier labels**. CUDA kernels present; **CPU fallback is what runs in CI** (GPU box deferred). |
-| Tournament (`tournament/`) | ✅ | **Span/ticker purged CPCV + φ paths**, **causal feature selection**, **uniqueness weighting**, XGBoost trainer, block‑wise simulator, per‑sector director. |
-| Evaluation (`evaluation/`) | ✅ | DSR/N_eff/PSR/MinTRL, per‑regime DSR, **block‑bootstrap gauntlet**, PBO/CSCV, haircut, MinBTL, **path‑distribution DSR gate**, immutable registry. |
+| Tournament (`tournament/`) | ✅ | **Span/ticker purged CPCV + φ paths**, **causal feature selection**, **uniqueness weighting**, XGBoost trainer, block‑wise simulator, per‑sector director, **meta‑labeling**, **stat‑arb (Engle‑Granger + Johansen + OU)**. |
+| Evaluation (`evaluation/`) | ✅ | DSR/N_eff/PSR/MinTRL, per‑regime DSR, **block‑bootstrap gauntlet**, PBO/CSCV, haircut, MinBTL, **path‑distribution DSR gate**, **IC/ICIR alpha eval**, **White's RC / Hansen's SPA**, immutable registry. |
+| Portfolio (`portfolio/`) | ✅ | HRP / NCO / inverse‑variance / IC‑weighted combination on RMT‑ or Ledoit‑Wolf‑denoised covariance; exact cross‑sector + stat‑arb books. |
 | Execution graph (`execution/orchestrator.py`, `mcp_tools.py`, ledgers) | ◐ | LangGraph Verdict→Grader→Risk‑Veto→Execute wired; deterministic MCP tools; veto/trade ledgers. Runs on fakes. |
 | LLM client | ○ | **`FakeLLMClient` only — no live LLM is wired** (Ollama config exists, unused). |
 | RAG (`execution/rag_engine.py`) | ○ | Late‑chunk + BM25 + a **hashing‑bag embedder placeholder**; **`retrieve()` is not called by the graph** and the evidence_for/against/missing loop is not built. |
 | Anonymizer | ◐ | Offline **gazetteer** anonymizer complete (`entity_anonymizer.py`); live **spaCy** path (`anonymizer_spacy.py`) lazy‑imported + mock‑tested. |
 | Adapters — market/broker/news/sentiment | ◐ | Fakes + `StaticUniverse`/`StaticNews` fully wired; **Alpaca**, **GDELT**, **EDGAR**, **FinBERT**, **spaCy** lazy‑imported, coverage‑omitted, mock‑tested — **not yet exercised against the real services**. |
-| Monitoring / dashboard (`monitoring/`) | ◐ | Streamlit multipage renders from fixture parquet; KPI cards; telemetry text formatter. **Metrics collector / health are minimal; alert delivery (email/Slack/webhook) is stubbed; no live streaming.** |
-| Models registry (`models/`) | ◐ | Minimal; the durable promotion registry lives in `evaluation/promotion.py`. |
-| Hardening (`hardening/`) | ✗ | Only a chaos/load test exists; Docker/K8s/Terraform/CI/observability/secrets not started. |
+| Dashboard — React SPA + FastAPI (`frontend/`, `new_pipeline/api/`) | ✅ | Overview / Analytics / Live Monitor / Engine Control over a typed JSON API; schema‑introspected control panel; subprocess‑isolated runs; **config‑gated bearer‑token auth**. Replaced Streamlit (UI deleted; its pure data layer reused by the monitor router). |
+| Monitoring backends (`monitoring/`) | ○ | The dashboard *data* layer (`realtime`/`views`/`alerts`) is ✅ and live via the API. Everything else is **dormant**: `MetricsCollector` has no production increments, `HealthCheck` is a hardcoded stub, nothing serves `/metrics`, and alert `dispatch()` (console/webhook channels) is wired to nothing. |
+| Hardening (`hardening/`) | ○ | **CI is real** (ruff + coverage gate + frontend build + pip‑audit + Dependabot). Docker (app/mcp) + K8s (app/mcp) are unvalidated templates; Terraform is an explicit skeleton; the observability configs name metrics that are not yet emitted; the React+FastAPI dashboard has **no container yet**. |
 
 ---
 
-## Remaining work to reach the wholly‑realized system
+## Remaining work — the phased plan (ordered for least backtracking)
 
-### 1. Live LLM wiring — ○ → ◐  (Phase 5 cutover)
-- **Task:** implement an `OllamaLLMClient(LLMClient)` (verdict/grader) behind the existing `adapters/base.py::LLMClient` ABC; select it in `adapters/factory.py` when `fusion.ollama_endpoint` is configured (today the factory always returns `FakeLLMClient`).
-- **Reuse:** `FusionConfig.{ollama_endpoint, llm_model_name, verdict_model, semaphore_limit}`; the `asyncio.Semaphore` throttle pattern in `execution/async_sentiment.py`.
-- **Acceptance:** an offline contract test with a mocked HTTP endpoint; the LangGraph verdict path runs end‑to‑end against a local Ollama on an allowlisted host; MCP still forbids the LLM doing math (G1).
+Each phase only consumes contracts finalized in an earlier phase. **Phase 1 (truth & contracts) shipped:** config‑gated bearer‑token API auth (`api/auth.py`, `QA_API_TOKEN`, fail‑closed, threaded through the frontend client), dead‑code removal (the superseded `models/` package, unused utils helpers, `BaseDataHandler`), deletion of the broken Streamlit‑targeting deploy artifacts, CI extension (API deps fixed, frontend build job, gating `pip-audit`, Dependabot), and this docs sync.
 
-### 2. Agentic RAG — ○ → ✅  (Phase 5 depth)
-- **Task:** (a) replace the hashing‑bag embedder in `execution/rag_engine.py` with a real sentence‑transformer embedder behind a pluggable `embed` interface (FAISS + the existing BM25 for hybrid retrieval); (b) wire `rag_engine.retrieve()` into `execution/orchestrator.py` as a retrieval node, and have the verdict/grader evaluate **evidence_for / evidence_against / missing_evidence** (the roadmap's agentic loop).
-- **Acceptance:** deterministic offline test with a fixture corpus (retrieval recall on a known query); orchestrator graph test showing the evidence fields populated and a grader retry on insufficient evidence.
+### Phase 2 — Observability spine (offline) — ○ → ✅
+- **Task:** real `HealthCheck` probes (vaults / ledgers / registry / API); `MetricsCollector` increments in the runner, orchestrator, and API; a `/metrics` route on FastAPI rendering `telemetry.render_prometheus`; alert `dispatch()` wired to the existing console/webhook channels behind config; re‑point `observability/{prometheus.yml,alert_rules.yml,grafana_dashboard.json}` at the metric names actually emitted.
+- **Why now:** paper trading (Phase 5) must be observable from its first session, and the deploy configs (Phase 6) must scrape metrics that exist.
+- **Acceptance:** `/metrics` serves real counters after a `trade` session; a threshold breach fires a delivered alert in a test harness.
 
-### 3. Live data / broker / news validation — ◐ → ✅  (Phase 5/7 cutover)
-- **Task:** exercise the already‑written live adapters against real services on an allowlisted host — `market_alpaca.py`, `broker_alpaca.py`, `news_alpaca.py` (paper account via `QA_ALPACA__*`), `news_gdelt.py` (keyless egress), `news_edgar.py` (`news.edgar_identity` + `edgartools`), `sentiment_finbert.py` + `anonymizer_spacy.py` (model downloads). Drivers exist: `scripts/live_smoke.py`, `scripts/ingest_training_data.py --news --news-vault`.
-- **Acceptance:** a paper smoke run (account snapshot → tiny order → positions); a real PIT news vault materialized and read back identically; fusion run with non‑zero `sentiment_score`.
+### Phase 3 — Live data plane (needs creds + egress) — ◐ → ✅
+- **Task:** exercise the already‑written live adapters against real services on an allowlisted host — `market_alpaca.py`, `broker_alpaca.py`, `news_alpaca.py` (paper account via `QA_ALPACA__*`), `news_gdelt.py` (keyless egress), `news_edgar.py` (`news.edgar_identity` + `edgartools`), `fundamentals_edgar.py`. Drivers exist: `scripts/live_smoke.py`, `scripts/ingest_training_data.py --news --news-vault`. Expect small fixes — the coverage‑omitted live code has never seen a real payload.
+- **Acceptance:** a paper smoke run (account snapshot → tiny order → positions); a real PIT news vault materialized and read back identically; the **first real‑data backtest launched and analyzed through the dashboard**.
 
-### 4. Monitoring / ops backends — ◐ → ✅  (Phase 6 completion)
-- **Task:** a real `MetricsCollector` (time‑series/rolling windows) + non‑trivial health checks; wire `monitoring/telemetry.py` to a Prometheus exporter; implement alert‑delivery backends (email / Slack / webhook) behind `monitoring/dashboard/notifications.py`; optional live streaming for the dashboard.
-- **Acceptance:** `/metrics` serves real counters; an alert fires and is delivered on a threshold breach in a test harness; dashboard pages render live KPIs.
+### Phase 4 — LLM + agentic RAG — ○ → ✅
+- **Task:** (a) **build the missing `OllamaLLMClient(LLMClient)`** (verdict/grader) behind `adapters/base.py::LLMClient`, consuming `FusionConfig.{ollama_endpoint, llm_model_name, verdict_model, semaphore_limit}` — today the factory returns `FakeLLMClient` even in live mode; (b) install the fusion stack (FinBERT + spaCy) on the host; (c) replace the hashing‑bag embedder in `execution/rag_engine.py` with a real sentence‑transformer behind a pluggable `Embedder` seam (hashing fallback kept), and wire `rag_engine.retrieve()` into `execution/orchestrator.py` as a retrieval node feeding **evidence_for / evidence_against / missing_evidence** to the verdict + grader.
+- **Acceptance:** offline contract test with a mocked HTTP endpoint; retrieval‑recall test on a fixture corpus; an orchestrator graph test showing evidence fields populated and a grader retry on insufficient evidence; the verdict path runs against a local Ollama; MCP still forbids the LLM doing math (G1).
 
-### 5. Phase‑7 production hardening — ✗ → ✅
-- **Task:** Dockerfiles (app / dashboard / MCP), K8s manifests + node selectors (GPU for trainer/feature, CPU for dashboard/MCP), Terraform, a CI pipeline enforcing **ruff + golden tests + ≥85 % coverage**, Prometheus/Grafana, secrets via a manager, chaos/recovery playbooks; a **nightly GPU↔CPU reconciliation** job asserting kernel parity.
-- **Acceptance:** images build; CI green with the coverage gate; `@pytest.mark.gpu` parity passes on a GPU runner; secrets never in the repo.
+### Phase 5 — Paper trading end‑to‑end — integration only
+- **Task:** `run_mode=paper` with real adapters + the real LLM: promoted champions trade the Alpaca paper account through the LangGraph graph; ledgers fill; the Live Monitor is genuinely live; a scheduled cadence (daily trade session, weekly retrain → promote) and an ops runbook.
+- **Acceptance:** a multi‑day paper run with delivered alerts, live dashboards, and an auditable veto/trade ledger.
 
-### 6. GPU execution path — ◐ → ✅
-- **Task:** validate the `@cuda.jit` kernels in `features/gpu_kernels.py` and the XGBoost `device='cuda'` / `ExtMemQuantileDMatrix` path on a real GPU box; keep the CPU fallback as the CI default.
-- **Acceptance:** GPU≈CPU within tolerance on the golden vectors (skip‑if‑no‑CUDA); end‑to‑end run on GPU.
+### Phase 6 — Package & deploy (Phase‑7 completion) — ○ → ✅
+- **Task:** a multi‑stage Dockerfile for the dashboard (node builds the SPA → uvicorn serves API + `dist/`); corrected compose/K8s topology (the Streamlit remnants were deleted in Phase 1); real secret mounts (`QA_ALPACA__*`, `QA_FUSION__OLLAMA_ENDPOINT`, `QA_API_TOKEN`); Prometheus scraping the real `/metrics`; CI building images; chaos/recovery validation; a **nightly GPU↔CPU reconciliation** job asserting kernel parity (`features/gpu_kernels.py`, XGBoost `device='cuda'`).
+- **Acceptance:** images build in CI; the stack comes up via compose/K8s with secrets from the environment; GPU≈CPU within tolerance on the golden vectors on a GPU runner.
 
-### 7. Deferred quantitative‑rigor refinements (research)
+### Continuous track — deferred refinements (zero coupling; slot anywhere)
 - **Cross‑sectional leakage:** the per‑sector matrix pools tickers, so same‑date / different‑ticker correlation is not addressed by time‑ordered CPCV — add a cross‑sectional purge or group‑by‑date scheme.
 - **Options‑mode labels:** an options payoff label behind the same label interface as a future `RunMode` (the triple‑barrier interface already anticipates it).
 - **Nonlinear causal screen:** a transfer‑entropy / causal‑discovery alternative to the linear Granger screen (the selector already keys off a `feature_selection_method` switch).
-- **Meta‑labelling:** a secondary model sizing/filtering the triple‑barrier primary (the sequential bootstrap utility is already in place for bagged meta‑models).
+- **Frontend quality:** a test framework (vitest + RTL — the SPA has zero tests today), an error boundary, URL routing/deep‑linkable run views, and SSE adoption for live run logs (the endpoint exists; the UI polls).
+- **Library‑only utilities, wire or keep as opt‑in:** `sequential_bootstrap` (bagged meta‑models), `hansens_spa` (gate option next to White's RC), `min_track_record_length` / `minimum_profit_hurdle` (promotion‑audit diagnostics).
 
-### 8. Alpha research roadmap (signal generation)
+### Alpha research roadmap (signal generation) — top‑6 status
 The pipeline's *defenses* are deep but its *offense* is thin — ~11 microstructure/technical features → one XGBoost classifier per sector. `quantitative_math.md` Part II is the full toolbox; these are the **top‑6, prioritized by alpha‑per‑effort**, each of which must pass the existing CPCV + DSR/PBO/haircut/path‑DSR gauntlet before promotion. **`OFFENSE_ROADMAP.md` is the architecture + phased sequencing** that turns this list into shipped code (the three missing axes — cross‑sectional stage, IC/ICIR alpha eval, multi‑sleeve combination — and the P0→P5 plan).
 
 1. **Cross‑sectional factor library + IC/ICIR eval** (Part II §B,§H) — momentum/reversal/value/quality/low‑vol/BAB/seasonality, ranked + sector/beta‑neutralized; evaluate with Information Coefficient / ICIR. **◐ factor library shipped** — `features/factors.py::add_cross_sectional_factors` (mom_12_1/reversal_21/low_vol/seasonality, sector‑neutral cross‑sectional z‑score, `xf_*` columns) behind `features.factor_set` (default‑off), wired into `build_training_frame`; the causal screen already retains `xf_low_vol`/`xf_mom_12_1` on the offline run. **IC/ICIR eval shipped (P2)** — `evaluation/alpha_eval.py` (universe‑wide rank‑IC, ICIR, t‑stat, breadth, hit‑rate, decay → `alpha_eval.json`), golden‑pinned. **Value/quality shipped (Phase C):** a point-in-time fundamentals layer (`adapters/` `FundamentalsSource` + fake/static/EDGAR, `data/fundamentals.py` backward as-of join) feeds `book_to_market`/`earnings_yield`/`roe` cross-sectional factors. **Pending:** promoting a standalone factor *sleeve* (vs. factors‑as‑features today) arrives with the P4 portfolio layer. *Biggest expected lift — most equity alpha lives here.*

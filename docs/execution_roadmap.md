@@ -25,5 +25,5 @@
 
 ## Phase 6: Tournament Evaluation & Live Deployment — ◐
 - ✅ HMM regime evaluator; **DSR ≥ 0.95** promotion — now part of a far larger gate stack (PSR/MinTRL/N_eff, PBO/CSCV, haircut, MinBTL, per‑regime DSR, **path‑distribution DSR gate**, block‑bootstrap gauntlet).
-- ✅ Streamlit dashboard + PyArrow‑cached veto ledger (renders from fixtures).
+- ✅ Dashboard + PyArrow‑cached veto ledger — now the **React + FastAPI** app (`frontend/` + `new_pipeline/api/`); the Streamlit UI was built, then replaced (its data layer survives under `monitoring/dashboard/`).
 - ◐ Alpaca live execution: adapters written + mock‑tested; **live cutover deferred** (IMPLEMENTATION_STATUS §3).

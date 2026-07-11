@@ -1,9 +1,11 @@
 # Quantum Avenger — Web Dashboard
 
 A modern, decoupled React front-end for the Quantum Avenger ML quant engine. The
-UI talks to a thin **FastAPI** layer (`new_pipeline/api/`) over JSON/SSE — no Python
+UI talks to a thin **FastAPI** layer (`new_pipeline/api/`) over JSON — no Python
 is imported in the browser, and the quant engine (`tournament`/`evaluation`/
-`features`) is untouched.
+`features`) is untouched. Live data is polled via TanStack Query (an SSE
+log-stream endpoint exists at `/api/runs/{id}/logs/stream`; the UI doesn't
+consume it yet).
 
 > This React app fully replaces the old Streamlit dashboard. The Streamlit UI has
 > been removed; its pure data + alert layer (`new_pipeline/monitoring/dashboard/`:
@@ -49,6 +51,19 @@ python -m new_pipeline.api.app   # FastAPI serves the API *and* dist/ as an SPA
 
 When `frontend/dist/` exists, `new_pipeline/api/app.py` mounts it at `/`, so a
 single `uvicorn` process serves the whole app on one origin.
+
+## Auth
+
+The API ships with config-gated bearer-token auth. To enable it:
+
+```bash
+QA_DASHBOARD__AUTH_ENABLED=true QA_API_TOKEN=<secret> python -m new_pipeline.api.app
+```
+
+The SPA attaches the token from `localStorage`; provision it once via a
+`#token=<secret>` URL fragment (stored, then stripped from the address bar) or
+type it into the prompt that appears on the first 401. `/api/health` and the
+static assets stay open. Default is auth off for local development.
 
 ## Layout
 

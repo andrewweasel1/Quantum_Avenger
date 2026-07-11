@@ -19,7 +19,7 @@ Quantum Avenger is built as a layered hybrid trading system combining determinis
 3. **Phase 3: Tournament** — CPCV backtesting, out-of-core XGBoost training, candidate model generation.
 4. **Phase 4: Evaluation** — Statistical validation via DSR, HMM generalization, promotion and champion registry.
 5. **Phase 5: Orchestration** — FastMCP bridge, entity anonymization, RAG, LangGraph verdict workflow, trade execution.
-6. **Phase 6: Monitoring** — Streamlit dashboard, KPI streaming, veto analytics, trade log exploration.
+6. **Phase 6: Monitoring** — the React + FastAPI dashboard (`frontend/` + `new_pipeline/api/`): KPIs, veto analytics, trade log, run analytics, engine control.
 7. **Phase 7: Hardening** — Deployment, observability, resilience, security, and production readiness.
 
 ---
@@ -167,7 +167,7 @@ Quantum Avenger is built as a layered hybrid trading system combining determinis
   - Risk and market tool registry
 
 - `quantum-avenger-dashboard`
-  - Streamlit monitoring UI
+  - React + FastAPI monitoring UI (`frontend/` + `new_pipeline/api/`)
   - Live metrics and export services
 
 - `quantum-avenger-worker` (optional)

@@ -55,7 +55,7 @@ What is buildable **now** (data surface = OHLCV + causal sentiment) vs. what nee
 
 ## Phased build
 
-Each phase = its own commit series; **config‑gated, default‑off** so the 333‑test suite stays bit‑stable until each family is flipped on after it clears the gauntlet.
+Each phase = its own commit series; **config‑gated, default‑off** so the full offline suite stays bit‑stable until each family is flipped on after it clears the gauntlet.
 
 | Phase | Adds | New modules | Plugs in at | quant_math / §8 |
 |---|---|---|---|---|
