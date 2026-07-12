@@ -1,0 +1,59 @@
+# The dashboard (FastAPI + built React SPA, image quantum-avenger-api).
+# Probes hit the open /api/health; everything else sits behind the bearer gate
+# when QA_DASHBOARD__AUTH_ENABLED is on (token from quantum-avenger-secrets).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantum-avenger-api
+  labels: {app: quantum-avenger, component: api}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: quantum-avenger, component: api}
+  template:
+    metadata:
+      labels: {app: quantum-avenger, component: api}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: api
+          image: quantum-avenger-api:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: {name: quantum-avenger-config}
+            - secretRef: {name: quantum-avenger-secrets}
+          env:
+            - name: QA_DASHBOARD__AUTH_ENABLED
+              value: "true" # never expose the control plane unauthenticated
+          resources:
+            requests: {cpu: "250m", memory: "1Gi"}
+            limits: {cpu: "2", memory: "4Gi"} # backtest subprocesses run in-pod
+          readinessProbe:
+            httpGet: {path: /api/health, port: 8000}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /api/health, port: 8000}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          volumeMounts:
+            - {name: qa-data, mountPath: /app/data}
+            - {name: qa-models, mountPath: /app/models}
+      volumes:
+        - name: qa-data
+          emptyDir: {} # swap for a PVC to persist runs/ledgers across restarts
+        - name: qa-models
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantum-avenger-api
+  labels: {app: quantum-avenger, component: api}
+spec:
+  type: ClusterIP # front with your ingress controller + TLS of choice
+  selector: {app: quantum-avenger, component: api}
+  ports:
+    - port: 80
+      targetPort: 8000

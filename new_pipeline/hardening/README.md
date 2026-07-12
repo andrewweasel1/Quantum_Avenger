@@ -3,16 +3,18 @@
 Operational artifacts for building, shipping, observing, and recovering the system.
 
 ## Layout
-- `docker/` — `Dockerfile.{app,mcp}` + `docker-compose.yml` (local prod-like stack).
-  The web dashboard (React SPA + FastAPI, `/frontend` + `new_pipeline/api/`) is
-  **not containerized yet** — its image, service, and ingress land with the
-  deployment phase.
-- `k8s/` — `deployment.yaml` (app / mcp), `configmap.yaml`, `secrets.yaml`
-  (placeholder template), `hpa.yaml`, `networkpolicy.yaml`.
-- `observability/` — `prometheus.yml` scrape config + `alert_rules.yml` +
-  `grafana_dashboard.json`. NOTE: the referenced `quantum_avenger_*` metrics are
-  not emitted yet — wiring `MetricsCollector` into the runner/API and exposing
-  `/metrics` is the observability phase.
+- `docker/` — `Dockerfile.{api,app,mcp}` + `docker-compose.yml` (api + app +
+  mcp + Prometheus). `Dockerfile.api` is the dashboard: a Node stage builds the
+  React SPA, then uvicorn serves `/api` + the SPA on one origin (non-root,
+  healthchecked, `QA_API_HOST=0.0.0.0`). `Dockerfile.gpu` is a CUDA trainer
+  template (needs a GPU host).
+- `k8s/` — `api.yaml` (dashboard Deployment + ClusterIP Service, auth forced
+  on, probes on `/api/health`), `deployment.yaml` (app / mcp),
+  `configmap.yaml`, `secrets.yaml` (placeholder template incl. `QA_API_TOKEN`),
+  `hpa.yaml`, `networkpolicy.yaml`.
+- `observability/` — `prometheus.yml` (scrapes `api:8000/metrics`) +
+  `alert_rules.yml` + `grafana_dashboard.json`, all referencing metrics the
+  code actually emits.
 - `terraform/` — an explicit provider-agnostic skeleton (no cloud resources).
 - `docs/` — deployment, recovery, and security guides.
 - `chaos/` — `load_test.py` perf smoke (Shield + t+1 simulator throughput).
@@ -29,17 +31,18 @@ make compose-up   # run the stack locally
 ```
 
 ## Metrics
-`new_pipeline.monitoring.telemetry.render_prometheus` renders Prometheus text
-exposition (gauges prefixed `quantum_avenger_`), but **nothing populates or
-serves it yet** — no production code increments `MetricsCollector` and no
-process runs `metrics_endpoint.serve_metrics`. `alert_rules.yml` /
-`grafana_dashboard.json` name the intended metrics; they go live when the
-observability phase wires collection into the runner/orchestrator/API.
+The api serves `/metrics` (Prometheus text exposition): process counters
+incremented by the orchestrator / runner / API plus KPI gauges computed from
+the ledgers at scrape time and the weakest champion's `dsr_value`. When API
+auth is enabled, give the scraper the bearer token (`authorization` block in
+`prometheus.yml`).
 
 ## Scope notes
-Dockerfiles and K8s manifests are templates, not a validated deployment: the
-app container runs the `health` stub (not a trading loop), Terraform is a
-skeleton, and the dashboard (React + FastAPI) has no image yet. The MCP image
-runs the offline tool-inventory entrypoint; the live FastMCP stdio server is
-wired at the live cutover. See `docs/DEPLOYMENT.md` for the current manual
-steps.
+CI builds all three CPU images on every PR and smoke-tests the api container
+(health + SPA). The api image's runtime layout, entrypoint, healthcheck
+command, 0.0.0.0 binding, and run-subprocess spawn path are validated by a
+staged-layout simulation; the app container still defaults to the `health`
+command (point it at `pipeline`/`trade` per deployment), Terraform remains a
+skeleton, and the MCP image runs the offline tool-inventory entrypoint until
+the live FastMCP cutover. GPU: `Dockerfile.gpu` + the manual
+`nightly-gpu.yml` parity workflow need a self-hosted CUDA runner.

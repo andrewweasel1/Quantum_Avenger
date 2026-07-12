@@ -1,6 +1,27 @@
 # Local prod-like stack. Run from this directory: docker compose up --build
-# (build context is the repo root so the images can COPY new_pipeline/).
+# (build context is the repo root so the images can COPY new_pipeline/ + frontend/).
 services:
+  # The dashboard: FastAPI + the built React SPA on one origin (port 8000).
+  # Auth is off by default; to enable it export QA_DASHBOARD__AUTH_ENABLED=true
+  # and QA_API_TOKEN=<secret> before `docker compose up` — secrets come from the
+  # host environment, never from this file.
+  api:
+    build:
+      context: ../../..
+      dockerfile: new_pipeline/hardening/docker/Dockerfile.api
+    image: quantum-avenger-api
+    environment:
+      QA_ENV: production
+      QA_DASHBOARD__AUTH_ENABLED: ${QA_DASHBOARD__AUTH_ENABLED:-false}
+      QA_API_TOKEN: ${QA_API_TOKEN:-}
+      QA_ALPACA__API_KEY: ${QA_ALPACA__API_KEY:-}
+      QA_ALPACA__SECRET_KEY: ${QA_ALPACA__SECRET_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - qa-data:/app/data # run artifacts + ledgers survive restarts
+      - qa-models:/app/models
+
   app:
     build:
       context: ../../..
@@ -9,10 +30,9 @@ services:
     environment:
       QA_ENV: production
     command: ["health"]
-
-  # NOTE: the web dashboard (React SPA + FastAPI — see /frontend and
-  # new_pipeline/api/) is not containerized yet; its image + service land with
-  # the deployment phase. The old Streamlit dashboard container was removed.
+    volumes:
+      - qa-data:/app/data
+      - qa-models:/app/models
 
   mcp:
     build:
@@ -21,3 +41,19 @@ services:
     image: quantum-avenger-mcp
     environment:
       QA_ENV: production
+
+  # Scrapes the api's /metrics (see ../observability/prometheus.yml). When API
+  # auth is enabled, add an `authorization` block with the bearer token there.
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ../observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+volumes:
+  qa-data:
+  qa-models:

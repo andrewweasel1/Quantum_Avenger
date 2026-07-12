@@ -1,0 +1,25 @@
+# GPU <-> CPU kernel reconciliation. Requires a SELF-HOSTED runner with an
+# NVIDIA GPU (labels: [self-hosted, gpu]) — GitHub-hosted runners have no CUDA,
+# so this workflow is manual until such a runner is registered; add a
+# `schedule:` block then to make it nightly.
+name: GPU reconciliation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gpu-parity:
+    runs-on: [self-hosted, gpu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install runtime + GPU deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r new_pipeline/requirements.txt -r new_pipeline/requirements-dev.txt -r new_pipeline/requirements-gpu.txt
+      - name: GPU-marked tests (kernel parity vs CPU golden vectors)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest new_pipeline/tests -m gpu -v

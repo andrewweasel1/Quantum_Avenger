@@ -8,5 +8,9 @@ reference_code/
 docs/
 *.md
 logs/
-data/raw/
-data/processed/
+data/
+models/
+# Frontend: the image's node stage runs npm ci + vite build itself.
+frontend/node_modules/
+frontend/dist/
+frontend/docs/

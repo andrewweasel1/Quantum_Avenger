@@ -1,0 +1,47 @@
+# Quantum Avenger — dashboard image: FastAPI + the built React SPA on one origin.
+# Build from the repo root:
+#   docker build -f new_pipeline/hardening/docker/Dockerfile.api -t quantum-avenger-api .
+#
+# Stage 1 builds the SPA with Node; stage 2 is the Python runtime serving
+# /api/* and frontend/dist (mounted by api/app.py when the directory exists).
+# The full engine requirements are installed because POST /api/runs spawns
+# `python -m new_pipeline.api.run_job` subprocesses that run the real pipeline.
+
+FROM node:22-slim AS frontend
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app \
+    QA_API_HOST=0.0.0.0 \
+    QA_API_PORT=8000
+
+WORKDIR /app
+
+COPY new_pipeline/requirements.txt new_pipeline/requirements-api.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-api.txt
+
+COPY new_pipeline ./new_pipeline
+# app.py resolves the SPA at <repo-root>/frontend/dist == /app/frontend/dist here.
+COPY --from=frontend /build/dist ./frontend/dist
+
+# Non-root runtime; the run/ledger/model dirs must be writable by uid 10001
+# (POST /api/runs writes ./data/api_runs, the runner writes ./data/ledger).
+RUN useradd --create-home --uid 10001 quant \
+    && mkdir -p data models logs \
+    && chown -R quant /app
+USER quant
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)" || exit 1
+
+ENTRYPOINT ["python", "-m", "new_pipeline.api.app"]

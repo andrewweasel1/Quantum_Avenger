@@ -59,3 +59,26 @@ jobs:
         run: |
           python -m pip install --upgrade pip pip-audit
           pip-audit -r new_pipeline/requirements.txt -r new_pipeline/requirements-api.txt -r new_pipeline/requirements-dev.txt
+
+  images:
+    # Gate the Dockerfiles: build (no push) every image from the repo root.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build api image (SPA build + engine runtime)
+        run: docker build -f new_pipeline/hardening/docker/Dockerfile.api -t quantum-avenger-api .
+      - name: Build app image
+        run: docker build -f new_pipeline/hardening/docker/Dockerfile.app -t quantum-avenger-app .
+      - name: Build mcp image
+        run: docker build -f new_pipeline/hardening/docker/Dockerfile.mcp -t quantum-avenger-mcp .
+      - name: Smoke the api container (health endpoint through the image entrypoint)
+        run: |
+          docker run -d --name qa-api -p 8000:8000 quantum-avenger-api
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/api/health
+          curl -sf http://127.0.0.1:8000/ | grep -q "Quantum Avenger"  # SPA served
+          docker logs qa-api
+          docker rm -f qa-api
