@@ -43,9 +43,11 @@ omit = [
     "new_pipeline/adapters/broker_alpaca.py",
     "new_pipeline/scripts/live_smoke.py",
     "new_pipeline/scripts/ingest_training_data.py",
-    # Fusion ML adapters: require torch/transformers/spaCy, absent from the CI image.
+    # Fusion ML adapters: require torch/transformers/spaCy/sentence-transformers,
+    # absent from the CI image.
     "new_pipeline/adapters/sentiment_finbert.py",
     "new_pipeline/execution/anonymizer_spacy.py",
+    "new_pipeline/execution/embedders.py",
     # Live PIT news providers: require egress (GDELT) / edgartools (EDGAR).
     "new_pipeline/adapters/news_gdelt.py",
     "new_pipeline/adapters/news_edgar.py",

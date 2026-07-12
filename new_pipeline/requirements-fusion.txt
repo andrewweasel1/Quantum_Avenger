@@ -9,3 +9,4 @@
 torch>=2.0
 transformers>=4.30
 spacy>=3.7
+sentence-transformers>=3.0

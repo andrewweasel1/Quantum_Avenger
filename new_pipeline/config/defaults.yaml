@@ -156,10 +156,14 @@ stat_arb:
   min_basket: 3
 
 rag:
-  embedder: "hashing"
+  embedder: "hashing"  # "sentence_transformer" on a fusion host (requirements-fusion.txt)
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
   top_k: 5
   chunk_size: 512
   chunk_overlap: 100
+  # When true, the trade graph retrieves evidence from the request context and
+  # feeds it to the verdict + grader (the agentic evidence loop).
+  evidence_enabled: false
 
 news:
   providers:

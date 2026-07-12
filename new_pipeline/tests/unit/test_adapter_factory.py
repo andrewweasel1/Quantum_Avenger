@@ -44,3 +44,20 @@ def test_live_mode_builds_alpaca_adapters():
 def test_unknown_mode_raises():
     with pytest.raises(ValueError, match="unknown run_mode"):
         build_adapters(_cfg_with_mode("banana"))
+
+
+def test_build_llm_client_selects_ollama_when_fusion_live(monkeypatch):
+    from new_pipeline.adapters.factory import build_llm_client
+    from new_pipeline.adapters.llm_ollama import OllamaLLMClient
+    from new_pipeline.config import reload_config
+
+    monkeypatch.setenv("QA_FUSION__ENABLED", "true")
+    cfg = reload_config()
+    assert isinstance(build_llm_client(cfg), OllamaLLMClient)
+
+    cfg.fusion.enabled = False  # explicit flip back -> deterministic fake
+    assert isinstance(build_llm_client(cfg), FakeLLMClient)
+
+    cfg.fusion.enabled = True
+    cfg.fusion.ollama_endpoint = ""  # enabled but no endpoint -> fake
+    assert isinstance(build_llm_client(cfg), FakeLLMClient)

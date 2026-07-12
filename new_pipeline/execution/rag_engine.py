@@ -92,3 +92,21 @@ class RagEngine:
         combined = 0.5 * dense + 0.5 * lexical
         order = np.argsort(combined)[::-1][:k]
         return [RetrievedChunk(self._chunks[i], float(combined[i])) for i in order]
+
+
+def build_rag_engine(cfg) -> RagEngine:
+    """RagEngine from ``cfg.rag``: the deterministic hashing embedder by default,
+    the sentence-transformers embedder when ``rag.embedder: sentence_transformer``
+    (fusion host; lazy heavy import)."""
+    if cfg.rag.embedder == "sentence_transformer":
+        from new_pipeline.execution.embedders import SentenceTransformerEmbedder
+
+        embedder = SentenceTransformerEmbedder(cfg.rag.embedding_model)
+    else:
+        embedder = HashingEmbedder()
+    return RagEngine(
+        embedder,
+        top_k=cfg.rag.top_k,
+        chunk_size=cfg.rag.chunk_size,
+        overlap=cfg.rag.chunk_overlap,
+    )

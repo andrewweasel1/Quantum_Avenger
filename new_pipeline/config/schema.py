@@ -173,10 +173,12 @@ class MCPConfig(BaseModel):
 
 
 class RAGConfig(BaseModel):
-    embedder: str = "hashing"
+    embedder: str = "hashing"  # "hashing" (offline default) | "sentence_transformer"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     top_k: int = 5
     chunk_size: int = 512
     chunk_overlap: int = 100
+    evidence_enabled: bool = False  # wire retrieve() into the trade graph's evidence node
 
 
 class NewsConfig(BaseModel):

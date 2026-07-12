@@ -68,12 +68,18 @@ def run_trading_session(
     ledger_dir = Path(cfg.execution.ledger_dir)
     ledger = VetoLedger(ledger_dir / "veto_ledger.parquet")
     trade_log = TradeLog(ledger_dir / "trade_log.parquet")
+    rag = None
+    if cfg.rag.evidence_enabled:
+        from new_pipeline.execution.rag_engine import build_rag_engine
+
+        rag = build_rag_engine(cfg)
     orchestrator = TradeOrchestrator(
         adapters.llm,
         adapters.broker,
         ledger,
         max_retries=cfg.execution.max_retries,
         tif=cfg.execution.tif,
+        rag=rag,
     )
     dsr_by_sector = _champion_dsr(registry)
     sector_of = adapters.universe.sectors()

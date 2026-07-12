@@ -72,12 +72,23 @@ def build_adapters(cfg) -> AdapterBundle:
     raise ValueError(f"unknown run_mode: {mode!r}")
 
 
+def build_llm_client(cfg) -> LLMClient:
+    """The live Ollama client when fusion is enabled and an endpoint is configured;
+    the deterministic fake otherwise. Gated on ``fusion.enabled`` (not just the
+    endpoint) because ``defaults.yaml`` ships a localhost endpoint — going live
+    with the LLM is an explicit flip, mirroring the FinBERT/spaCy stack."""
+    if cfg.fusion.enabled and cfg.fusion.ollama_endpoint:
+        from new_pipeline.adapters.llm_ollama import OllamaLLMClient
+
+        return OllamaLLMClient.from_config(cfg)
+    return FakeLLMClient()
+
+
 def _build_live_adapters(cfg) -> AdapterBundle:  # pragma: no cover - needs the live SDK + egress
     """Assemble the live Alpaca adapters (lazy SDK import keeps offline runs clean).
 
-    The LLM stays the deterministic fake until an Ollama endpoint is configured —
-    Alpaca covers market data, news, and order execution. Going fully live is a
-    drop-in LLM client here, no change elsewhere.
+    The LLM is the Ollama client when ``fusion.enabled`` + ``ollama_endpoint``
+    say so (see ``build_llm_client``), else the deterministic fake.
     """
     from new_pipeline.adapters.broker_alpaca import AlpacaBroker
     from new_pipeline.adapters.market_alpaca import AlpacaMarketDataSource
@@ -89,7 +100,7 @@ def _build_live_adapters(cfg) -> AdapterBundle:  # pragma: no cover - needs the 
     return AdapterBundle(
         market_data=AlpacaMarketDataSource(*creds, feed=cfg.alpaca.data_feed),
         news=AlpacaNewsSource(*creds),
-        llm=FakeLLMClient(),
+        llm=build_llm_client(cfg),
         broker=AlpacaBroker(*creds, paper=cfg.alpaca.paper),
         universe=universe,
         sentiment_engine=sentiment_engine,
