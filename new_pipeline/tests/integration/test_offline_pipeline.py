@@ -160,3 +160,26 @@ def test_offline_pipeline_records_reality_check_when_enabled(tmp_path, monkeypat
     assert registry["promotions"]
     pvalue = registry["promotions"][0]["reality_check_pvalue"]
     assert pvalue is not None and 0.0 < pvalue <= 1.0
+
+
+def test_build_training_frame_skips_failing_symbols(monkeypatch):
+    """One bad ticker must not kill a 500-name ingest (real feeds have gaps)."""
+    from datetime import date
+
+    from new_pipeline.adapters import FakeMarketDataSource
+
+    class _FlakySource(FakeMarketDataSource):
+        def history(self, symbol, start, end):
+            if symbol == "BAD":
+                raise RuntimeError("unknown symbol")
+            return super().history(symbol, start, end)
+
+    reload_config()
+    frame = build_training_frame(
+        ["AAPL", "BAD", "MSFT"], {"AAPL": "Information Technology",
+                                   "BAD": "Information Technology",
+                                   "MSFT": "Information Technology"},
+        date(2021, 1, 1), date(2021, 3, 31), _FlakySource(), base.get_config(),
+    )
+    tickers = set(frame["ticker"].unique().to_list())
+    assert "BAD" not in tickers and {"AAPL", "MSFT"} <= tickers

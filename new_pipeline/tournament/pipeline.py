@@ -7,6 +7,7 @@ Sharpe + HMM promotion. The legacy multi-phase ``main`` flow, rebuilt offline.
 
 import itertools
 import json
+import logging
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -52,6 +53,8 @@ from new_pipeline.tournament.simulator import sharpe_ratio
 from new_pipeline.tournament.stat_arb import adf_tstat, engle_granger, mean_reversion_returns
 from new_pipeline.tournament.trainer import load_booster, predict_proba
 
+_logger = logging.getLogger(__name__)
+
 FEATURE_COLS = [
     "returns", "atr", "adv_20", "volatility", "spread_pct", "roll_spread",
     "amihud", "ncskew", "duvol",
@@ -78,14 +81,20 @@ def build_training_frame(
     """
     source = source or FakeMarketDataSource()
     cfg = cfg or get_config()
-    rows = [
-        {
-            "date": bar.day, "ticker": symbol, "open": bar.open, "high": bar.high,
-            "low": bar.low, "close": bar.close, "volume": bar.volume,
-        }
-        for symbol in symbols
-        for bar in source.history(symbol, start, end)
-    ]
+    rows = []
+    for symbol in symbols:
+        try:
+            bars = source.history(symbol, start, end)
+        except Exception as exc:  # one bad ticker must not kill a 500-name ingest
+            _logger.warning("skipping %s: history fetch failed (%s)", symbol, exc)
+            continue
+        rows.extend(
+            {
+                "date": bar.day, "ticker": symbol, "open": bar.open, "high": bar.high,
+                "low": bar.low, "close": bar.close, "volume": bar.volume,
+            }
+            for bar in bars
+        )
     features = compile_features(pl.DataFrame(rows))
     if cfg.features.extended_features:
         features = add_extended_features(
@@ -153,7 +162,9 @@ def run_offline_pipeline(
     output_dir, start=date(2021, 1, 1), end=date(2022, 12, 31), max_symbols=None, source=None
 ) -> dict:
     cfg = get_config()
-    universe = StaticUniverseProvider()
+    universe = StaticUniverseProvider(
+        Path(cfg.data.universe_path) if cfg.data.universe_path else None
+    )
     sectors = universe.sectors()
     symbols = list(sectors)[: max_symbols] if max_symbols else list(sectors)
     news_source = sentiment_engine = anonymizer = None

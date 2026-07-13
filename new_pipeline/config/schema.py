@@ -7,6 +7,9 @@ class DataConfig(BaseModel):
     parquet_blocksize: str
     row_group_size: int
     validation_mode: str
+    # Path to a universe membership CSV (ticker,gics_sector,start_date,end_date).
+    # Empty -> the packaged 41-name fixture; e.g. new_pipeline/data/universe/sp500.csv.
+    universe_path: str = ""
 
 
 class FeatureConfig(BaseModel):

@@ -4,6 +4,10 @@ data:
   parquet_blocksize: "128MiB"
   row_group_size: 100000
   validation_mode: "strict"
+  # Universe membership CSV; empty -> the packaged 41-name fixture. The S&P 500
+  # snapshot lives at new_pipeline/data/universe/sp500.csv (current-constituent,
+  # i.e. survivorship-biased until a licensed PIT membership dataset replaces it).
+  universe_path: ""
 
 features:
   cache_enabled: true

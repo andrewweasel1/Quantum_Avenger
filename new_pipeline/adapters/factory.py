@@ -46,11 +46,21 @@ class AdapterBundle:
     anonymizer: Anonymizer = field(default_factory=EntityAnonymizer)
 
 
+def _build_universe(cfg) -> StaticUniverseProvider:
+    """The membership fixture selected by ``data.universe_path`` (empty -> the
+    packaged 41-name default; e.g. the S&P 500 snapshot at
+    ``new_pipeline/data/universe/sp500.csv``)."""
+    from pathlib import Path
+
+    path = getattr(cfg.data, "universe_path", "")
+    return StaticUniverseProvider(Path(path) if path else None)
+
+
 def build_adapters(cfg) -> AdapterBundle:
     """Return the adapter bundle for ``cfg.system.run_mode``."""
     mode = (cfg.system.run_mode or "offline").lower()
     if mode in OFFLINE_MODES:
-        universe = StaticUniverseProvider()
+        universe = _build_universe(cfg)
         return AdapterBundle(
             market_data=FakeMarketDataSource(),
             news=FakeNewsSource(),
@@ -95,7 +105,7 @@ def _build_live_adapters(cfg) -> AdapterBundle:  # pragma: no cover - needs the 
     from new_pipeline.adapters.news_alpaca import AlpacaNewsSource
 
     creds = (cfg.alpaca.api_key, cfg.alpaca.secret_key)
-    universe = StaticUniverseProvider()
+    universe = _build_universe(cfg)
     sentiment_engine, anonymizer = _build_fusion(cfg, universe)
     return AdapterBundle(
         market_data=AlpacaMarketDataSource(*creds, feed=cfg.alpaca.data_feed),
