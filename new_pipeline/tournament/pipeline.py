@@ -164,6 +164,14 @@ def run_offline_pipeline(
         news_source = build_news_source(cfg, universe)  # PIT fixture offline
         sentiment_engine, anonymizer = bundle.sentiment_engine, bundle.anonymizer
         source = source or bundle.market_data
+    elif source is None:
+        from new_pipeline.adapters.factory import LIVE_MODES, build_adapters
+
+        # A live run_mode backtests on real bars even without the fusion stack —
+        # e.g. the dashboard launching a run with a {"system": {"run_mode":
+        # "paper"}} override pulls Alpaca history instead of the fake source.
+        if (cfg.system.run_mode or "offline").lower() in LIVE_MODES:
+            source = build_adapters(cfg).market_data
     fundamentals_source = None
     if cfg.features.factor_set and any(f in FUNDAMENTAL_FACTORS for f in cfg.features.factor_set):
         from new_pipeline.adapters.factory import build_fundamentals_source

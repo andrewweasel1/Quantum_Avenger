@@ -78,3 +78,24 @@ def test_install_config_sets_the_singleton():
 def test_bad_override_value_raises_validation_error():
     with pytest.raises(ValidationError):
         build_overridden_config({"tournament": {"num_boost_round": "not-an-int"}})
+
+
+def test_overrides_start_from_the_effective_env_config(monkeypatch):
+    """Regression: dashboard-launched runs must keep QA_* env configuration.
+
+    build_overridden_config used to merge onto raw defaults, silently stripping
+    env-provided credentials/run_mode from every subprocess run.
+    """
+    monkeypatch.setenv("QA_TOURNAMENT__NUM_BOOST_ROUND", "33")
+    monkeypatch.setenv("QA_ALPACA__API_KEY", "env-key")
+    from new_pipeline.config import reload_config
+
+    reload_config()
+
+    cfg = build_overridden_config({})
+    assert cfg.tournament.num_boost_round == 33  # env survived
+    assert cfg.alpaca.api_key == "env-key"
+
+    cfg = build_overridden_config({"tournament": {"num_boost_round": 55}})
+    assert cfg.tournament.num_boost_round == 55  # explicit override beats env
+    assert cfg.alpaca.api_key == "env-key"  # untouched groups keep env values
