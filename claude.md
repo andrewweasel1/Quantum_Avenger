@@ -54,3 +54,14 @@ You must read the following files in the `/docs/` directory to understand the pr
 - `/docs/system_architecture.md`
 - `/docs/execution_roadmap.md`
 - `/docs/quantitative_math.md`
+
+# Operational preferences (standing)
+- **Backtest runs**: whenever a backtest/tournament run is executed for the user
+  (via the dashboard API or otherwise), capture a screenshot of the dashboard's
+  Analytics page rendering that run (headless Chromium at
+  `/opt/pw-browsers/chromium-*/chrome-linux/chrome` against the running API
+  server) and send it to the user alongside the written summary — visual
+  analysis is part of every run report.
+- **Secrets**: Alpaca credentials live only in environment variables
+  (`QA_ALPACA__API_KEY` / `QA_ALPACA__SECRET_KEY`), never in files or commits;
+  secret-scan the staged diff before every commit.
