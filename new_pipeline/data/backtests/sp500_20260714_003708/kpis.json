@@ -1,0 +1,15 @@
+{
+  "sharpe": 1.210186015717386,
+  "total_return": 0.005399345949692158,
+  "max_drawdown": -0.00410871456379136,
+  "win_rate": 0.5114503816793893,
+  "n_trades": 10743,
+  "signal_threshold": 0.18092651665210724,
+  "signal_quantile": 0.9,
+  "n_symbols": 501,
+  "n_train_rows": 152795,
+  "n_test_rows": 66092,
+  "split_date": "2025-12-26",
+  "test_start": "2025-12-29",
+  "test_end": "2026-07-09"
+}

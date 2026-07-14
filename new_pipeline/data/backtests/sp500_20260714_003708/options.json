@@ -1,0 +1,27 @@
+{
+  "universe": "S&P 500",
+  "start": "2024-07-15",
+  "end": "2026-07-10",
+  "use_news_sentiment": true,
+  "expanded_families": true,
+  "use_fundamentals": true,
+  "train_frac": 0.7,
+  "max_symbols": null,
+  "feature_columns": [
+    "returns",
+    "atr",
+    "adv_20",
+    "volatility",
+    "spread_pct",
+    "roll_spread",
+    "amihud",
+    "ncskew",
+    "duvol",
+    "regime",
+    "sentiment_score",
+    "fund_rev_yoy",
+    "fund_net_margin",
+    "fund_roe"
+  ],
+  "degradations": []
+}
