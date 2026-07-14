@@ -118,23 +118,37 @@ def _build_live_adapters(cfg) -> AdapterBundle:  # pragma: no cover - needs the 
     )
 
 
-def _build_fusion(cfg, universe):  # pragma: no cover - heavy ML deps (torch/transformers/spaCy)
-    """FinBERT + spaCy when fusion is enabled; deterministic fakes otherwise.
+def _build_fusion(cfg, universe):
+    """The fusion sentiment engine + anonymizer; deterministic fakes when off.
 
-    Lazy imports keep torch/transformers/spaCy out of the offline image; the
-    gazetteer is built from the universe's ticker -> alias map.
+    Backends: ``fusion.sentiment_backend`` selects FinBERT (neural; lazy
+    torch/transformers import, needs HF egress) or VADER (lexicon; base dep,
+    no downloads). The spaCy anonymizer degrades to the offline gazetteer
+    ``EntityAnonymizer`` when spaCy or its model isn't available, so fusion
+    never hard-fails on the NER dependency.
     """
-    if not cfg.fusion.enabled:
-        return FakeSentimentEngine(), EntityAnonymizer(
-            vocabulary=universe.symbols(), gazetteer=universe.aliases()
-        )
-    from new_pipeline.adapters.sentiment_finbert import FinBERTSentimentEngine
-    from new_pipeline.execution.anonymizer_spacy import SpacyNewsAnonymizer
-
-    return (
-        FinBERTSentimentEngine(model_name=cfg.fusion.sentiment_model),
-        SpacyNewsAnonymizer(universe.aliases(), spacy_model=cfg.fusion.spacy_model),
+    gazetteer_anonymizer = EntityAnonymizer(
+        vocabulary=universe.symbols(), gazetteer=universe.aliases()
     )
+    if not cfg.fusion.enabled:
+        return FakeSentimentEngine(), gazetteer_anonymizer
+
+    if cfg.fusion.sentiment_backend == "vader":
+        from new_pipeline.adapters.sentiment_vader import VaderSentimentEngine
+
+        engine = VaderSentimentEngine()
+    else:  # pragma: no cover - heavy ML deps (torch/transformers)
+        from new_pipeline.adapters.sentiment_finbert import FinBERTSentimentEngine
+
+        engine = FinBERTSentimentEngine(model_name=cfg.fusion.sentiment_model)
+
+    try:  # pragma: no cover - spaCy + model are fusion-host extras
+        from new_pipeline.execution.anonymizer_spacy import SpacyNewsAnonymizer
+
+        anonymizer = SpacyNewsAnonymizer(universe.aliases(), spacy_model=cfg.fusion.spacy_model)
+    except Exception:
+        anonymizer = gazetteer_anonymizer
+    return engine, anonymizer
 
 
 def build_fundamentals_source(cfg, universe=None):

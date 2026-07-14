@@ -112,8 +112,10 @@ def build_training_frame(
         cfg.features.label_method,
     )
     if news_source is not None and sentiment_engine is not None and anonymizer is not None:
-        labeled = _attach_sentiment(labeled, symbols, news_source, sentiment_engine, anonymizer)
-    if cfg.fusion.enabled:
+        labeled = _attach_sentiment(
+            labeled, symbols, news_source, sentiment_engine, anonymizer, start, end
+        )
+    if cfg.fusion.enabled and cfg.fusion.markov_features:
         labeled = add_markov_regime_features(labeled)
     sector_df = pl.DataFrame(
         {"ticker": list(sectors), "sector": [sectors[t] for t in sectors]}
@@ -130,19 +132,29 @@ def build_training_frame(
     return joined
 
 
-def _attach_sentiment(labeled, symbols, news_source, sentiment_engine, anonymizer) -> pl.DataFrame:
+def _attach_sentiment(
+    labeled, symbols, news_source, sentiment_engine, anonymizer, start, end
+) -> pl.DataFrame:
     """Overwrite the neutral ``sentiment_score`` with a real, causally-aligned
-    daily score joined per (ticker, date); no-news days keep the neutral 0.0."""
+    daily score joined per (ticker, date); no-news days keep the neutral 0.0.
+
+    One RANGE fetch per symbol — never a per-(symbol, day) loop, which against a
+    live provider like GDELT would mean hundreds of thousands of HTTP calls for
+    an index-scale universe. A failing symbol is skipped, not fatal."""
     from new_pipeline.data.sentiment_feature_builder import SentimentFeatureBuilder
 
     builder = SentimentFeatureBuilder(anonymizer=anonymizer, engine=sentiment_engine)
-    dates = labeled.select("date").unique().to_series().to_list()
-    records = [
-        {"timestamp": item.timestamp, "text": item.headline, "ticker": item.symbol}
-        for symbol in symbols
-        for day in dates
-        for item in news_source.headlines(symbol, day)
-    ]
+    records = []
+    for symbol in symbols:
+        try:
+            items = news_source.fetch(symbol, start, end)
+        except Exception as exc:
+            _logger.warning("skipping news for %s: fetch failed (%s)", symbol, exc)
+            continue
+        records.extend(
+            {"timestamp": item.timestamp, "text": item.headline, "ticker": item.symbol}
+            for item in items
+        )
     if not records:
         return labeled
     daily = builder.build_daily_sentiment(pd.DataFrame(records))
@@ -195,7 +207,12 @@ def run_offline_pipeline(
     )
     feature_cols = list(FEATURE_COLS)
     if cfg.fusion.enabled:
-        feature_cols += list(MARKOV_FEATURE_NAMES)
+        # Raw daily sentiment as a direct model feature (the causal screen judges
+        # it); the sentiment-fused HMM regime probabilities ride the (costly,
+        # config-gated) markov layer.
+        feature_cols += ["sentiment_score"]
+        if cfg.fusion.markov_features:
+            feature_cols += list(MARKOV_FEATURE_NAMES)
     if cfg.features.factor_set:
         feature_cols += factor_feature_names(cfg.features.factor_set)
     if cfg.features.extended_features:

@@ -75,6 +75,12 @@ class FusionConfig(BaseModel):
     semaphore_limit: int
     verdict_model: str = "qwen-3"
     sentiment_model: str = "ProsusAI/finbert"  # FinBERT weights (live sentiment engine)
+    # "finbert" (neural; needs torch + HF egress) | "vader" (lexicon; no downloads).
+    sentiment_backend: str = "finbert"
+    # Rolling sentiment-fused HMM regime features (markov_prob_persist_*).
+    # ~8s/ticker at 4y daily — disable for index-scale universes; the raw
+    # sentiment_score feature still feeds the model either way.
+    markov_features: bool = True
     spacy_model: str = "en_core_web_lg"  # spaCy NER model (live anonymizer)
     mask_for_scorer: bool = False  # FinBERT trained WITH names; mask only for the LLM
 

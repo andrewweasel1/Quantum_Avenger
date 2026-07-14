@@ -19,7 +19,11 @@ def test_offline_mode_returns_fakes():
 
 
 def test_live_mode_requires_credentials():
-    cfg = _cfg_with_mode("live")  # default config has empty Alpaca keys
+    cfg = _cfg_with_mode("live")
+    # Explicitly blank the keys: on hosts where QA_ALPACA__* env vars are set
+    # (live sessions), the effective config would otherwise carry them.
+    cfg.alpaca.api_key = ""
+    cfg.alpaca.secret_key = ""
     with pytest.raises(ValueError, match="QA_ALPACA"):
         build_adapters(cfg)
 

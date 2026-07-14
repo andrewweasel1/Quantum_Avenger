@@ -66,6 +66,12 @@ fusion:
   sentiment_timeout: 5.0
   semaphore_limit: 20
   verdict_model: "qwen-3"
+  # "finbert" (neural; needs torch + huggingface egress) | "vader" (lexicon
+  # augmented with financial terms; pure-python base dep, no downloads).
+  sentiment_backend: "finbert"
+  # Sentiment-fused rolling HMM regime features; costly (~8s/ticker at 4y daily)
+  # — disable for index-scale universes (sentiment_score still feeds the model).
+  markov_features: true
 
 system:
   run_mode: "backtest"
