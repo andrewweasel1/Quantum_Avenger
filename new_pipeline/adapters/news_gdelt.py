@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 
 DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 MIN_REQUEST_INTERVAL = 6.0  # GDELT asks for >= 5s between requests
-MAX_RETRIES = 8  # shared/proxied egress IPs get throttled well beyond 5s
+MAX_RETRIES = 10  # shared/proxied egress IPs get throttled well beyond 5s
+MAX_BACKOFF = 120.0
 TIMEOUT = 30.0
 
 # GICS sector -> GDELT full-text query for sector-level tone. Phrases keep the
@@ -66,7 +67,7 @@ class GdeltClient:
             self._last_request = time.monotonic()
             if response.status_code == 429:
                 logger.warning("GDELT 429; backing off (attempt %d)", attempt + 1)
-                time.sleep(MIN_REQUEST_INTERVAL * (attempt + 1))
+                time.sleep(min(MIN_REQUEST_INTERVAL * 2**attempt, MAX_BACKOFF))
                 continue
             if response.status_code != 200:
                 raise NewsSourceError(f"GDELT HTTP {response.status_code}: {response.text[:200]}")
@@ -76,7 +77,7 @@ class GdeltClient:
                 # GDELT returns plain-text rate-limit notices with HTTP 200.
                 if "limit requests" in response.text.lower():
                     logger.warning("GDELT soft rate limit; backing off (attempt %d)", attempt + 1)
-                    time.sleep(MIN_REQUEST_INTERVAL * (attempt + 1))
+                    time.sleep(min(MIN_REQUEST_INTERVAL * 2**attempt, MAX_BACKOFF))
                     continue
                 raise NewsSourceError(f"GDELT non-JSON response: {response.text[:200]}") from exc
         raise NewsSourceError(f"GDELT rate-limited after {MAX_RETRIES} attempts")
