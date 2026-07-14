@@ -85,14 +85,19 @@ class EntityAnonymizer(Anonymizer):
             terms.update(aliases)
         # Longest term first so "Apple Inc" is masked before "Apple".
         self._terms: list[str] = sorted({t for t in terms if t}, key=len, reverse=True)
+        # Compile each term's boundary pattern ONCE at construction — anonymize() runs
+        # per document, so compiling inside its loop would recompile every pattern for
+        # every headline (O(docs * vocabulary) compiles) and thrash re's small cache.
+        self._patterns: list[tuple[str, re.Pattern[str]]] = [
+            (term, re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)) for term in self._terms
+        ]
 
     def anonymize(self, text: str) -> AnonymizationResult:
         result = _mask_structural(text) if self.mask_structural else text
         mapping: dict[str, str] = {}
         ticker_to_token: dict[str, str] = {}
         token_of_key: dict[str, str] = {}  # ticker | lowered surface -> placeholder
-        for term in self._terms:
-            pattern = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+        for term, pattern in self._patterns:
             if not pattern.search(result):
                 continue
             ticker = self._alias_to_ticker.get(term.lower())

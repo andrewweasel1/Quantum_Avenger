@@ -61,11 +61,15 @@ class SentimentFeatureBuilder:
         df = news_df.copy()
         ts = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(self.cfg.tz)
 
-        # 1. Anonymize once (audit map + multi-entity resolution).
-        results = self.anonymizer.anonymize_batch(df["text"].astype(str).tolist())
-        clean = [r.text for r in results]
-        # Score raw text by default (FinBERT prior); masked text only if requested.
-        text_for_scorer = clean if self.cfg.mask_for_scorer else df["text"].astype(str).tolist()
+        # 1. Score raw text by default (FinBERT/VADER priors are trained WITH names);
+        #    anonymize ONLY when the scorer will consume the masked text. Masking is a
+        #    per-document regex sweep over the whole gazetteer, so running it when
+        #    ``mask_for_scorer`` is False is pure dead work at index scale.
+        raw = df["text"].astype(str).tolist()
+        if self.cfg.mask_for_scorer:
+            text_for_scorer = [r.text for r in self.anonymizer.anonymize_batch(raw)]
+        else:
+            text_for_scorer = raw
 
         # 2. Score per document.
         scores = self.engine.score_headlines(text_for_scorer, batch_size=self.cfg.batch_size)
