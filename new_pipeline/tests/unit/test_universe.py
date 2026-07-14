@@ -63,3 +63,27 @@ def test_universe_path_config_selects_fixture(monkeypatch):
     monkeypatch.delenv("QA_DATA__UNIVERSE_PATH")
     cfg = reload_config()
     assert len(_build_universe(cfg).sectors()) == 41  # packaged default
+
+
+def test_sibling_aliases_file_auto_selected(tmp_path):
+    """A universe fixture pairs with its <stem>_aliases.csv sibling gazetteer."""
+    from new_pipeline.adapters.universe_static import StaticUniverseProvider
+
+    (tmp_path / "custom.csv").write_text(
+        "ticker,gics_sector,start_date,end_date\nXYZ,Materials,2000-01-01,\n"
+    )
+    (tmp_path / "custom_aliases.csv").write_text('ticker,alias\nXYZ,"Xylophone Corp"\n')
+    provider = StaticUniverseProvider(tmp_path / "custom.csv")
+    assert provider.aliases() == {"XYZ": ["Xylophone Corp"]}
+
+
+def test_sp500_aliases_cover_every_constituent():
+    from pathlib import Path
+
+    from new_pipeline.adapters.universe_static import StaticUniverseProvider
+
+    provider = StaticUniverseProvider(Path("new_pipeline/data/universe/sp500.csv"))
+    aliases = provider.aliases()
+    tickers = set(provider.sectors())
+    assert tickers <= set(aliases)  # every S&P 500 name has a company alias
+    assert aliases["AAPL"] == ["Apple"]

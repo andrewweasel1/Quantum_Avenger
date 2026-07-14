@@ -56,6 +56,8 @@ class GdeltNewsSource(NewsSource):
         fetch=None,
         min_interval: float = 5.0,  # GDELT's informal per-IP tolerance is ~1 req/5s
         source_lang: str = "english",
+        retry_attempts: int = 3,
+        retry_backoff: float = 60.0,
     ):
         self._aliases = {ticker: list(names) for ticker, names in aliases.items()}
         self._endpoint = endpoint
@@ -67,6 +69,8 @@ class GdeltNewsSource(NewsSource):
         self._min_interval = min_interval if fetch is None else 0.0
         self._last_call = 0.0
         self._source_lang = source_lang
+        self._retry_attempts = retry_attempts
+        self._retry_backoff = retry_backoff
 
     def query_url(self, symbol: str, start: date, end: date) -> str:
         names = self._aliases.get(symbol) or [symbol]
@@ -97,8 +101,10 @@ class GdeltNewsSource(NewsSource):
             time.sleep(wait)
         self._last_call = time.monotonic()
 
-    def _fetch_with_retry(self, url: str, attempts: int = 3, backoff: float = 60.0) -> dict:
+    def _fetch_with_retry(self, url: str, attempts: int = 0, backoff: float = 0.0) -> dict:
         """The free API 429s bursts; back off and retry instead of losing the symbol."""
+        attempts = attempts or self._retry_attempts
+        backoff = backoff or self._retry_backoff
         for attempt in range(attempts):
             self._throttle()
             try:

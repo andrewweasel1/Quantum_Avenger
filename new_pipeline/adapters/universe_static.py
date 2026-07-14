@@ -30,8 +30,15 @@ class StaticUniverseProvider(UniverseProvider):
     ) -> None:
         self._path = membership_path or DEFAULT_MEMBERSHIP_PATH
         self._members = self._load()
-        self._aliases_path = aliases_path or DEFAULT_ALIASES_PATH
+        self._aliases_path = aliases_path or self._default_aliases_path()
         self._aliases = self._load_aliases()
+
+    def _default_aliases_path(self) -> Path:
+        """Prefer a sibling ``<stem>_aliases.csv`` next to the membership file
+        (so ``sp500.csv`` pairs with ``sp500_aliases.csv``); else the packaged
+        default. Keeps a universe fixture + its gazetteer a matched drop-in."""
+        sibling = self._path.with_name(f"{self._path.stem}_aliases.csv")
+        return sibling if sibling.exists() else DEFAULT_ALIASES_PATH
 
     def _load(self) -> list[UniverseMember]:
         if not self._path.exists():

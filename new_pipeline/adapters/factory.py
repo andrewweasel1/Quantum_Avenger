@@ -186,7 +186,15 @@ def _build_live_news_source(cfg, universe):  # pragma: no cover - egress / live 
 
     sources = []
     for provider in cfg.news.providers:
-        if provider == "gdelt":
+        if provider == "vault":
+            # A pre-ingested Parquet news vault (scripts/ingest_gdelt_vault.py):
+            # zero network in the run itself — fetch once, reuse forever.
+            from pathlib import Path
+
+            from new_pipeline.adapters.news_static import VaultNewsSource
+
+            sources.append(VaultNewsSource(Path(cfg.news.vault_dir) / "news_vault.parquet"))
+        elif provider == "gdelt":
             from new_pipeline.adapters.news_gdelt import GdeltNewsSource
 
             sources.append(
