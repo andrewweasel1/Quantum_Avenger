@@ -187,13 +187,18 @@ def _build_live_news_source(cfg, universe):  # pragma: no cover - egress / live 
     sources = []
     for provider in cfg.news.providers:
         if provider == "vault":
-            # A pre-ingested Parquet news vault (scripts/ingest_gdelt_vault.py):
+            # A pre-ingested Parquet news vault (scripts/ingest_news_vault.py):
             # zero network in the run itself — fetch once, reuse forever.
             from pathlib import Path
 
             from new_pipeline.adapters.news_static import VaultNewsSource
 
             sources.append(VaultNewsSource(Path(cfg.news.vault_dir) / "news_vault.parquet"))
+        elif provider == "alpaca":
+            # Authenticated Benzinga feed — not per-IP rate-limited like GDELT.
+            from new_pipeline.adapters.news_alpaca import AlpacaNewsSource
+
+            sources.append(AlpacaNewsSource(cfg.alpaca.api_key, cfg.alpaca.secret_key))
         elif provider == "gdelt":
             from new_pipeline.adapters.news_gdelt import GdeltNewsSource
 

@@ -1,4 +1,4 @@
-"""Resumable GDELT news-vault ingest for a universe.
+"""Resumable news-vault ingest for a universe (Alpaca or GDELT).
 
 Fetch is the expensive, rate-limited, interruptible part of a news-driven run —
 so it is decoupled from the backtest and made restart-proof: each symbol's
@@ -7,12 +7,14 @@ moment they arrive, already-present symbols are skipped on re-run, and a final
 merge writes the single ``news_vault.parquet`` that ``VaultNewsSource`` (the
 ``news.providers: ["vault"]`` backend) replays with zero network.
 
-    python -m new_pipeline.scripts.ingest_gdelt_vault \
+    python -m new_pipeline.scripts.ingest_news_vault --source alpaca \
         --start 2021-01-01 --end 2024-12-31 \
         --universe new_pipeline/data/universe/sp500.csv \
-        --vault-dir ./data/raw/news --limit 250
+        --vault-dir ./data/raw/news
 
-Re-run after any interruption; it picks up where it left off.
+``--source alpaca`` (default) uses the authenticated Benzinga feed
+(QA_ALPACA__* keys) — not per-IP rate-limited; ``--source gdelt`` uses the free
+keyless API. Re-run after any interruption; it picks up where it left off.
 """
 
 import argparse
@@ -56,8 +58,30 @@ def merge_vault(by_symbol_dir: Path, vault_path: Path) -> int:
     return len(merged)
 
 
+def _build_source(name: str, universe, limit: int, min_interval: float):
+    if name == "alpaca":
+        import os
+
+        from new_pipeline.adapters.news_alpaca import AlpacaNewsSource
+
+        key, secret = os.environ.get("QA_ALPACA__API_KEY"), os.environ.get("QA_ALPACA__SECRET_KEY")
+        if not (key and secret):
+            raise SystemExit("--source alpaca needs QA_ALPACA__API_KEY / QA_ALPACA__SECRET_KEY")
+        return AlpacaNewsSource(key, secret)
+    from new_pipeline.adapters.news_gdelt import GdeltNewsSource
+
+    return GdeltNewsSource(
+        universe.aliases(),
+        limit=limit,
+        min_interval=min_interval,
+        retry_attempts=2,  # in a resumable ingest a re-run is cheaper than long backoffs
+        retry_backoff=45.0,
+    )
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Resumable GDELT news-vault ingest")
+    parser = argparse.ArgumentParser(description="Resumable news-vault ingest")
+    parser.add_argument("--source", choices=["alpaca", "gdelt"], default="alpaca")
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--universe", default="")
@@ -66,17 +90,10 @@ def main() -> None:
     parser.add_argument("--min-interval", type=float, default=5.0)
     args = parser.parse_args()
 
-    from new_pipeline.adapters.news_gdelt import GdeltNewsSource
     from new_pipeline.adapters.universe_static import StaticUniverseProvider
 
     universe = StaticUniverseProvider(Path(args.universe) if args.universe else None)
-    source = GdeltNewsSource(
-        universe.aliases(),
-        limit=args.limit,
-        min_interval=args.min_interval,
-        retry_attempts=2,  # in a resumable ingest a re-run is cheaper than long backoffs
-        retry_backoff=45.0,
-    )
+    source = _build_source(args.source, universe, args.limit, args.min_interval)
     start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
     vault_dir = Path(args.vault_dir)
     by_symbol = vault_dir / "by_symbol"
