@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Backtest/data caches (downloaded market data, GDELT tone, SEC data sets)
+new_pipeline/data/backtest_cache/
+new_pipeline/data/fundamentals_cache/
