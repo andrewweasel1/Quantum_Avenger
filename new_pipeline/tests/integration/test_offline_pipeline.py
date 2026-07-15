@@ -284,3 +284,30 @@ def test_regime_gate_defaults_on_with_daily_series_and_reasons(tmp_path, monkeyp
         dates = pl.read_parquet(tmp_path / f"{slug}_sample_dates.parquet")["date"]
         n_days = dates.n_unique()
         assert any(series.size == n_days for series in captured)
+
+
+def test_run_offline_pipeline_applies_membership_windows(tmp_path, monkeypatch):
+    """The pipeline masks training rows to the universe provider's membership
+    windows: with the packaged 41-name fixture (real PIT dates), a ticker whose
+    window ends mid-range contributes no rows past its exit."""
+    import new_pipeline.tournament.pipeline as pipe
+
+    captured = {}
+    real_mask = pipe.apply_membership_mask
+
+    def spy(frame, members):
+        captured["members"] = list(members)
+        out = real_mask(frame, members)
+        captured["max_dates"] = dict(
+            out.group_by("ticker").agg(max_date=("date")).iter_rows()
+        )
+        return out
+
+    monkeypatch.setenv("QA_TOURNAMENT__NUM_BOOST_ROUND", "10")
+    reload_config()
+    seed_everything(0)
+    monkeypatch.setattr(pipe, "apply_membership_mask", spy)
+    run_offline_pipeline(tmp_path, start=date(2021, 1, 1), end=date(2021, 6, 30), max_symbols=6)
+
+    assert captured, "membership mask never invoked"
+    assert len(captured["members"]) >= 41  # the provider's full interval list

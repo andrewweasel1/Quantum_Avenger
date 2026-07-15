@@ -74,12 +74,18 @@ def build_training_frame(
     sentiment_engine=None,
     anonymizer=None,
     fundamentals_source=None,
+    membership=None,
 ) -> pl.DataFrame:
     """Synthetic OHLCV -> features -> sector join + target_label, one frame.
 
     When ``news_source`` + ``sentiment_engine`` + ``anonymizer`` are supplied, a
     real causally-aligned ``sentiment_score`` is joined in before the (optional)
     sentiment-fused micro-HMM features.
+
+    ``membership`` (a list of ``UniverseMember`` with real start/end dates)
+    point-in-time masks each ticker's rows to its index-membership windows —
+    see :func:`apply_membership_mask`. ``None`` keeps every row (fixtures with
+    placeholder dates, direct callers).
     """
     source = source or FakeMarketDataSource()
     cfg = cfg or get_config()
@@ -140,6 +146,11 @@ def build_training_frame(
         {"ticker": list(sectors), "sector": [sectors[t] for t in sectors]}
     )
     joined = labeled.join(sector_df, on="ticker", how="left")
+    if membership is not None:
+        # PIT mask BEFORE the cross-sectional factors: per-ticker features and
+        # labels keep their full-history warmup above, but cross-sectional
+        # ranks/z-scores must only ever see actual index members per date.
+        joined = apply_membership_mask(joined, membership)
     if cfg.features.factor_set:
         if fundamentals_source is not None and any(
             factor in FUNDAMENTAL_FACTORS for factor in cfg.features.factor_set
@@ -149,6 +160,38 @@ def build_training_frame(
             joined, cfg.features.factor_set, sector_neutral=cfg.features.factor_sector_neutral
         )
     return joined
+
+
+def apply_membership_mask(frame: pl.DataFrame, members) -> pl.DataFrame:
+    """Keep only rows inside a ticker's index-membership window(s).
+
+    ``members`` is a list of ``UniverseMember`` (ticker, start_date, end_date;
+    end-exclusive, ``None`` = still a member; a ticker can carry several
+    disjoint intervals — exits and re-entries). Rows for tickers with no
+    interval at all are dropped: with a point-in-time fixture, "not in the
+    membership file" means "never an index member in the window" — keeping
+    such rows would reintroduce the survivorship the fixture exists to remove.
+    """
+    windows = pl.DataFrame({
+        "ticker": [m.ticker for m in members],
+        "_m_start": [m.start_date for m in members],
+        "_m_end": [m.end_date for m in members],
+    })
+    if windows.is_empty():
+        return frame.clear()
+    windows = windows.with_columns(
+        pl.col("_m_start").cast(pl.Date), pl.col("_m_end").cast(pl.Date)
+    )
+    # Many-to-many on ticker (one row per interval); intervals are disjoint, so
+    # a (ticker, date) row survives through at most one of them.
+    return (
+        frame.join(windows, on="ticker", how="inner")
+        .filter(
+            (pl.col("date") >= pl.col("_m_start"))
+            & (pl.col("_m_end").is_null() | (pl.col("date") < pl.col("_m_end")))
+        )
+        .drop("_m_start", "_m_end")
+    )
 
 
 def _attach_sentiment(
@@ -223,6 +266,9 @@ def run_offline_pipeline(
         symbols, sectors, start, end, source, cfg,
         news_source=news_source, sentiment_engine=sentiment_engine, anonymizer=anonymizer,
         fundamentals_source=fundamentals_source,
+        # PIT masking: with a dated fixture (sp500_pit.csv or membership.csv)
+        # a ticker only contributes rows while an actual index member.
+        membership=universe.members(),
     )
     feature_cols = list(FEATURE_COLS)
     if cfg.fusion.enabled:

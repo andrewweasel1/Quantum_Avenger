@@ -4,9 +4,12 @@ data:
   parquet_blocksize: "128MiB"
   row_group_size: 100000
   validation_mode: "strict"
-  # Universe membership CSV; empty -> the packaged 41-name fixture. The S&P 500
-  # snapshot lives at new_pipeline/data/universe/sp500.csv (current-constituent,
-  # i.e. survivorship-biased until a licensed PIT membership dataset replaces it).
+  # Universe membership CSV; empty -> the packaged 41-name fixture. Real runs
+  # should use the point-in-time fixture new_pipeline/data/universe/sp500_pit.csv
+  # (membership intervals since 2015 incl. departed names; rebuilt with
+  # scripts/build_pit_universe.py). The current-constituent snapshot sp500.csv
+  # remains the GICS sector source for the builder but is survivorship-biased
+  # as a backtest universe.
   universe_path: ""
 
 features:
