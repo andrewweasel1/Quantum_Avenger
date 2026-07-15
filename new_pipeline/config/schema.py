@@ -97,7 +97,7 @@ class TournamentConfig(BaseModel):
     purge_days: int = 5
     embargo_days: int = 5
     embargo_pct: float = 0.0  # fractional embargo: ceil(pct * n_samples) positions
-    penalty_fp: float = 5.0
+    penalty_fp: float = 1.0  # symmetric default; see defaults.yaml for the recalibration note
     penalty_fn: float = 1.0
     num_boost_round: int = 100
     early_stopping_rounds: int = 25

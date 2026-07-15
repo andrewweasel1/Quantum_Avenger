@@ -44,7 +44,15 @@ models:
 execution:
   max_risk_per_trade: 0.02
   atr_stop_multiplier: 2.0
-  confidence_threshold: 0.65
+  # Entry bar on the model's predicted P(win). Calibrated jointly with
+  # tournament.penalty_fp: with a symmetric loss (penalty_fp 1.0) predicted
+  # probabilities are honest win-rates, so 0.55 demands a modest real edge.
+  # If penalty_fp is raised to w, probabilities compress toward the equilibrium
+  # p/(p + w(1-p)); a threshold t then demands a raw win-rate of
+  # t*w/(t*w + 1 - t) — e.g. the old 0.65 under w=5 required >90% raw
+  # conviction, which real daily equity data never reaches (zero trades).
+  # Raise w only together with a threshold recomputed from that formula.
+  confidence_threshold: 0.55
   max_adv_coverage: 0.25
   ledger_dir: "./data/ledger"
   max_retries: 3
@@ -90,7 +98,12 @@ tournament:
   purge_days: 5
   embargo_days: 5
   embargo_pct: 0.01
-  penalty_fp: 5.0
+  # Asymmetric-loss penalties for the XGBoost objective. Symmetric (1.0/1.0)
+  # keeps predicted probabilities calibrated so execution.confidence_threshold
+  # reads as a real win-rate; loss-side asymmetry (fp > 1) double-charges risk
+  # aversion once the threshold also sits above 0.5 — see the note there for
+  # the recalibration formula before raising this.
+  penalty_fp: 1.0
   penalty_fn: 1.0
   num_boost_round: 100
   cache_host_ratio: 0.75
