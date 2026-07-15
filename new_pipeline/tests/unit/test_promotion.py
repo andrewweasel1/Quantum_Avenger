@@ -15,6 +15,24 @@ def test_reject_low_dsr():
     assert decision.reason == "low DSR"
 
 
+def test_zero_trades_named_ahead_of_low_dsr():
+    # An all-zero OOS series scores DSR 0.0 by construction; the reason must say
+    # the strategy never traded, not that its (vacuous) DSR was low.
+    decision = assess_promotion("Energy", 0.0, 0.0, n_trades=0)
+    assert decision.promoted is False
+    assert decision.reason == "zero trades (entry threshold never fired)"
+    assert decision.n_trades == 0
+
+
+def test_n_trades_recorded_and_nonzero_does_not_trip_gate():
+    # With trades present the zero-trade gate stays silent; other gates decide.
+    decision = assess_promotion("Energy", 0.97, 0.2, n_trades=137)
+    assert decision.promoted is True
+    assert decision.n_trades == 137
+    # Omitted n_trades (legacy callers) leaves the gate disabled entirely.
+    assert assess_promotion("Energy", 0.0, 0.0).reason == "low DSR"
+
+
 def test_reality_check_gate_opt_in():
     # gate off (default): a high RC p-value is recorded but ignored.
     assert assess_promotion("Energy", 0.97, 0.2, reality_check_pvalue=0.8).promoted is True

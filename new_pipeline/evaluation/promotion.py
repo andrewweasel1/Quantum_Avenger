@@ -28,6 +28,7 @@ class PromotionDecision:
     cpcv_path_pass_fraction: float | None = None
     cpcv_path_dsr_median: float | None = None
     reality_check_pvalue: float | None = None
+    n_trades: int | None = None
 
 
 def assess_promotion(
@@ -48,8 +49,15 @@ def assess_promotion(
     reality_check_pvalue=None,  # recorded; gates only when reality_check_gate_enabled
     reality_check_gate_enabled=False,
     reality_check_threshold=0.05,
+    n_trades=None,
 ) -> PromotionDecision:
     """Apply every promotion gate; the first failure names the rejection reason.
+
+    ``n_trades`` (when supplied) is the count of realized OOS trades behind the
+    champion's return series. Zero trades means the entry threshold never fired —
+    every statistic downstream is 0.0 *by construction*, so the zero-trade gate is
+    checked first: "low DSR" on an all-zero series would misread a dead strategy
+    as a weak one.
 
     The CPCV path gate (when enabled and supplied) requires at least
     ``path_fraction_threshold`` of the reconstructed backtest paths to clear the
@@ -62,6 +70,7 @@ def assess_promotion(
         and path_pass_fraction < path_fraction_threshold
     )
     gates = {
+        "zero trades (entry threshold never fired)": n_trades is not None and n_trades == 0,
         "low DSR": dsr < dsr_threshold,
         "failed synthetic gauntlet": synthetic_sharpe <= synthetic_min,
         "overfit (high PBO)": pbo is not None and pbo > pbo_threshold,
@@ -87,6 +96,7 @@ def assess_promotion(
         cpcv_path_pass_fraction=path_pass_fraction,
         cpcv_path_dsr_median=path_dsr_median,
         reality_check_pvalue=reality_check_pvalue,
+        n_trades=n_trades,
     )
 
 
@@ -113,6 +123,7 @@ class PromotionRegistry:
             "cpcv_path_pass_fraction": decision.cpcv_path_pass_fraction,
             "cpcv_path_dsr_median": decision.cpcv_path_dsr_median,
             "reality_check_pvalue": decision.reality_check_pvalue,
+            "n_trades": decision.n_trades,
             "promoted": decision.promoted,
             "reason": decision.reason,
             "timestamp": datetime.now(UTC).isoformat(),

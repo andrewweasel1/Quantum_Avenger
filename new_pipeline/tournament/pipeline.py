@@ -477,6 +477,10 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             cfg.evaluation.dsr_promotion_threshold, cfg.evaluation.synthetic_sr_min,
             pbo=pbo, pbo_threshold=cfg.evaluation.pbo_threshold,
             psr=psr, haircut_sharpe=haircut, minbtl_satisfied=minbtl_ok,
+            # Realized OOS trades behind the champion series: an entry threshold
+            # that never fires yields an all-zero series whose DSR/PSR/PBO are
+            # 0.0 by construction — name that explicitly instead of "low DSR".
+            n_trades=int(np.count_nonzero(champion_returns)),
             path_pass_fraction=path_pass_fraction,
             path_fraction_threshold=cfg.evaluation.cpcv_path_min_fraction,
             path_dsr_median=path_dsr_median,
