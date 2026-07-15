@@ -42,7 +42,10 @@ def _slug(sector: str) -> str:
 
 
 def _sharpe_score_fn(labels, prices, cfg, block_ids=None):
-    """A score_fn(feature_matrix) -> Sharpe used for CFS permutation importance."""
+    """A score_fn(feature_matrix) -> Sharpe used for CFS permutation importance.
+
+    Stays on the pooled per-sample axis: this is an internal feature-RANKING
+    heuristic (only relative order matters), not an accounting statistic."""
     rounds = min(40, cfg.tournament.num_boost_round)
     ids = np.zeros(len(labels)) if block_ids is None else block_ids
 
@@ -241,10 +244,12 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
             )
     selected_matrix = clean.select(selected).to_numpy()
 
+    sample_dates = clean["date"] if "date" in clean.columns else None
     search = run_grid_search(
         selected_matrix, labels, prices,
         confidence_threshold=cfg.execution.confidence_threshold,
         t1_offset=t1_offset, block_ids=block_ids,
+        dates=sample_dates,  # calendar-time trial scoring (equal-weight daily)
     )
     booster = _train_candidate(selected_matrix, labels, cfg, t1_offset, block_ids)
     meta = (
@@ -252,7 +257,6 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
         if cfg.tournament.enable_meta_labeling
         else None
     )
-    sample_dates = clean["date"] if "date" in clean.columns else None
     return sector, _persist(output, sector, booster, selected, search, meta, sample_dates)
 
 

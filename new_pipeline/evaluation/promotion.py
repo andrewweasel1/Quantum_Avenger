@@ -29,6 +29,9 @@ class PromotionDecision:
     cpcv_path_dsr_median: float | None = None
     reality_check_pvalue: float | None = None
     n_trades: int | None = None
+    # Observation count behind the gate statistics (calendar days when the
+    # evaluation ran on the daily axis; pooled samples on legacy artifacts).
+    n_obs: int | None = None
 
 
 def assess_promotion(
@@ -50,6 +53,7 @@ def assess_promotion(
     reality_check_gate_enabled=False,
     reality_check_threshold=0.05,
     n_trades=None,
+    n_obs=None,
 ) -> PromotionDecision:
     """Apply every promotion gate; the first failure names the rejection reason.
 
@@ -97,6 +101,7 @@ def assess_promotion(
         cpcv_path_dsr_median=path_dsr_median,
         reality_check_pvalue=reality_check_pvalue,
         n_trades=n_trades,
+        n_obs=n_obs,
     )
 
 
@@ -124,6 +129,7 @@ class PromotionRegistry:
             "cpcv_path_dsr_median": decision.cpcv_path_dsr_median,
             "reality_check_pvalue": decision.reality_check_pvalue,
             "n_trades": decision.n_trades,
+            "n_obs": decision.n_obs,
             "promoted": decision.promoted,
             "reason": decision.reason,
             "timestamp": datetime.now(UTC).isoformat(),

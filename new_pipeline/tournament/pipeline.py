@@ -48,6 +48,7 @@ from new_pipeline.features.labels import add_labels
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov_regime_features
 from new_pipeline.features.polars_engine import compile_features
 from new_pipeline.portfolio.combination import combine_returns
+from new_pipeline.tournament.accounting import collapse_to_daily
 from new_pipeline.tournament.director import run_sector_tournament
 from new_pipeline.tournament.johansen import johansen_basket
 from new_pipeline.tournament.simulator import sharpe_ratio
@@ -402,12 +403,9 @@ def _combine_book(results: dict, output_dir, cfg) -> dict | None:
             :, int(np.argmax(trials))
         ].to_numpy()
         dates = pl.read_parquet(dates_path)["date"]
-        daily[sector] = (
-            pl.DataFrame({"date": dates, sector: champion})
-            .group_by("date")
-            .agg(pl.col(sector).mean())  # equal-weight sector daily return
-            .sort("date")
-        )
+        # equal-weight sector daily return on the shared calendar-time collapse
+        day, series = collapse_to_daily(dates, champion)
+        daily[sector] = pl.DataFrame({"date": day, sector: series})
     if len(daily) < 2:
         return None
     sectors = list(daily)
@@ -458,20 +456,32 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
         if not trials:
             continue
         best = int(np.argmax(trials))
-        returns_matrix = pl.read_parquet(result["candidate_path"].replace(
+        pooled_matrix = pl.read_parquet(result["candidate_path"].replace(
             "_candidate.json", "_returns_matrix.parquet"
-        ))
-        champion_returns = returns_matrix[:, best].to_numpy()
+        )).to_numpy()
+        pooled_champion = pooled_matrix[:, best]
         paths = _load_champion_paths(result["candidate_path"])
+        dates = _load_sample_dates(result["candidate_path"])
+        if dates is not None and len(dates) == pooled_matrix.shape[0]:
+            # Calendar-time axis: every gate statistic below runs on equal-weight
+            # per-date returns (one shared collapse keeps trial columns aligned),
+            # so n_obs / sqrt(252) / "years" mean what the formulas assume.
+            _, eval_matrix = collapse_to_daily(dates, pooled_matrix)
+            if paths is not None and paths.shape[1] == len(dates):
+                paths = collapse_to_daily(dates, paths.T)[1].T
+        else:  # legacy artifacts without sample dates: pooled behavior unchanged
+            _logger.warning("%s: no sample dates; evaluating on pooled samples", sector)
+            eval_matrix = pooled_matrix
+        champion_returns = eval_matrix[:, best]
 
-        dsr = _deflated_sharpe(champion_returns, trials, returns_matrix, cfg)
-        path_pass_fraction, path_dsr_median = _path_dsr_stats(paths, trials, returns_matrix, cfg)
-        synthetic_sr = _synthetic_sharpe(frame, sector, result, champion_returns, cfg)
+        dsr = _deflated_sharpe(champion_returns, trials, eval_matrix, cfg)
+        path_pass_fraction, path_dsr_median = _path_dsr_stats(paths, trials, eval_matrix, cfg)
+        # The synthetic HMM gauntlet block-bootstraps the per-sample FEATURE matrix,
+        # so its champion series must stay row-aligned with samples (pooled).
+        synthetic_sr = _synthetic_sharpe(frame, sector, result, pooled_champion, cfg)
         # Overfitting/selection diagnostics over the full (n_obs x n_trials) matrix.
         champion_sharpe = sharpe_ratio(champion_returns)
-        pbo = probability_of_backtest_overfitting(
-            returns_matrix.to_numpy(), cfg.evaluation.pbo_partitions
-        )
+        pbo = probability_of_backtest_overfitting(eval_matrix, cfg.evaluation.pbo_partitions)
         psr = probabilistic_sharpe_ratio(champion_returns, cfg.evaluation.psr_benchmark_sr)
         haircut = haircut_sharpe_ratio(
             champion_sharpe, champion_returns.size, len(trials), cfg.evaluation.mt_method,
@@ -483,7 +493,7 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             )
         reality_check_p = (
             whites_reality_check(
-                returns_matrix.to_numpy(),
+                eval_matrix,
                 cfg.evaluation.reality_check_bootstrap,
                 cfg.evaluation.reality_check_block,
             )
@@ -498,7 +508,9 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             # Realized OOS trades behind the champion series: an entry threshold
             # that never fires yields an all-zero series whose DSR/PSR/PBO are
             # 0.0 by construction — name that explicitly instead of "low DSR".
-            n_trades=int(np.count_nonzero(champion_returns)),
+            # Counted on the POOLED samples: a daily mean blurs distinct trades.
+            n_trades=int(np.count_nonzero(pooled_champion)),
+            n_obs=int(champion_returns.size),
             path_pass_fraction=path_pass_fraction,
             path_fraction_threshold=cfg.evaluation.cpcv_path_min_fraction,
             path_dsr_median=path_dsr_median,
@@ -544,6 +556,14 @@ def _load_champion_paths(candidate_path):
     return pl.read_parquet(paths_file).to_numpy().T  # columns are paths -> rows are paths
 
 
+def _load_sample_dates(candidate_path):
+    """Per-sample dates row-aligned with the persisted returns matrix (None if absent)."""
+    dates_file = Path(candidate_path.replace("_candidate.json", "_sample_dates.parquet"))
+    if not dates_file.exists():
+        return None
+    return pl.read_parquet(dates_file)["date"]
+
+
 def _path_dsr_stats(paths, trials, returns_matrix, cfg):
     """Per-path Deflated Sharpe over the phi CPCV paths: (pass_fraction, median).
 
@@ -554,7 +574,7 @@ def _path_dsr_stats(paths, trials, returns_matrix, cfg):
     if paths is None or paths.shape[0] == 0:
         return None, None
     if cfg.evaluation.use_effective_trials:
-        n_eff = effective_number_of_trials(returns_matrix.to_numpy().T)
+        n_eff = effective_number_of_trials(returns_matrix.T)
         path_dsrs = np.array(
             [deflated_sharpe_report(path, n_eff, trial_sharpes=trials).dsr for path in paths]
         )
@@ -567,9 +587,10 @@ def _path_dsr_stats(paths, trials, returns_matrix, cfg):
 def _deflated_sharpe(champion_returns, trials, returns_matrix, cfg) -> float:
     """Deflated Sharpe for the champion. With ``use_effective_trials`` the trial
     count is the correlation-adjusted N_eff (correlated grid configs otherwise
-    over-deflate the DSR); the per-trial Sharpes still supply the variance."""
+    over-deflate the DSR); the per-trial Sharpes still supply the variance.
+    ``returns_matrix`` is the (n_obs x n_trials) numpy evaluation matrix."""
     if cfg.evaluation.use_effective_trials:
-        n_eff = effective_number_of_trials(returns_matrix.to_numpy().T)
+        n_eff = effective_number_of_trials(returns_matrix.T)
         return deflated_sharpe_report(champion_returns, n_eff, trial_sharpes=trials).dsr
     return compute_deflated_sharpe_ratio(champion_returns, trials)
 

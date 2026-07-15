@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from new_pipeline.config import get_config
+from new_pipeline.tournament.accounting import collapse_to_daily
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
 from new_pipeline.tournament.sample_weights import uniqueness_sample_weights
 from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns_blockwise
@@ -31,7 +32,8 @@ class GridSearchResult:
 
 
 def run_grid_search(
-    features, labels, prices, grid=None, confidence_threshold=0.5, t1_offset=None, block_ids=None
+    features, labels, prices, grid=None, confidence_threshold=0.5, t1_offset=None,
+    block_ids=None, dates=None,
 ):
     """``prices`` is a dict of equal-length 'close'/'low'/'atr' arrays.
 
@@ -40,6 +42,13 @@ def run_grid_search(
     backtest paths are reconstructed; the combo's OOS series is their mean (which
     equals the canonical per-sample OOS average), and the champion's full path
     matrix rides along for the path-distribution Deflated-Sharpe gate.
+
+    When ``dates`` (per-row sample dates) is given, each combo is SCORED on its
+    equal-weight calendar-daily series rather than the pooled samples. Selection
+    must happen on the same axis the promotion gates evaluate — and the persisted
+    champion paths belong to this argmax, so a downstream re-rank could orphan
+    them. The pooled per-sample rows are still returned in ``returns_matrix``
+    (they are the artifact; consumers collapse them as needed).
     """
     cfg = get_config()
     grid = grid or _DEFAULT_GRID
@@ -105,7 +114,7 @@ def run_grid_search(
         paths = splitter.assemble_paths(n, segments)
         oos = paths.mean(axis=0)  # == canonical per-sample OOS average across folds
         rows.append(oos)
-        sharpe = sharpe_ratio(oos)
+        sharpe = sharpe_ratio(oos if dates is None else collapse_to_daily(dates, oos)[1])
         sharpes.append(sharpe)
         if sharpe > best_sharpe:
             best_sharpe, champion_paths = sharpe, paths

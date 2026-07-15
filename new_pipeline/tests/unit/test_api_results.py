@@ -7,7 +7,8 @@ import polars as pl
 from new_pipeline.api.results import parse_results
 
 
-def _write_run(run_dir, *, slug="information_technology", n_obs=60, n_trials=3, n_paths=15):
+def _write_run(run_dir, *, slug="information_technology", n_obs=60, n_trials=3, n_paths=15,
+               n_dates=None):
     output = run_dir / "output"
     output.mkdir(parents=True)
     rng = np.random.default_rng(0)
@@ -16,6 +17,14 @@ def _write_run(run_dir, *, slug="information_technology", n_obs=60, n_trials=3, 
     pl.DataFrame(matrix, schema=[f"t{j}" for j in range(n_trials)]).write_parquet(
         output / f"{slug}_returns_matrix.parquet"
     )
+    if n_dates:  # pooled ticker-major sample dates: each date repeats n_obs/n_dates times
+        from datetime import date, timedelta
+
+        days = [date(2021, 1, 4) + timedelta(days=i) for i in range(n_dates)]
+        sample_dates = [days[i % n_dates] for i in range(n_obs)]
+        pl.DataFrame({"date": sample_dates}).write_parquet(
+            output / f"{slug}_sample_dates.parquet"
+        )
     paths = rng.normal(0.0, 0.01, size=(n_obs, n_paths))
     pl.DataFrame(paths, schema=[f"p{j}" for j in range(n_paths)]).write_parquet(
         output / f"{slug}_paths.parquet"
@@ -75,3 +84,25 @@ def test_parse_results_handles_missing_output_dir(tmp_path):
     assert result["sectors"] == []
     assert result["promotions"] == []
     assert result["alpha_eval"] is None
+
+
+def test_sample_dates_collapse_equity_to_calendar_days(tmp_path):
+    # 60 pooled samples over 12 distinct dates (5 "tickers" per day) -> the
+    # served equity/paths shrink to one point per calendar day, and the
+    # champion is picked on the collapsed (daily) Sharpe.
+    _write_run(tmp_path, n_obs=60, n_dates=12)
+    sector = parse_results(tmp_path)["sectors"][0]
+    assert len(sector["equity"]) == 12
+    assert all(len(p) == 12 for p in sector["paths"])
+    assert sector["metrics"]["sharpe"] > 0.0  # trial 1 still the champion
+
+
+def test_sample_dates_length_mismatch_falls_back_to_pooled(tmp_path):
+    _write_run(tmp_path, n_obs=60, n_dates=12)
+    # Corrupt the dates artifact so its height no longer matches the matrix.
+    import polars as pl_  # noqa: PLC0415 - test-local alias
+
+    out = tmp_path / "output" / "information_technology_sample_dates.parquet"
+    pl_.DataFrame({"date": pl_.read_parquet(out)["date"][:10]}).write_parquet(out)
+    sector = parse_results(tmp_path)["sectors"][0]
+    assert len(sector["equity"]) == 60  # pooled behavior, not a crash

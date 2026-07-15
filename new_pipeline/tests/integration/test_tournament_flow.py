@@ -92,3 +92,41 @@ def test_offline_end_to_end_pipeline(tmp_path, monkeypatch):
     )
     assert len(registry.promotions) == 1
     assert (tmp_path / "promotion_registry.json").exists()
+
+
+def test_grid_search_scores_trials_on_calendar_days_when_dates_given(monkeypatch):
+    """With per-row sample dates, each trial's Sharpe is computed on the
+    equal-weight DAILY collapse of its pooled OOS row — selection happens on the
+    same axis the promotion gates evaluate (the persisted champion paths belong
+    to this argmax)."""
+    from datetime import timedelta
+
+    from new_pipeline.tournament.accounting import collapse_to_daily
+    from new_pipeline.tournament.simulator import sharpe_ratio
+
+    monkeypatch.setenv("QA_TOURNAMENT__NUM_BOOST_ROUND", "10")
+    reload_config()
+    seed_everything(42)
+
+    bars = FakeMarketDataSource().history("AAPL", date(2022, 1, 1), date(2022, 6, 30))
+    frame = pl.DataFrame(
+        [{"date": b.day, "ticker": "AAPL", "open": b.open, "high": b.high,
+          "low": b.low, "close": b.close, "volume": b.volume} for b in bars]
+    )
+    feats = add_features(frame).drop_nulls()
+    features = feats.select(_FEATURE_COLS).to_numpy()
+    close = feats["close"].to_numpy()
+    forward = np.zeros(len(close))
+    forward[:-1] = close[1:] / close[:-1] - 1.0
+    labels = (forward > 0.0).astype(np.float64)
+    prices = {"close": close, "low": feats["low"].to_numpy(), "atr": feats["atr"].to_numpy()}
+
+    # Two "tickers" per date: rows i and i+1 share a date -> the daily collapse
+    # is a real average, not a permutation of the pooled series.
+    base = date(2022, 1, 3)
+    dates = [base + timedelta(days=i // 2) for i in range(len(labels))]
+
+    result = run_grid_search(features, labels, prices, dates=dates)
+    for row, sharpe in zip(result.returns_matrix, result.trial_sharpes, strict=True):
+        expected = sharpe_ratio(collapse_to_daily(dates, row)[1])
+        np.testing.assert_allclose(sharpe, expected, rtol=1e-12)

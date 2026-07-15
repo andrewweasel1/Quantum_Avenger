@@ -205,3 +205,36 @@ def test_all_symbols_empty_raises_market_data_error():
                                "MSFT": "Information Technology"},
             date(2018, 1, 1), date(2018, 12, 31), _EmptySource(), base.get_config(),
         )
+
+
+def test_promotion_metrics_use_calendar_axis(tmp_path, monkeypatch):
+    """The registry's gate statistics are computed on the equal-weight daily
+    collapse of the champion's pooled samples (n_obs = calendar days), pinned by
+    recomputing PSR from the persisted artifacts."""
+    import numpy as np
+    import polars as pl
+
+    from new_pipeline.evaluation.dsr import probabilistic_sharpe_ratio
+    from new_pipeline.tournament.accounting import collapse_to_daily
+    from new_pipeline.tournament.simulator import sharpe_ratio
+
+    monkeypatch.setenv("QA_TOURNAMENT__NUM_BOOST_ROUND", "10")
+    reload_config()
+    seed_everything(0)
+    run_offline_pipeline(tmp_path, start=date(2021, 1, 1), end=date(2021, 6, 30), max_symbols=4)
+
+    registry = json.loads((tmp_path / "promotion_registry.json").read_text())
+    checked = 0
+    for entry in registry["promotions"]:
+        slug = entry["sector"].lower().replace(" ", "_")
+        matrix = pl.read_parquet(tmp_path / f"{slug}_returns_matrix.parquet").to_numpy()
+        dates = pl.read_parquet(tmp_path / f"{slug}_sample_dates.parquet")["date"]
+        _, daily = collapse_to_daily(dates, matrix)
+        best = int(np.argmax([sharpe_ratio(daily[:, j]) for j in range(daily.shape[1])]))
+        assert entry["n_obs"] == daily.shape[0]  # calendar days on the daily axis
+        assert entry["n_obs"] <= matrix.shape[0]  # == only for single-ticker sectors
+        np.testing.assert_allclose(
+            entry["psr"], probabilistic_sharpe_ratio(daily[:, best], 0.0), rtol=1e-9
+        )
+        checked += 1
+    assert checked > 0
