@@ -18,6 +18,7 @@ import polars as pl
 
 from new_pipeline.adapters import FakeMarketDataSource, StaticUniverseProvider
 from new_pipeline.config import get_config
+from new_pipeline.core.exceptions import MarketDataError
 from new_pipeline.data.fundamentals import attach_fundamentals
 from new_pipeline.evaluation.alpha_eval import alpha_eval_report
 from new_pipeline.evaluation.dsr import (
@@ -82,11 +83,18 @@ def build_training_frame(
     source = source or FakeMarketDataSource()
     cfg = cfg or get_config()
     rows = []
+    empty_symbols = 0
     for symbol in symbols:
         try:
             bars = source.history(symbol, start, end)
         except Exception as exc:  # one bad ticker must not kill a 500-name ingest
             _logger.warning("skipping %s: history fetch failed (%s)", symbol, exc)
+            continue
+        if not bars:
+            # Providers return empty (not an error) outside their coverage — e.g.
+            # Alpaca's IEX feed has no daily bars before mid-2020 (SIP does).
+            _logger.warning("skipping %s: history returned no bars", symbol)
+            empty_symbols += 1
             continue
         rows.extend(
             {
@@ -94,6 +102,16 @@ def build_training_frame(
                 "low": bar.low, "close": bar.close, "volume": bar.volume,
             }
             for bar in bars
+        )
+    if symbols and not rows:
+        # An all-empty fetch is a data-plane failure, not a valid (vacuously
+        # "done", zero-sector) backtest — fail loudly with the likely cause.
+        raise MarketDataError(
+            f"no market data for any of the {len(symbols)} symbols in "
+            f"{start}..{end} ({empty_symbols} returned empty). If this is a "
+            "live Alpaca run, check alpaca.data_feed coverage for the period "
+            "(the default 'iex' feed has no daily bars before mid-2020; "
+            "'sip' carries full history)."
         )
     features = compile_features(pl.DataFrame(rows))
     if cfg.features.extended_features:

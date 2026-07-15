@@ -235,7 +235,10 @@ class AlpacaConfig(BaseModel):
     api_key: str = ""
     secret_key: str = ""
     paper: bool = True
-    data_feed: str = "iex"  # free feed; "sip" needs a paid subscription
+    # "iex" (free real-time; historical daily bars only from ~mid-2020) or
+    # "sip" (full history on free keys — only *real-time* SIP needs a paid plan).
+    # Backtests reaching before mid-2020 must use "sip".
+    data_feed: str = "iex"
 
 
 class AppConfig(BaseModel):

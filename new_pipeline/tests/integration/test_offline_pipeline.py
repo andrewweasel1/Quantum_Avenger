@@ -183,3 +183,25 @@ def test_build_training_frame_skips_failing_symbols(monkeypatch):
     )
     tickers = set(frame["ticker"].unique().to_list())
     assert "BAD" not in tickers and {"AAPL", "MSFT"} <= tickers
+
+
+def test_all_symbols_empty_raises_market_data_error():
+    """An all-empty fetch must fail loudly, not report a vacuous zero-sector
+    'done' (e.g. Alpaca's IEX feed silently returns no daily bars before
+    mid-2020, so a 2018 backtest on it would otherwise 'succeed' empty)."""
+    from datetime import date
+
+    from new_pipeline.adapters import FakeMarketDataSource
+    from new_pipeline.core.exceptions import MarketDataError
+
+    class _EmptySource(FakeMarketDataSource):
+        def history(self, symbol, start, end):
+            return []
+
+    reload_config()
+    with pytest.raises(MarketDataError, match="no market data"):
+        build_training_frame(
+            ["AAPL", "MSFT"], {"AAPL": "Information Technology",
+                               "MSFT": "Information Technology"},
+            date(2018, 1, 1), date(2018, 12, 31), _EmptySource(), base.get_config(),
+        )
