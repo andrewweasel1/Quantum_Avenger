@@ -24,3 +24,14 @@ def test_config_environment_override(monkeypatch):
 
     assert config.data.raw_vault_dir == "/tmp/test_raw"
     assert config.execution.max_risk_per_trade == 0.05
+
+
+def test_regime_gate_enabled_by_default():
+    """The per-regime DSR gate defaults ON (schema and YAML in sync) now that it
+    runs on the calendar-daily champion series."""
+    from new_pipeline.config import base
+
+    cfg = base.get_config()
+    assert cfg.evaluation.regime_gate_enabled is True
+    assert cfg.evaluation.min_regime_obs == 60
+    assert cfg.evaluation.thin_regime_policy == "skip"

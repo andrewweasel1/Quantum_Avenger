@@ -53,3 +53,24 @@ def test_too_short_input_returns_unpromoted_verdict():
     )
     assert isinstance(verdict, RegimeVerdict)
     assert not verdict.promoted
+
+
+def test_daily_scale_series_with_thin_regime_skipped():
+    """At realistic calendar-time lengths (~750 daily obs) a sparse regime falls
+    under min_regime_obs and is skipped; the verdict is decided by the testable
+    regimes alone."""
+    import pandas as pd
+
+    rng = np.random.default_rng(11)
+    calm = rng.normal(0.004, 0.005, 700)   # long, strongly positive regime
+    burst = rng.normal(0.0, 0.05, 50)      # short high-vol burst: < 60 obs
+    returns = np.concatenate([calm, burst])
+    vol = pd.Series(returns).rolling(10).std().bfill().to_numpy()
+
+    evaluator = QuantitativeEvaluator(
+        min_dsr_threshold=0.95, n_components=2, min_regime_obs=60, random_state=7
+    )
+    verdict = evaluator.evaluate_model_robustness(returns, vol, n_trials=4)
+    assert verdict.skipped_regimes  # the 50-obs burst regime was too thin to test
+    assert verdict.per_regime  # the calm regime was testable
+    assert verdict.promoted is True  # and clears DSR on ~700 high-Sharpe days

@@ -138,6 +138,16 @@ evaluation:
   dsr_promotion_threshold: 0.95
   hmm_states: 3
   synthetic_sr_min: 0.0
+  # Per-regime DSR gate: an HMM decodes regimes over the champion's CALENDAR-
+  # DAILY return series (calendar-time accounting makes the sequence real —
+  # on pooled ticker-major samples the decoder would see a fake transition at
+  # every ticker boundary) and the champion must clear the DSR threshold in
+  # every testable regime. Regimes with fewer than min_regime_obs days (or
+  # zero variance) follow thin_regime_policy: "skip" excludes them, "veto"
+  # fails the model; if NO regime is testable the model is rejected.
+  regime_gate_enabled: true
+  min_regime_obs: 60
+  thin_regime_policy: "skip"
   registry_path: "./models/prod/promotion_registry.json"
   psr_benchmark_sr: 0.0
   pbo_threshold: 0.5

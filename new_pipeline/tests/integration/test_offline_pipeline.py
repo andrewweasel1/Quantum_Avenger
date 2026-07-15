@@ -238,3 +238,49 @@ def test_promotion_metrics_use_calendar_axis(tmp_path, monkeypatch):
         )
         checked += 1
     assert checked > 0
+
+
+def test_regime_gate_defaults_on_with_daily_series_and_reasons(tmp_path, monkeypatch):
+    """Under default config the regime gate runs on every would-be promotion and
+    receives the CALENDAR-DAILY champion series; its two rejection modes land in
+    the registry with distinct reasons."""
+    import numpy as np
+    import polars as pl
+
+    import new_pipeline.tournament.pipeline as pipe
+    from new_pipeline.evaluation.regime_dsr import RegimeVerdict
+
+    monkeypatch.setenv("QA_TOURNAMENT__NUM_BOOST_ROUND", "10")
+    # Relax the primary gates (whole-engine pattern) so decisions reach the
+    # regime gate; the gate itself must stay at its DEFAULT (enabled).
+    monkeypatch.setenv("QA_EVALUATION__DSR_PROMOTION_THRESHOLD", "0.0")
+    monkeypatch.setenv("QA_EVALUATION__SYNTHETIC_SR_MIN", "-1000.0")
+    monkeypatch.setenv("QA_EVALUATION__PBO_THRESHOLD", "1.0")
+    monkeypatch.setenv("QA_EVALUATION__CPCV_PATH_GATE_ENABLED", "false")
+    reload_config()
+    seed_everything(0)
+
+    captured = []
+
+    def fake_verdict(champion_returns, trials, cfg):
+        captured.append(np.asarray(champion_returns))
+        # First sector: a regime failed its DSR; later sectors: nothing testable.
+        per_regime = {0: object()} if len(captured) == 1 else {}
+        return RegimeVerdict(promoted=False, per_regime=per_regime, skipped_regimes=[])
+
+    monkeypatch.setattr(pipe, "_regime_verdict", fake_verdict)
+    run_offline_pipeline(tmp_path, start=date(2021, 1, 1), end=date(2021, 6, 30), max_symbols=4)
+
+    assert captured, "regime gate never ran despite default-enabled config"
+    registry = json.loads((tmp_path / "promotion_registry.json").read_text())
+    reasons = {e["sector"]: e["reason"] for e in registry["promotions"]}
+    assert "failed per-regime DSR" in reasons.values()
+    if len(captured) > 1:
+        assert "regime gate: no testable regime" in reasons.values()
+
+    # The series handed to the gate is the daily collapse, not pooled samples.
+    for entry in registry["promotions"]:
+        slug = entry["sector"].lower().replace(" ", "_")
+        dates = pl.read_parquet(tmp_path / f"{slug}_sample_dates.parquet")["date"]
+        n_days = dates.n_unique()
+        assert any(series.size == n_days for series in captured)

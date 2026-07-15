@@ -520,8 +520,16 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             reality_check_threshold=cfg.evaluation.reality_check_threshold,
         )
         if cfg.evaluation.regime_gate_enabled and decision.promoted:
-            if not _regime_verdict(champion_returns, trials, cfg).promoted:
-                decision = replace(decision, promoted=False, reason="failed per-regime DSR")
+            verdict = _regime_verdict(champion_returns, trials, cfg)
+            if not verdict.promoted:
+                # Distinguish "a regime failed its DSR" from "nothing was
+                # testable" (all regimes thin, or the HMM failed to fit).
+                reason = (
+                    "failed per-regime DSR"
+                    if verdict.per_regime
+                    else "regime gate: no testable regime"
+                )
+                decision = replace(decision, promoted=False, reason=reason)
         model_path = result["candidate_path"] if decision.promoted else None
         registry.record(decision, model_path=model_path)
         decisions[sector] = decision.promoted

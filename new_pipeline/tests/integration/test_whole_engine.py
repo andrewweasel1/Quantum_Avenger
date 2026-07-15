@@ -25,6 +25,9 @@ def test_engine_runs_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setenv("QA_EVALUATION__DSR_PROMOTION_THRESHOLD", "0.0")
     monkeypatch.setenv("QA_EVALUATION__SYNTHETIC_SR_MIN", "-1000.0")
     monkeypatch.setenv("QA_EVALUATION__PBO_THRESHOLD", "1.0")
+    # This capstone needs a promotion to exercise the trade path; its ~124-day
+    # run can't seat 60-obs regimes, so the (default-on) regime gate is opted out.
+    monkeypatch.setenv("QA_EVALUATION__REGIME_GATE_ENABLED", "false")
     reload_config()
     seed_everything(0)
 
