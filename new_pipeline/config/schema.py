@@ -31,6 +31,9 @@ class FeatureConfig(BaseModel):
     # bit-stable); names from features.factors.SUPPORTED_FACTORS.
     factor_set: list[str] = Field(default_factory=list)
     factor_sector_neutral: bool = True  # sector-demean before cross-sectional z-score
+    # Missing FUNDAMENTAL factor inputs: "neutral" fills xf_ z-scores with 0.0 so
+    # PIT departed names survive drop_nulls; "drop" propagates nulls (legacy).
+    factor_null_policy: str = "neutral"
     # Extended per-ticker feature families (offense roadmap P1). Empty => off.
     # Available: fracdiff, vol_estimators, microstructure.
     extended_features: list[str] = Field(default_factory=list)

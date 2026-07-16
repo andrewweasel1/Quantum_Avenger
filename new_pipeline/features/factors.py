@@ -105,13 +105,21 @@ def _zscore(name: str) -> pl.Expr:
 
 
 def add_cross_sectional_factors(
-    frame: pl.DataFrame, factor_set, *, sector_neutral: bool = True
+    frame: pl.DataFrame, factor_set, *, sector_neutral: bool = True, null_policy: str = "drop"
 ) -> pl.DataFrame:
     """Append cross-sectional ``xf_*`` factor columns for the requested ``factor_set``.
 
     No-op (identity) when ``factor_set`` is empty. Requires ``close`` and, depending
     on the factors, ``returns`` / ``volatility`` (all produced by ``compile_features``);
     ``sector_neutral`` additionally requires a ``sector`` column (else it is skipped).
+
+    ``null_policy`` governs rows whose FUNDAMENTAL factor inputs are missing
+    (no resolvable filings — e.g. departed names): ``"neutral"`` fills their
+    ``xf_`` z-scores with 0.0 (exactly-average exposure) so the rows survive
+    the tournament's ``drop_nulls`` — with a point-in-time universe, dropping
+    them would silently reintroduce the survivorship the fixture removed.
+    ``"drop"`` (the function default; config default is "neutral") preserves
+    the legacy null-propagation. Price-factor warmup nulls always stay null.
     """
     if not factor_set:
         return frame
@@ -140,6 +148,12 @@ def add_cross_sectional_factors(
         ]
     )
     out = out.with_columns([_zscore(name) for name in factor_set])
+    if null_policy == "neutral":
+        fundamental = [n for n in factor_set if n in FUNDAMENTAL_FACTORS]
+        if fundamental:
+            out = out.with_columns(
+                [pl.col(f"{FACTOR_PREFIX}{n}").fill_null(0.0) for n in fundamental]
+            )
 
     scratch = [f"_xf_raw_{name}" for name in factor_set]
     scratch += [f"_xf_base_{name}" for name in factor_set]

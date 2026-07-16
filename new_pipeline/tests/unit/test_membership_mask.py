@@ -71,3 +71,34 @@ def test_build_training_frame_membership_none_is_noop_and_masking_bites():
     )
     assert masked.height < full.height
     assert max(masked["date"].to_list()) < exit_date  # nothing at/after the exit
+
+
+def test_fundamental_nulls_neutral_filled_but_price_warmup_stays_null():
+    """null_policy='neutral' rescues rows whose FUNDAMENTAL inputs are missing
+    (departed names) at exactly-average exposure, while price-factor warmup
+    nulls keep dropping — the two null sources are semantically different."""
+    from datetime import date, timedelta
+
+    import polars as pl
+    from new_pipeline.features.factors import add_cross_sectional_factors
+
+    days = [date(2021, 1, 4) + timedelta(days=i) for i in range(3)]
+    rows = []
+    for day in days:
+        # AAA has fundamentals; BBB does not (departed name, no filings).
+        rows.append({"date": day, "ticker": "AAA", "sector": "X", "close": 10.0,
+                     "returns": 0.01, "volatility": 0.2, "book_value_per_share": 5.0})
+        rows.append({"date": day, "ticker": "BBB", "sector": "X", "close": 20.0,
+                     "returns": 0.02, "volatility": 0.3, "book_value_per_share": None})
+    frame = pl.DataFrame(rows)
+    out = add_cross_sectional_factors(
+        frame, ["book_to_market", "low_vol"], sector_neutral=False, null_policy="neutral"
+    )
+    bbb = out.filter(pl.col("ticker") == "BBB")
+    assert bbb["xf_book_to_market"].null_count() == 0  # neutral-filled
+    assert set(bbb["xf_book_to_market"].to_list()) == {0.0}
+    # 'drop' policy preserves the legacy null propagation.
+    legacy = add_cross_sectional_factors(
+        frame, ["book_to_market"], sector_neutral=False, null_policy="drop"
+    )
+    assert legacy.filter(pl.col("ticker") == "BBB")["xf_book_to_market"].null_count() == 3

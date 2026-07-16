@@ -31,6 +31,7 @@ features:
   # mom_12_1, reversal_21, low_vol, seasonality. e.g. ["reversal_21", "low_vol"].
   factor_set: []
   factor_sector_neutral: true
+  factor_null_policy: "neutral"
   # Extended per-ticker families (P1): fracdiff, vol_estimators, microstructure. Empty => off.
   extended_features: []
   fracdiff_d: 0.4

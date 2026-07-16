@@ -330,3 +330,29 @@ def test_next_ret_is_next_bar_close_ratio_and_not_a_feature():
     np.testing.assert_allclose(next_ret[:-1], close[1:] / close[:-1] - 1.0, rtol=1e-12)
     assert np.isnan(next_ret[-1])  # no forward bar for the last row
     assert "next_ret" not in FEATURE_COLS
+
+
+def test_partially_covered_fundamentals_keep_all_tickers_in_tournament():
+    """A ticker with no fundamentals (departed name, no resolvable filings) must
+    reach the tournament at neutral factor exposure — not silently vanish
+    through drop_nulls, which would reintroduce survivorship."""
+    from new_pipeline.adapters import FakeMarketDataSource
+    from new_pipeline.adapters.fakes import FakeFundamentalsSource
+
+    class _PartialSource(FakeFundamentalsSource):
+        def history(self, symbol, start, end):
+            return [] if symbol == "MSFT" else super().history(symbol, start, end)
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.features.factor_set = ["book_to_market", "roe"]
+    frame = build_training_frame(
+        ["AAPL", "MSFT"], {"AAPL": "Information Technology",
+                           "MSFT": "Information Technology"},
+        date(2021, 1, 1), date(2021, 6, 30), FakeMarketDataSource(), cfg,
+        fundamentals_source=_PartialSource(),
+    )
+    msft = frame.filter(frame["ticker"] == "MSFT")
+    assert msft.height > 0
+    assert msft["xf_book_to_market"].null_count() == 0  # neutral-filled, survives
+    assert set(msft["xf_book_to_market"].to_list()) == {0.0}

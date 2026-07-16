@@ -164,8 +164,20 @@ def build_training_frame(
             factor in FUNDAMENTAL_FACTORS for factor in cfg.features.factor_set
         ):
             joined = attach_fundamentals(joined, fundamentals_source)  # point-in-time
+            covered = joined.filter(pl.col("book_value_per_share").is_not_null())
+            _logger.info(
+                "fundamentals coverage: %.1f%% of rows, %d/%d tickers",
+                100.0 * covered.height / max(joined.height, 1),
+                covered["ticker"].n_unique(),
+                joined["ticker"].n_unique(),
+            )
         joined = add_cross_sectional_factors(
-            joined, cfg.features.factor_set, sector_neutral=cfg.features.factor_sector_neutral
+            joined, cfg.features.factor_set,
+            sector_neutral=cfg.features.factor_sector_neutral,
+            # "neutral": missing-fundamentals rows keep average exposure instead
+            # of being dropped — dropping them would silently reintroduce the
+            # survivorship the PIT universe removed.
+            null_policy=cfg.features.factor_null_policy,
         )
     return joined
 

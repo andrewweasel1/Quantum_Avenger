@@ -72,3 +72,18 @@ def test_edgar_fundamentals_maps_injected_records():
     assert len(snaps) == 2  # the 2022 record is excluded
     assert snaps[0].as_of < snaps[1].as_of  # sorted ascending
     assert snaps[0].earnings_per_share == 1.5
+
+
+def test_build_fundamentals_source_prefers_fixture_in_live_modes(monkeypatch):
+    """Vault-first: a set fixture_path replays with zero network even in paper
+    mode — fundamentals are never re-fetched inline inside a backtest."""
+    from new_pipeline.adapters.factory import build_fundamentals_source
+    from new_pipeline.adapters.fundamentals_static import StaticFundamentalsSource
+    from new_pipeline.config import base, reload_config
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.system.run_mode = "paper"
+    cfg.fundamentals.fixture_path = "new_pipeline/data/fundamentals/snapshots.csv"
+    source = build_fundamentals_source(cfg)
+    assert isinstance(source, StaticFundamentalsSource)

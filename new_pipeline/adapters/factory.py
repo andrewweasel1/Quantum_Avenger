@@ -152,15 +152,19 @@ def _build_fusion(cfg, universe):
 
 
 def build_fundamentals_source(cfg, universe=None):
-    """Point-in-time fundamentals for the value/quality factors: a deterministic fake
-    (or a checked-in fixture when ``fundamentals.fixture_path`` is set) offline, the
-    live EDGAR source otherwise."""
+    """Point-in-time fundamentals for the value/quality factors.
+
+    Vault-first in EVERY run mode: a set ``fundamentals.fixture_path`` (the
+    fetched-once snapshots CSV from ``scripts/ingest_fundamentals_vault``)
+    replays with zero network even in live/paper runs — fundamentals should
+    never be re-fetched inline inside a backtest. Otherwise: deterministic
+    fake offline, live EDGAR companyfacts source in live modes."""
+    if cfg.fundamentals.fixture_path:
+        from new_pipeline.adapters.fundamentals_static import StaticFundamentalsSource
+
+        return StaticFundamentalsSource(cfg.fundamentals.fixture_path)
     mode = (cfg.system.run_mode or "offline").lower()
     if mode in OFFLINE_MODES:
-        if cfg.fundamentals.fixture_path:
-            from new_pipeline.adapters.fundamentals_static import StaticFundamentalsSource
-
-            return StaticFundamentalsSource(cfg.fundamentals.fixture_path)
         return FakeFundamentalsSource()
     from new_pipeline.adapters.fundamentals_edgar import (  # pragma: no cover - egress
         EdgarFundamentalsSource,

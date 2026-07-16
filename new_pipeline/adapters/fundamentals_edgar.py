@@ -41,27 +41,13 @@ class EdgarFundamentalsSource(FundamentalsSource):
             )
         return sorted(snapshots, key=lambda snap: snap.as_of)
 
-    def _default_fetch(self, symbol, start, end):  # pragma: no cover - egress + XBRL parse
-        """Derive per-share book value, EPS, and ROE from EDGAR XBRL facts
-        (StockholdersEquity / CommonSharesOutstanding, EarningsPerShareBasic,
-        NetIncomeLoss). Validated on an allowlisted host with a real SEC identity."""
-        import edgar
+    def _default_fetch(self, symbol, start, end):  # pragma: no cover - egress
+        """One companyfacts GET per company via the shared mapping helpers
+        (``data/edgar_companyfacts``): CIK-resolved, tag-fallback-robust, PIT
+        ``as_of`` = filed date. Replaces the per-filing edgartools walk that
+        broke on variant XBRL tags and delisted tickers."""
+        from new_pipeline.data.edgar_companyfacts import fetch_company_records
 
-        edgar.set_identity(self._identity or "research research@example.com")
-        company = edgar.Company(symbol)
-        records = []
-        for filing in company.get_filings(form=["10-K", "10-Q"]).filter(date=f"{start}:{end}"):
-            facts = filing.obj().financials
-            equity = float(facts.balance_sheet.loc["StockholdersEquity"].iloc[0])
-            shares = float(facts.balance_sheet.loc["CommonSharesOutstanding"].iloc[0])
-            eps = float(facts.income_statement.loc["EarningsPerShareBasic"].iloc[0])
-            net_income = float(facts.income_statement.loc["NetIncomeLoss"].iloc[0])
-            records.append(
-                {
-                    "as_of": filing.filing_date,
-                    "book_value_per_share": equity / shares if shares else 0.0,
-                    "earnings_per_share": eps,
-                    "return_on_equity": net_income / equity if equity else 0.0,
-                }
-            )
-        return records
+        return fetch_company_records(
+            symbol, start, end, identity=self._identity or "research research@example.com"
+        )
