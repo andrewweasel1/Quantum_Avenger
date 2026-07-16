@@ -161,6 +161,22 @@ class PortfolioConfig(BaseModel):
     min_obs: int = 20  # min common stream length to combine sleeves
 
 
+class LongShortConfig(BaseModel):
+    """Universe-wide cross-sectional long-short rank sleeve (breadth strategy).
+
+    Ranks names daily by the model's bagged OOS probability, holds top-vs-bottom
+    quantile dollar-neutral, books next-day returns net of turnover costs, and
+    rides the full promotion gauntlet under one "Universe Long Short" key."""
+
+    enabled: bool = False  # new sleeve; default off keeps the suite/runtime stable
+    quantile: float = 0.2  # fraction of scored names per leg
+    cost_bps: float = 10.0  # transaction cost per unit turnover (one-way, incl. slippage)
+    min_names_per_day: int = 20  # below this breadth the book holds nothing that day
+    sector_neutral: bool = True  # z-score scores within (date, sector) before ranking
+    null_iterations: int = 20  # within-date permutation null (synthetic-gauntlet slot)
+    null_quantile: float = 0.95  # champion must beat this quantile of the null
+
+
 class StatArbConfig(BaseModel):
     """Cointegration / OU mean-reversion strategy family (offense roadmap P5)."""
 
@@ -255,6 +271,7 @@ class AppConfig(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
     stat_arb: StatArbConfig = Field(default_factory=StatArbConfig)
+    long_short: LongShortConfig = Field(default_factory=LongShortConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
     fundamentals: FundamentalsConfig = Field(default_factory=FundamentalsConfig)

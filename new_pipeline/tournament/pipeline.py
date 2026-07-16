@@ -291,8 +291,20 @@ def run_offline_pipeline(
     if cfg.features.extended_features:
         feature_cols += extended_feature_names(cfg.features.extended_features)
     results = run_sector_tournament(frame, feature_cols, output_dir)
-    promotions = _evaluate_and_promote(frame, results, output_dir, cfg)
-    summary = {"sectors": list(results), "promotions": promotions}
+    gauntlet_results = results
+    summary = {"sectors": list(results)}
+    if cfg.long_short.enabled:
+        from new_pipeline.tournament.long_short import LONG_SHORT_KEY, run_universe_long_short
+
+        # The universe L/S book rides the SAME gauntlet as the sector champions
+        # (one extra registry key); the sector-only ``results`` still feeds the
+        # portfolio book and summary["sectors"] so their meaning is unchanged.
+        ls_entry = run_universe_long_short(results, output_dir, cfg)
+        if ls_entry is not None:
+            gauntlet_results = {**results, LONG_SHORT_KEY: ls_entry}
+            summary["long_short"] = ls_entry["diagnostics"]
+    promotions = _evaluate_and_promote(frame, gauntlet_results, output_dir, cfg)
+    summary["promotions"] = promotions
     if cfg.evaluation.alpha_eval_enabled:
         summary["alpha_eval"] = _write_alpha_eval(frame, feature_cols, cfg, output_dir)
     if cfg.portfolio.enabled:
@@ -530,9 +542,16 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
 
         dsr = _deflated_sharpe(champion_returns, trials, eval_matrix, cfg)
         path_pass_fraction, path_dsr_median = _path_dsr_stats(paths, trials, eval_matrix, cfg)
-        # The synthetic HMM gauntlet block-bootstraps the per-sample FEATURE matrix,
-        # so its champion series must stay row-aligned with samples (pooled).
-        synthetic_sr = _synthetic_sharpe(frame, sector, result, pooled_champion, cfg)
+        if result.get("kind") == "long_short":
+            # A book-level candidate has no per-name booster to bootstrap (its
+            # candidate.json is a manifest); its synthetic-gauntlet statistic is
+            # the within-date permutation-null margin computed by the sleeve —
+            # the same gate (`<= synthetic_sr_min` rejects) applies verbatim.
+            synthetic_sr = float(result["synthetic_margin"])
+        else:
+            # The synthetic HMM gauntlet block-bootstraps the per-sample FEATURE
+            # matrix, so its champion series stays row-aligned with samples (pooled).
+            synthetic_sr = _synthetic_sharpe(frame, sector, result, pooled_champion, cfg)
         # Overfitting/selection diagnostics over the full (n_obs x n_trials) matrix.
         champion_sharpe = sharpe_ratio(champion_returns)
         pbo = probability_of_backtest_overfitting(eval_matrix, cfg.evaluation.pbo_partitions)

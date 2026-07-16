@@ -86,9 +86,14 @@ def run_trading_session(
 
     counters = {"decisions": 0, "executed": 0, "vetoed": 0, "pnl": 0.0}
     for sector, model_path in champions.items():
+        symbols = [ticker for ticker, sec in sector_of.items() if sec == sector]
+        if not symbols:
+            # Portfolio-level champions (e.g. "Universe Long Short") have no
+            # per-name replay here and their candidate.json is a manifest, not
+            # a booster — loading it would crash the session.
+            continue
         booster = load_booster(model_path)
         selected = _selected_features(model_path)
-        symbols = [ticker for ticker, sec in sector_of.items() if sec == sector]
         for symbol in symbols:
             _replay_symbol(
                 symbol, dsr_by_sector.get(sector, 0.0), booster, selected,

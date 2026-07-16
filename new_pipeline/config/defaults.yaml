@@ -177,6 +177,19 @@ portfolio:
   cov_method: "rmt"
   min_obs: 20
 
+# Universe-wide cross-sectional long-short rank sleeve: daily top-vs-bottom
+# quantile on the model's bagged OOS probability, dollar-neutral, next-day
+# returns net of cost_bps per unit turnover. Promotes (or fails) through the
+# full gauntlet under the "Universe Long Short" registry key.
+long_short:
+  enabled: false
+  quantile: 0.2
+  cost_bps: 10.0
+  min_names_per_day: 20
+  sector_neutral: true
+  null_iterations: 20
+  null_quantile: 0.95
+
 # Statistical arbitrage (P5): cointegration + OU mean reversion (new family, default off).
 stat_arb:
   enabled: false
