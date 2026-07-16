@@ -182,6 +182,10 @@ class LongShortConfig(BaseModel):
     # per-ticker mean before ranking. 1/1 = the original daily book.
     rebalance_days: int = 1
     score_smoothing_days: int = 1
+    # Vol-targeted de-risking (never levers up): scale rebalance weights by
+    # min(1, target / trailing annualized vol of the UNIT book). 0 = off.
+    vol_target_annual: float = 0.0
+    vol_lookback_days: int = 20
     null_iterations: int = 20  # within-date permutation null (synthetic-gauntlet slot)
     null_quantile: float = 0.95  # champion must beat this quantile of the null
 

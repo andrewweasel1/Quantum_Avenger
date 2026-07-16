@@ -169,3 +169,43 @@ def test_slow_book_cuts_turnover_on_noisy_scores():
     slow = build_long_short_book(smooth_scores(panel, 5), 0.2, 10.0, 10, False,
                                  rebalance_days=5)
     assert slow.turnover.mean() < 0.35 * fast.turnover.mean()  # >65% turnover cut
+
+
+def test_vol_target_derisk_is_causal_and_never_levers():
+    from datetime import timedelta
+
+    # 30 days, 4 names; unit book vol is large -> a tiny target must shrink
+    # exposure, but only AFTER the lookback warmup (causality).
+    rng = np.random.default_rng(9)
+    rows = []
+    for d in range(30):
+        day = D1 + timedelta(days=d)
+        for i, t in enumerate("ABCD"):
+            rows.append((day, t, "X", float(3 - i), float(rng.normal(0, 0.02))))
+    panel = _panel(rows)
+    plain = build_long_short_book(panel, 0.25, 0.0, 4, False, 1)
+    capped = build_long_short_book(panel, 0.25, 0.0, 4, False, 1,
+                                   vol_target_annual=0.01, vol_lookback=10)
+    # warmup: first 10 days identical (scalar 1 until enough unit history)
+    np.testing.assert_allclose(capped.gross[:10], plain.gross[:10])
+    # after warmup the tiny target binds: exposure and gross shrink
+    assert capped.avg_gross_exposure < 1.0
+    assert np.abs(capped.gross[15:]).sum() < np.abs(plain.gross[15:]).sum()
+    # gross scales linearly with the scalar: day-15 ratio equals exposure ratio
+    day = 20
+    exp_ratio = np.abs(capped.gross[day]) / max(np.abs(plain.gross[day]), 1e-12)
+    assert exp_ratio <= 1.0 + 1e-9
+    # never levers above unit gross
+    assert max(capped.turnover) <= max(plain.turnover) + 1e-9
+
+
+def test_vol_target_off_is_bit_stable():
+    rows = [
+        (D1, "A", "X", 4.0, 0.02), (D1, "B", "X", 3.0, 0.01),
+        (D1, "C", "X", 2.0, -0.01), (D1, "D", "X", 1.0, -0.03),
+    ]
+    a = build_long_short_book(_panel(rows), 0.25, 10.0, 4, False, 1)
+    b = build_long_short_book(_panel(rows), 0.25, 10.0, 4, False, 1,
+                              vol_target_annual=0.0, vol_lookback=20)
+    np.testing.assert_array_equal(a.net, b.net)
+    np.testing.assert_array_equal(a.turnover, b.turnover)

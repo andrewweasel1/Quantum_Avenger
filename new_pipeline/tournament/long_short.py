@@ -52,6 +52,7 @@ class LongShortBook:
     gross: np.ndarray
     turnover: np.ndarray  # one-way-ish: 0.5 * sum |delta weight| per day
     avg_names_per_leg: float
+    avg_gross_exposure: float = 1.0  # mean sum|w|; < 1 when vol-targeting de-risks
 
 
 def sector_neutral_scores(panel: pl.DataFrame, score_col: str = "score") -> pl.DataFrame:
@@ -89,6 +90,8 @@ def build_long_short_book(
     min_names: int,
     sector_neutral: bool = True,
     rebalance_days: int = 1,
+    vol_target_annual: float = 0.0,
+    vol_lookback: int = 20,
 ) -> LongShortBook:
     """Dollar-neutral rank book from a (date, ticker, sector, score, next_ret)
     panel, re-ranked every ``rebalance_days`` trading days.
@@ -100,12 +103,21 @@ def build_long_short_book(
     is force-exited that day (its unwind is charged; delistings are real).
     ``gross_t = sum(w_held * next_ret_t)``; ``turnover_t = 0.5 * sum|delta w|``;
     ``net_t = gross_t - cost_bps/1e4 * turnover_t``. ``rebalance_days=1``
-    reproduces the daily-rebalanced book exactly."""
+    reproduces the daily-rebalanced book exactly.
+
+    ``vol_target_annual > 0`` de-risks (never levers): at each rebalance the
+    weights are scaled by ``min(1, target / trailing_vol)``, where trailing vol
+    is the CAUSAL annualized std of the UNIT-gross book's last ``vol_lookback``
+    returns (strictly prior days; the estimator never sees its own scaling).
+    Returns in hostile regimes shrink toward zero instead of staying
+    large-and-wrong — the standard cure for regime-concentrated risk."""
     clean = panel.drop_nulls(["score", "next_ret"]).sort(["date", "ticker"])
     if sector_neutral and "sector" in clean.columns:
         clean = sector_neutral_scores(clean)
-    dates, gross, turnover, leg_sizes = [], [], [], []
+    dates, gross, turnover, leg_sizes, exposures = [], [], [], [], []
     held: dict[str, float] = {}
+    unit_held: dict[str, float] = {}  # unscaled shadow book: the vol estimator
+    unit_grosses: list[float] = []
     for index, day in enumerate(clean.partition_by("date", maintain_order=True)):
         tickers = day["ticker"].to_list()
         rets = dict(zip(tickers, day["next_ret"].to_list(), strict=True))
@@ -113,27 +125,38 @@ def build_long_short_book(
         # Forced exits first: a held name with no row today can't be held on.
         for name in [t for t in held if t not in rets]:
             day_turnover += 0.5 * abs(held.pop(name))
+        for name in [t for t in unit_held if t not in rets]:
+            unit_held.pop(name)
         if index % rebalance_days == 0:
             n = day.height
-            target: dict[str, float] = {}
+            base: dict[str, float] = {}
             if n >= min_names:
                 order = day.sort("score", descending=True)
                 ranked = order["ticker"].to_list()
                 k = max(1, int(n * quantile))
                 for i in range(k):
-                    target[ranked[i]] = 1.0 / (2 * k)
-                    target[ranked[n - 1 - i]] = target.get(ranked[n - 1 - i], 0.0) - 1.0 / (
+                    base[ranked[i]] = 1.0 / (2 * k)
+                    base[ranked[n - 1 - i]] = base.get(ranked[n - 1 - i], 0.0) - 1.0 / (
                         2 * k
                     )
                 leg_sizes.append(k)
+            scalar = 1.0
+            if vol_target_annual > 0.0 and len(unit_grosses) >= vol_lookback:
+                trailing = float(np.std(unit_grosses[-vol_lookback:], ddof=1)) * np.sqrt(252.0)
+                if trailing > 0.0:
+                    scalar = min(1.0, vol_target_annual / trailing)
+            target = {t: w * scalar for t, w in base.items()}
             day_turnover += 0.5 * sum(
                 abs(target.get(t, 0.0) - held.get(t, 0.0)) for t in target.keys() | held.keys()
             )
             held = target
+            unit_held = base
         day_gross = float(sum(w * rets[t] for t, w in held.items()))
+        unit_grosses.append(float(sum(w * rets[t] for t, w in unit_held.items())))
         dates.append(day["date"][0])
         gross.append(day_gross)
         turnover.append(day_turnover)
+        exposures.append(sum(abs(w) for w in held.values()))
     gross_arr = np.asarray(gross, dtype=np.float64)
     turn_arr = np.asarray(turnover, dtype=np.float64)
     net = gross_arr - (cost_bps / 1e4) * turn_arr
@@ -143,6 +166,7 @@ def build_long_short_book(
         gross=gross_arr,
         turnover=turn_arr,
         avg_names_per_leg=float(np.mean(leg_sizes)) if leg_sizes else 0.0,
+        avg_gross_exposure=float(np.mean(exposures)) if exposures else 0.0,
     )
 
 
@@ -156,6 +180,8 @@ def permutation_null_margin(
     null_quantile: float,
     champion_sharpe: float,
     rebalance_days: int = 1,
+    vol_target_annual: float = 0.0,
+    vol_lookback: int = 20,
 ) -> tuple[float, list[float]]:
     """Champion Sharpe minus the ``null_quantile`` of its informationless null.
 
@@ -171,7 +197,8 @@ def permutation_null_margin(
             pl.col("score").shuffle(seed=int(rng.integers(0, 2**31))).over("date")
         )
         book = build_long_short_book(
-            permuted, quantile, cost_bps, min_names, sector_neutral, rebalance_days
+            permuted, quantile, cost_bps, min_names, sector_neutral, rebalance_days,
+            vol_target_annual, vol_lookback,
         )
         null_sharpes.append(sharpe_ratio(book.net))
     margin = champion_sharpe - float(np.quantile(null_sharpes, null_quantile))
@@ -214,6 +241,8 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
 
     rebalance_days = getattr(ls, "rebalance_days", 1)
     smoothing = getattr(ls, "score_smoothing_days", 1)
+    vol_target = getattr(ls, "vol_target_annual", 0.0)
+    vol_lookback = getattr(ls, "vol_lookback_days", 20)
 
     def panel_for(score_expr: pl.Expr) -> pl.DataFrame:
         panel = universe.select(
@@ -224,7 +253,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     def book_for(score_expr: pl.Expr) -> LongShortBook:
         return build_long_short_book(
             panel_for(score_expr), ls.quantile, ls.cost_bps, ls.min_names_per_day,
-            ls.sector_neutral, rebalance_days,
+            ls.sector_neutral, rebalance_days, vol_target, vol_lookback,
         )
 
     combo_mean = [
@@ -246,7 +275,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     margin, null_sharpes = permutation_null_margin(
         champion_panel, ls.quantile, ls.cost_bps, ls.min_names_per_day, ls.sector_neutral,
         ls.null_iterations, ls.null_quantile, trial_sharpes[best],
-        rebalance_days=rebalance_days,
+        rebalance_days=rebalance_days, vol_target_annual=vol_target, vol_lookback=vol_lookback,
     )
 
     output = Path(output_dir)
@@ -271,6 +300,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         "gross_sharpe": gross_sharpe,
         "avg_daily_turnover": avg_turnover,
         "avg_names_per_leg": champion.avg_names_per_leg,
+        "avg_gross_exposure": champion.avg_gross_exposure,
         # cost level (bps per unit turnover) at which the mean net return hits 0
         "breakeven_cost_bps": (
             float(champion.gross.mean() / avg_turnover * 1e4) if avg_turnover > 0 else None
@@ -293,6 +323,8 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
                     "sector_neutral": ls.sector_neutral,
                     "rebalance_days": rebalance_days,
                     "score_smoothing_days": smoothing,
+                    "vol_target_annual": vol_target,
+                    "vol_lookback_days": vol_lookback,
                 },
                 "diagnostics": diagnostics,
             },

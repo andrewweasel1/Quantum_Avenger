@@ -190,6 +190,8 @@ long_short:
   sector_neutral: true
   rebalance_days: 1
   score_smoothing_days: 1
+  vol_target_annual: 0.0
+  vol_lookback_days: 20
   null_iterations: 20
   null_quantile: 0.95
 
