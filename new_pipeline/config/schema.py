@@ -176,6 +176,12 @@ class LongShortConfig(BaseModel):
     cost_bps: float = 10.0  # transaction cost per unit turnover (one-way, incl. slippage)
     min_names_per_day: int = 20  # below this breadth the book holds nothing that day
     sector_neutral: bool = True  # z-score scores within (date, sector) before ranking
+    # Turnover levers (the alpha-arc diagnostics: 35%/day churn at 10 bps ate a
+    # +1.54 gross Sharpe). Re-rank every N trading days, holding in between
+    # (forced exits still charged), and/or smooth scores with a trailing
+    # per-ticker mean before ranking. 1/1 = the original daily book.
+    rebalance_days: int = 1
+    score_smoothing_days: int = 1
     null_iterations: int = 20  # within-date permutation null (synthetic-gauntlet slot)
     null_quantile: float = 0.95  # champion must beat this quantile of the null
 

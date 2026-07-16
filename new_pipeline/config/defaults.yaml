@@ -188,6 +188,8 @@ long_short:
   cost_bps: 10.0
   min_names_per_day: 20
   sector_neutral: true
+  rebalance_days: 1
+  score_smoothing_days: 1
   null_iterations: 20
   null_quantile: 0.95
 

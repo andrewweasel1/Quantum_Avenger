@@ -71,53 +71,69 @@ def sector_neutral_scores(panel: pl.DataFrame, score_col: str = "score") -> pl.D
     return panel.with_columns(z.alias(score_col))
 
 
+def smooth_scores(panel: pl.DataFrame, days: int) -> pl.DataFrame:
+    """Trailing per-ticker rolling mean of the score (look-back only, so no
+    leakage). Smoothing dampens day-to-day rank churn — the main turnover lever
+    identified by the alpha-arc diagnostics."""
+    if days <= 1:
+        return panel
+    return panel.sort(["ticker", "date"]).with_columns(
+        pl.col("score").rolling_mean(window_size=days, min_samples=1).over("ticker")
+    )
+
+
 def build_long_short_book(
     panel: pl.DataFrame,
     quantile: float,
     cost_bps: float,
     min_names: int,
     sector_neutral: bool = True,
+    rebalance_days: int = 1,
 ) -> LongShortBook:
-    """Daily-rebalanced dollar-neutral rank book from a (date, ticker, sector,
-    score, next_ret) panel.
+    """Dollar-neutral rank book from a (date, ticker, sector, score, next_ret)
+    panel, re-ranked every ``rebalance_days`` trading days.
 
-    Per date with n >= ``min_names`` scored names: long the top ``k = max(1,
-    int(n * quantile))`` at +1/(2k), short the bottom k at -1/(2k) (unit gross).
-    ``gross_t = sum(w * next_ret)``; ``turnover_t = 0.5 * sum|w_t - w_{t-1}|``
-    (inception and forced exits are charged); ``net_t = gross_t -
-    cost_bps/1e4 * turnover_t``. Thin dates hold no book (weights empty, any
-    unwind still charged)."""
+    On a REBALANCE day with n >= ``min_names`` scored names: long the top
+    ``k = max(1, int(n * quantile))`` at +1/(2k), short the bottom k at -1/(2k)
+    (unit gross); a thin rebalance day goes flat (unwind charged). Between
+    rebalances the book HOLDS its weights — a held name missing from the panel
+    is force-exited that day (its unwind is charged; delistings are real).
+    ``gross_t = sum(w_held * next_ret_t)``; ``turnover_t = 0.5 * sum|delta w|``;
+    ``net_t = gross_t - cost_bps/1e4 * turnover_t``. ``rebalance_days=1``
+    reproduces the daily-rebalanced book exactly."""
     clean = panel.drop_nulls(["score", "next_ret"]).sort(["date", "ticker"])
     if sector_neutral and "sector" in clean.columns:
         clean = sector_neutral_scores(clean)
     dates, gross, turnover, leg_sizes = [], [], [], []
-    prev: dict[str, float] = {}
-    for day in clean.partition_by("date", maintain_order=True):
-        n = day.height
-        weights: dict[str, float] = {}
-        day_gross = 0.0
-        if n >= min_names:
-            k = max(1, int(n * quantile))
-            order = day.sort("score", descending=True)
-            tickers = order["ticker"].to_list()
-            rets = order["next_ret"].to_numpy()
-            for i in range(k):
-                weights[tickers[i]] = 1.0 / (2 * k)
-                weights[tickers[n - 1 - i]] = weights.get(tickers[n - 1 - i], 0.0) - 1.0 / (
-                    2 * k
-                )
-            day_gross = float(
-                sum(rets[i] / (2 * k) for i in range(k))
-                - sum(rets[n - 1 - i] / (2 * k) for i in range(k))
+    held: dict[str, float] = {}
+    for index, day in enumerate(clean.partition_by("date", maintain_order=True)):
+        tickers = day["ticker"].to_list()
+        rets = dict(zip(tickers, day["next_ret"].to_list(), strict=True))
+        day_turnover = 0.0
+        # Forced exits first: a held name with no row today can't be held on.
+        for name in [t for t in held if t not in rets]:
+            day_turnover += 0.5 * abs(held.pop(name))
+        if index % rebalance_days == 0:
+            n = day.height
+            target: dict[str, float] = {}
+            if n >= min_names:
+                order = day.sort("score", descending=True)
+                ranked = order["ticker"].to_list()
+                k = max(1, int(n * quantile))
+                for i in range(k):
+                    target[ranked[i]] = 1.0 / (2 * k)
+                    target[ranked[n - 1 - i]] = target.get(ranked[n - 1 - i], 0.0) - 1.0 / (
+                        2 * k
+                    )
+                leg_sizes.append(k)
+            day_turnover += 0.5 * sum(
+                abs(target.get(t, 0.0) - held.get(t, 0.0)) for t in target.keys() | held.keys()
             )
-            leg_sizes.append(k)
-        day_turnover = 0.5 * sum(
-            abs(weights.get(t, 0.0) - prev.get(t, 0.0)) for t in weights.keys() | prev.keys()
-        )
+            held = target
+        day_gross = float(sum(w * rets[t] for t, w in held.items()))
         dates.append(day["date"][0])
         gross.append(day_gross)
         turnover.append(day_turnover)
-        prev = weights
     gross_arr = np.asarray(gross, dtype=np.float64)
     turn_arr = np.asarray(turnover, dtype=np.float64)
     net = gross_arr - (cost_bps / 1e4) * turn_arr
@@ -139,20 +155,24 @@ def permutation_null_margin(
     n_iter: int,
     null_quantile: float,
     champion_sharpe: float,
+    rebalance_days: int = 1,
 ) -> tuple[float, list[float]]:
     """Champion Sharpe minus the ``null_quantile`` of its informationless null.
 
-    Each iteration permutes the score column WITHIN each date (breadth and the
-    return cross-section preserved exactly; the score-return link destroyed)
-    and rebuilds the net-of-cost book. A promotable book must beat the upper
-    tail of what pure chance produces on identical raw material."""
+    Each iteration permutes the (already-smoothed) score column WITHIN each
+    date (breadth and the return cross-section preserved exactly; the
+    score-return link destroyed) and rebuilds the net-of-cost book under the
+    SAME mechanics — including the rebalance cadence, so a slow book is judged
+    against slow-book nulls."""
     rng = np.random.default_rng(active_seed())
     null_sharpes = []
     for _ in range(n_iter):
         permuted = panel.with_columns(
             pl.col("score").shuffle(seed=int(rng.integers(0, 2**31))).over("date")
         )
-        book = build_long_short_book(permuted, quantile, cost_bps, min_names, sector_neutral)
+        book = build_long_short_book(
+            permuted, quantile, cost_bps, min_names, sector_neutral, rebalance_days
+        )
         null_sharpes.append(sharpe_ratio(book.net))
     margin = champion_sharpe - float(np.quantile(null_sharpes, null_quantile))
     return margin, null_sharpes
@@ -192,12 +212,19 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     n_combos, phi = layout
     universe = pl.concat(panels)
 
-    def book_for(score_expr: pl.Expr) -> LongShortBook:
+    rebalance_days = getattr(ls, "rebalance_days", 1)
+    smoothing = getattr(ls, "score_smoothing_days", 1)
+
+    def panel_for(score_expr: pl.Expr) -> pl.DataFrame:
         panel = universe.select(
             "date", "ticker", "sector", score_expr.alias("score"), "next_ret"
         )
+        return smooth_scores(panel, smoothing)
+
+    def book_for(score_expr: pl.Expr) -> LongShortBook:
         return build_long_short_book(
-            panel, ls.quantile, ls.cost_bps, ls.min_names_per_day, ls.sector_neutral
+            panel_for(score_expr), ls.quantile, ls.cost_bps, ls.min_names_per_day,
+            ls.sector_neutral, rebalance_days,
         )
 
     combo_mean = [
@@ -215,12 +242,11 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     path_books = [
         book_for(pl.col(f"proba_c{best}_p{p}")) for p in range(phi)
     ]
-    champion_panel = universe.select(
-        "date", "ticker", "sector", combo_mean[best].alias("score"), "next_ret"
-    )
+    champion_panel = panel_for(combo_mean[best])  # smoothed: the null permutes the book input
     margin, null_sharpes = permutation_null_margin(
         champion_panel, ls.quantile, ls.cost_bps, ls.min_names_per_day, ls.sector_neutral,
         ls.null_iterations, ls.null_quantile, trial_sharpes[best],
+        rebalance_days=rebalance_days,
     )
 
     output = Path(output_dir)
@@ -265,6 +291,8 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
                     "cost_bps": ls.cost_bps,
                     "min_names_per_day": ls.min_names_per_day,
                     "sector_neutral": ls.sector_neutral,
+                    "rebalance_days": rebalance_days,
+                    "score_smoothing_days": smoothing,
                 },
                 "diagnostics": diagnostics,
             },

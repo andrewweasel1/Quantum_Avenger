@@ -102,3 +102,70 @@ def test_permutation_null_margin_separates_oracle_from_noise():
     noise_margin, _ = permutation_null_margin(noise, 0.2, 0.0, 10, False, 12, 0.95,
                                               noise_champ)
     assert noise_margin < margin  # random scores don't beat their own null like the oracle
+
+
+def test_rebalance_days_holds_between_and_charges_forced_exits():
+    # rebalance_days=2: day1 ranks (long A / short C), day2 HOLDS despite flipped
+    # scores — but B... A vanishes on day2 -> forced exit charged; day3 re-ranks.
+    rows = [
+        (D1, "A", "X", 3.0, 0.01), (D1, "B", "X", 2.0, 0.0), (D1, "C", "X", 1.0, -0.01),
+        (D2, "B", "X", 9.0, 0.02), (D2, "C", "X", 8.0, 0.02),  # A missing (delisted)
+        (D3, "B", "X", 2.0, 0.0), (D3, "C", "X", 1.0, 0.0),
+    ]
+    book = build_long_short_book(_panel(rows), quantile=0.34, cost_bps=0.0,
+                                 min_names=2, sector_neutral=False, rebalance_days=2)
+    # day1 (rebalance): +0.5 A, -0.5 C; inception turnover 0.5
+    np.testing.assert_allclose(book.turnover[0], 0.5)
+    np.testing.assert_allclose(book.gross[0], 0.5 * 0.01 - 0.5 * (-0.01))
+    # day2 (hold): A force-exited (0.5*|0.5| = 0.25 turnover); C held -> gross = -0.5*0.02
+    np.testing.assert_allclose(book.turnover[1], 0.25)
+    np.testing.assert_allclose(book.gross[1], -0.5 * 0.02)
+    # day3 (rebalance): from {C:-0.5} to {B:+0.5, C:-0.5} -> turnover 0.25
+    np.testing.assert_allclose(book.turnover[2], 0.25)
+
+
+def test_daily_rebalance_matches_legacy_semantics():
+    # rebalance_days=1 must reproduce the original daily book bit-for-bit.
+    rows = [
+        (D1, "A", "X", 4.0, 0.02), (D1, "B", "X", 3.0, 0.01),
+        (D1, "C", "X", 2.0, -0.01), (D1, "D", "X", 1.0, -0.03),
+        (D2, "A", "X", 1.0, 0.01), (D2, "B", "X", 2.0, 0.02),
+        (D2, "C", "X", 3.0, -0.02), (D2, "D", "X", 4.0, -0.01),
+    ]
+    daily = build_long_short_book(_panel(rows), 0.25, 10.0, 4, False, rebalance_days=1)
+    np.testing.assert_allclose(daily.gross[0], 0.5 * 0.02 - 0.5 * (-0.03))
+    np.testing.assert_allclose(daily.gross[1], 0.5 * (-0.01) - 0.5 * 0.01)  # D long, A short
+    np.testing.assert_allclose(daily.turnover, [0.5, 1.0])  # full flip on day2
+
+
+def test_score_smoothing_is_trailing_per_ticker_mean():
+    from new_pipeline.tournament.long_short import smooth_scores
+
+    panel = _panel([
+        (D1, "A", "X", 1.0, 0.0), (D2, "A", "X", 3.0, 0.0), (D3, "A", "X", 5.0, 0.0),
+        (D1, "B", "X", 10.0, 0.0), (D2, "B", "X", 0.0, 0.0), (D3, "B", "X", 2.0, 0.0),
+    ])
+    out = smooth_scores(panel, 2).sort(["ticker", "date"])
+    a = out.filter(out["ticker"] == "A")["score"].to_list()
+    b = out.filter(out["ticker"] == "B")["score"].to_list()
+    assert a == [1.0, 2.0, 4.0]   # trailing mean of (1), (1,3), (3,5)
+    assert b == [10.0, 5.0, 1.0]  # (10), (10,0), (0,2)
+    assert smooth_scores(panel, 1) is panel  # no-op passthrough
+
+
+def test_slow_book_cuts_turnover_on_noisy_scores():
+    from datetime import timedelta
+
+    from new_pipeline.tournament.long_short import smooth_scores
+
+    rng = np.random.default_rng(5)
+    rows = []
+    for d in range(40):
+        day = D1 + timedelta(days=d)
+        for i in range(20):
+            rows.append((day, f"T{i:02d}", "X", float(rng.normal()), float(rng.normal(0, 0.01))))
+    panel = _panel(rows)
+    fast = build_long_short_book(panel, 0.2, 10.0, 10, False, rebalance_days=1)
+    slow = build_long_short_book(smooth_scores(panel, 5), 0.2, 10.0, 10, False,
+                                 rebalance_days=5)
+    assert slow.turnover.mean() < 0.35 * fast.turnover.mean()  # >65% turnover cut
