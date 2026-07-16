@@ -7,6 +7,7 @@ The per-sector champion is recovered as the highest-Sharpe column of the persist
 """
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -72,6 +73,30 @@ def _sector_performance(output: Path) -> list[dict]:
     return sectors
 
 
+def _normalize_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _enrich_promotions(promotions: list[dict], sectors: list[dict]) -> list[dict]:
+    """Join each champion's realized performance (max drawdown, win rate, profit
+    factor — computed by ``_sector_performance`` on the calendar-daily series)
+    onto its promotion-registry row, so the gates table doubles as a per-champion
+    scorecard. Rows without a matching artifact card pass through unchanged."""
+    metrics_by = {_normalize_name(card["sector"]): card["metrics"] for card in sectors}
+    enriched = []
+    for entry in promotions:
+        metrics = metrics_by.get(_normalize_name(entry.get("sector", "")))
+        if metrics:
+            entry = {
+                **entry,
+                "max_drawdown": metrics.get("max_drawdown"),
+                "win_rate": metrics.get("win_rate"),
+                "profit_factor": metrics.get("profit_factor"),
+            }
+        enriched.append(entry)
+    return enriched
+
+
 def parse_results(run_dir: Path | str) -> dict:
     """Aggregate a run's artifacts: per-sector equity/metrics/CPCV-paths/confusion,
     the promotion table, alpha-eval IC/ICIR, the portfolio book, and stat-arb pairs."""
@@ -80,13 +105,14 @@ def parse_results(run_dir: Path | str) -> dict:
     registry = _read_json(output / "promotion_registry.json") or {
         "promotions": [], "active_champions": {}
     }
+    sectors = _sector_performance(output) if output.exists() else []
     return {
         "run_id": run_dir.name,
         "summary": _read_json(run_dir / "summary.json") or {},
-        "promotions": registry.get("promotions", []),
+        "promotions": _enrich_promotions(registry.get("promotions", []), sectors),
         "active_champions": registry.get("active_champions", {}),
         "alpha_eval": _read_json(output / "alpha_eval.json"),
         "portfolio": _read_json(output / "portfolio.json"),
         "stat_arb": _read_json(output / "stat_arb.json"),
-        "sectors": _sector_performance(output) if output.exists() else [],
+        "sectors": sectors,
     }

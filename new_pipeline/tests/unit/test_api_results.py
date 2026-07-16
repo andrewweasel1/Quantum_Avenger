@@ -106,3 +106,24 @@ def test_sample_dates_length_mismatch_falls_back_to_pooled(tmp_path):
     pl_.DataFrame({"date": pl_.read_parquet(out)["date"][:10]}).write_parquet(out)
     sector = parse_results(tmp_path)["sectors"][0]
     assert len(sector["equity"]) == 60  # pooled behavior, not a crash
+
+
+def test_promotions_enriched_with_champion_performance(tmp_path):
+    """The gates table doubles as a scorecard: each registry row picks up its
+    champion's max drawdown / win rate / profit factor from the artifact card;
+    rows with no matching card (stale sectors) pass through unchanged."""
+    _write_run(tmp_path)
+    out = tmp_path / "output"
+    (out / "promotion_registry.json").write_text(json.dumps({
+        "promotions": [
+            {"sector": "Information Technology", "dsr": 0.97, "promoted": True,
+             "reason": "true alpha"},
+            {"sector": "Ghost Sector", "dsr": 0.1, "promoted": False, "reason": "low DSR"},
+        ],
+        "active_champions": {},
+    }))
+    rows = {p["sector"]: p for p in parse_results(tmp_path)["promotions"]}
+    it = rows["Information Technology"]
+    assert {"max_drawdown", "win_rate", "profit_factor"} <= set(it)
+    assert it["max_drawdown"] <= 0.0 and 0.0 <= it["win_rate"] <= 1.0
+    assert "max_drawdown" not in rows["Ghost Sector"]  # no card -> untouched

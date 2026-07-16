@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { type PromotionEntry } from "@/lib/api";
-import { cn, formatNumber } from "@/lib/utils";
+import { cn, formatNumber, formatPercent } from "@/lib/utils";
 
 // Display thresholds mirroring the engine's promotion gates (config defaults).
 function gateTone(value: number | null, pass: (v: number) => boolean): string {
@@ -45,6 +45,9 @@ export function PromotionTable({ promotions }: { promotions: PromotionEntry[] })
           <TableHead>PSR</TableHead>
           <TableHead>Haircut SR</TableHead>
           <TableHead>Path pass</TableHead>
+          <TableHead>Max DD</TableHead>
+          <TableHead>Win rate</TableHead>
+          <TableHead>Profit factor</TableHead>
           <TableHead>Reason</TableHead>
         </TableRow>
       </TableHeader>
@@ -68,6 +71,15 @@ export function PromotionTable({ promotions }: { promotions: PromotionEntry[] })
             <TableCell><Gate value={p.psr} pass={(v) => v >= 0.95} /></TableCell>
             <TableCell><Gate value={p.haircut_sharpe} pass={(v) => v > 0} /></TableCell>
             <TableCell><Gate value={p.cpcv_path_pass_fraction} pass={(v) => v >= 0.5} /></TableCell>
+            <TableCell>
+              <span className={cn("font-mono tabular-nums",
+                p.max_drawdown == null ? "text-muted-foreground"
+                  : p.max_drawdown <= -0.15 ? "text-destructive" : "text-foreground")}>
+                {formatPercent(p.max_drawdown)}
+              </span>
+            </TableCell>
+            <TableCell><Gate value={p.win_rate == null ? null : p.win_rate * 100} pass={(v) => v >= 50} digits={1} /></TableCell>
+            <TableCell><Gate value={p.profit_factor ?? null} pass={(v) => v >= 1.0} /></TableCell>
             <TableCell className="max-w-[14rem] truncate text-xs text-muted-foreground">
               {p.promoted ? "all gates passed" : p.reason}
             </TableCell>

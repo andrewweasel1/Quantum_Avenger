@@ -98,6 +98,10 @@ export interface PromotionEntry {
   reason: string;
   timestamp?: string;
   model_path?: string | null;
+  // Champion realized performance, joined server-side from the artifact card.
+  max_drawdown?: number | null;
+  win_rate?: number | null;
+  profit_factor?: number | null;
 }
 
 export interface ICReport {
