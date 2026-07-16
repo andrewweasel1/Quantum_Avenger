@@ -14,6 +14,7 @@ import numpy as np
 from new_pipeline.config import get_config
 from new_pipeline.tournament.accounting import collapse_to_daily
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
+from new_pipeline.tournament.meta_labeling import MIN_FIRED_TRAIN, meta_filtered_signal
 from new_pipeline.tournament.sample_weights import uniqueness_sample_weights
 from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns_blockwise
 from new_pipeline.tournament.trainer import default_params, predict_proba, train_booster
@@ -34,6 +35,30 @@ class GridSearchResult:
     # for sample i on CPCV path p; mean over axis 1 is the bagged per-sample
     # OOS proba. Consumed by the cross-sectional long-short sleeve.
     proba_paths: np.ndarray | None = None
+
+
+def _fit_fold_meta(booster, features, labels, train_idx, weights, threshold, cfg):
+    """Meta model for ONE CPCV fold: trained only on the fold's FIRED train rows
+    (``train_idx`` is already span-purged/embargoed, so filtering test signals
+    with it is leakage-safe). Returns a ``predict(X) -> P(win)`` or None when
+    too few rows fire or the fired outcomes are single-class.
+
+    The captured ``proba_segments`` stay the RAW primary beliefs either way —
+    the long-short sleeve ranks beliefs; meta gating is an entry concept."""
+    train_proba = predict_proba(booster, features[train_idx])
+    fired = train_proba > threshold
+    outcomes = labels[train_idx][fired]
+    if fired.sum() < MIN_FIRED_TRAIN or np.unique(outcomes).size < 2:
+        return None
+    meta_booster = train_booster(
+        features[train_idx][fired],
+        outcomes,
+        num_boost_round=min(40, cfg.tournament.num_boost_round),
+        penalty_fp=cfg.tournament.penalty_fp,
+        penalty_fn=cfg.tournament.penalty_fn,
+        sample_weight=None if weights is None else weights[train_idx][fired],
+    )
+    return lambda x: predict_proba(meta_booster, x)
 
 
 def run_grid_search(
@@ -101,6 +126,12 @@ def run_grid_search(
                 penalty_fn=cfg.tournament.penalty_fn,
                 sample_weight=None if weights is None else weights[train_idx],
             )
+            meta_predict = (
+                _fit_fold_meta(booster, features, labels, train_idx, weights,
+                               confidence_threshold, cfg)
+                if cfg.tournament.enable_meta_labeling
+                else None
+            )
             # Simulate each test group on its own contiguous block, block-wise per
             # ticker, so a trade's t+1 never crosses a group OR ticker boundary.
             for g in test_groups:
@@ -109,6 +140,10 @@ def run_grid_search(
                 proba = predict_proba(booster, features[block])
                 proba_segments[(combo_index, g)] = proba  # OOS beliefs, kept raw
                 signals = (proba > confidence_threshold).astype(np.int64)
+                if meta_predict is not None:  # meta veto: act only when both agree
+                    signals = meta_filtered_signal(
+                        signals, meta_predict(features[block]), cfg.tournament.meta_threshold
+                    )
                 group_ids = np.zeros(gend - gstart + 1) if block_ids is None else block_ids[block]
                 segments[(combo_index, g)] = simulate_t1_returns_blockwise(
                     signals,
