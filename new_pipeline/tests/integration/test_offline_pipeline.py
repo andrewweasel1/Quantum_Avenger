@@ -311,3 +311,22 @@ def test_run_offline_pipeline_applies_membership_windows(tmp_path, monkeypatch):
 
     assert captured, "membership mask never invoked"
     assert len(captured["members"]) >= 41  # the provider's full interval list
+
+
+def test_next_ret_is_next_bar_close_ratio_and_not_a_feature():
+    """The L/S realization column: next-day close-to-close per ticker, null on
+    each ticker's final bar, and never part of the selectable feature set."""
+    import numpy as np
+
+    from new_pipeline.adapters import FakeMarketDataSource
+
+    reload_config()
+    frame = build_training_frame(
+        ["AAPL"], {"AAPL": "Information Technology"},
+        date(2021, 1, 1), date(2021, 3, 31), FakeMarketDataSource(), base.get_config(),
+    ).sort("date")
+    close = frame["close"].to_numpy()
+    next_ret = frame["next_ret"].to_numpy()
+    np.testing.assert_allclose(next_ret[:-1], close[1:] / close[:-1] - 1.0, rtol=1e-12)
+    assert np.isnan(next_ret[-1])  # no forward bar for the last row
+    assert "next_ret" not in FEATURE_COLS

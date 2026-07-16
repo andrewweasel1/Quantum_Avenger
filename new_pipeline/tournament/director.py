@@ -257,7 +257,11 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
         if cfg.tournament.enable_meta_labeling
         else None
     )
-    return sector, _persist(output, sector, booster, selected, search, meta, sample_dates)
+    return sector, _persist(
+        output, sector, booster, selected, search, meta, sample_dates,
+        tickers=clean["ticker"] if "ticker" in clean.columns else None,
+        next_ret=clean["next_ret"] if "next_ret" in clean.columns else None,
+    )
 
 
 def _train_candidate(matrix, labels, cfg, t1_offset=None, block_ids=None):
@@ -282,7 +286,8 @@ def _train_candidate(matrix, labels, cfg, t1_offset=None, block_ids=None):
 
 
 def _persist(
-    output: Path, sector: str, booster, selected, search, meta=None, sample_dates=None
+    output: Path, sector: str, booster, selected, search, meta=None, sample_dates=None,
+    tickers=None, next_ret=None,
 ) -> dict:
     slug = _slug(sector)
     candidate_path = output / f"{slug}_candidate.json"
@@ -313,6 +318,20 @@ def _persist(
         pl.DataFrame(
             paths.T, schema=[f"path_{i}" for i in range(paths.shape[0])]
         ).write_parquet(output / f"{slug}_paths.parquet")
+    proba = getattr(search, "proba_paths", None)
+    if proba is not None and sample_dates is not None and tickers is not None:
+        # Per-sample OOS beliefs, row-aligned with the returns matrix: what the
+        # model believed out-of-sample for every (name, day), per combo x path.
+        # The universe long-short sleeve ranks these cross-sectionally.
+        frame = pl.DataFrame({"date": sample_dates, "ticker": tickers})
+        if next_ret is not None:
+            frame = frame.with_columns(pl.Series("next_ret", next_ret, dtype=pl.Float64))
+        frame = frame.with_columns([
+            pl.Series(f"proba_c{j}_p{p}", proba[j, p, :], dtype=pl.Float32)
+            for j in range(proba.shape[0])
+            for p in range(proba.shape[1])
+        ])
+        frame.write_parquet(output / f"{slug}_oos_proba.parquet")
 
     return {
         "selected_features": selected,

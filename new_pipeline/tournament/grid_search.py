@@ -29,6 +29,11 @@ class GridSearchResult:
     trial_sharpes: list[float] = field(default_factory=list)
     paths: np.ndarray | None = None  # champion CPCV backtest paths (phi, n_samples)
     path_count: int = 0
+    # Genuine OOS predicted probabilities, stitched exactly like the return
+    # paths: (n_trials, phi, n_samples). Row [j, p, i] is combo j's OOS proba
+    # for sample i on CPCV path p; mean over axis 1 is the bagged per-sample
+    # OOS proba. Consumed by the cross-sectional long-short sleeve.
+    proba_paths: np.ndarray | None = None
 
 
 def run_grid_search(
@@ -74,9 +79,11 @@ def run_grid_search(
     rows: list[np.ndarray] = []
     sharpes: list[float] = []
     champion_paths: np.ndarray | None = None
+    proba_paths_per_combo: list[np.ndarray] = []
     best_sharpe = -np.inf
     for combo in combos:
         segments: dict[tuple[int, int], np.ndarray] = {}
+        proba_segments: dict[tuple[int, int], np.ndarray] = {}
         for combo_index, (fold, test_groups) in enumerate(zip(folds, combo_groups, strict=True)):
             train_idx, _ = fold
             params = default_params(
@@ -100,6 +107,7 @@ def run_grid_search(
                 gstart, gend = bounds[g]
                 block = slice(gstart, gend + 1)
                 proba = predict_proba(booster, features[block])
+                proba_segments[(combo_index, g)] = proba  # OOS beliefs, kept raw
                 signals = (proba > confidence_threshold).astype(np.int64)
                 group_ids = np.zeros(gend - gstart + 1) if block_ids is None else block_ids[block]
                 segments[(combo_index, g)] = simulate_t1_returns_blockwise(
@@ -112,6 +120,7 @@ def run_grid_search(
                     cfg.execution.max_risk_per_trade,
                 )
         paths = splitter.assemble_paths(n, segments)
+        proba_paths_per_combo.append(splitter.assemble_paths(n, proba_segments))
         oos = paths.mean(axis=0)  # == canonical per-sample OOS average across folds
         rows.append(oos)
         sharpe = sharpe_ratio(oos if dates is None else collapse_to_daily(dates, oos)[1])
@@ -128,4 +137,5 @@ def run_grid_search(
         trial_sharpes=sharpes,
         paths=champion_paths,
         path_count=splitter.path_count,
+        proba_paths=np.stack(proba_paths_per_combo),
     )

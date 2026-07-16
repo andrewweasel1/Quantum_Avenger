@@ -136,6 +136,14 @@ def build_training_frame(
         cfg.features.label_sl_mult,
         cfg.features.label_method,
     )
+    # Next-day close-to-close return per ticker: the REALIZATION leg for the
+    # cross-sectional long-short sleeve (rank on info at t, earn t -> t+1).
+    # Computed on full per-ticker history BEFORE the PIT mask so an index-exit
+    # day still books its real forced-exit return. Forward-looking by design —
+    # it must never appear in FEATURE_COLS or any selectable feature set.
+    labeled = labeled.with_columns(
+        (pl.col("close").shift(-1).over("ticker") / pl.col("close") - 1.0).alias("next_ret")
+    )
     if news_source is not None and sentiment_engine is not None and anonymizer is not None:
         labeled = _attach_sentiment(
             labeled, symbols, news_source, sentiment_engine, anonymizer, start, end
