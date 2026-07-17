@@ -19,15 +19,17 @@ from new_pipeline.features.fracdiff import FRACDIFF_FEATURE_NAMES, add_fracdiff
 from new_pipeline.features.garch import GARCH_FEATURE_NAMES, add_garch
 from new_pipeline.features.microstructure import MICRO_FEATURE_NAMES, add_microstructure
 from new_pipeline.features.signals_v2 import (
+    FLOW_COLS,
     OVERNIGHT_COLS,
     RESIDUAL_COLS,
+    add_flow_features,
     add_overnight_features,
     add_residual_features,
 )
 from new_pipeline.features.vol_estimators import VOL_FEATURE_NAMES, add_vol_estimators
 
 SUPPORTED_FAMILIES = (
-    "fracdiff", "vol_estimators", "microstructure", "garch", "overnight", "residual"
+    "fracdiff", "vol_estimators", "microstructure", "garch", "overnight", "residual", "flow"
 )
 _FAMILY_FEATURE_NAMES = {
     "fracdiff": FRACDIFF_FEATURE_NAMES,
@@ -36,6 +38,7 @@ _FAMILY_FEATURE_NAMES = {
     "garch": GARCH_FEATURE_NAMES,
     "overnight": OVERNIGHT_COLS,
     "residual": RESIDUAL_COLS,
+    "flow": FLOW_COLS,
 }
 
 
@@ -70,6 +73,8 @@ def add_extended_features(
             group = add_garch(group, garch_fit_window)
         if "overnight" in families:
             group = add_overnight_features(group)
+        if "flow" in families:
+            group = add_flow_features(group)
         groups.append(group)
     out = pl.concat(groups)
     if "residual" in families:  # cross-ticker: needs the market return
