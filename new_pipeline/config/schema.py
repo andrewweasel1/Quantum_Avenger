@@ -35,8 +35,13 @@ class FeatureConfig(BaseModel):
     # PIT departed names survive drop_nulls; "drop" propagates nulls (legacy).
     factor_null_policy: str = "neutral"
     # Extended per-ticker feature families (offense roadmap P1). Empty => off.
-    # Available: fracdiff, vol_estimators, microstructure.
+    # Available: fracdiff, vol_estimators, microstructure, garch, overnight,
+    # residual, flow (features.extended.SUPPORTED_FAMILIES).
     extended_features: list[str] = Field(default_factory=list)
+    # Event-time family (filing clock/drift + news burst). Each subset only
+    # materializes when its source is active: filing features need fundamental
+    # factors in factor_set; the news burst needs fusion.enabled.
+    event_features: bool = False
     fracdiff_d: float = 0.4  # fractional-differencing order
     fracdiff_threshold: float = 1e-3  # weight-truncation threshold (sets the window width)
     vol_window: int = 20  # range vol-estimator rolling window

@@ -38,6 +38,12 @@ from new_pipeline.evaluation.regime_dsr import (
     RegimeVerdict,
     ThinRegimePolicy,
 )
+from new_pipeline.features.event_time import (
+    FILING_EVENT_COLS,
+    NEWS_EVENT_COLS,
+    add_filing_event_features,
+    add_news_burst,
+)
 from new_pipeline.features.extended import add_extended_features, extended_feature_names
 from new_pipeline.features.factors import (
     FUNDAMENTAL_FACTORS,
@@ -146,8 +152,13 @@ def build_training_frame(
     )
     if news_source is not None and sentiment_engine is not None and anonymizer is not None:
         labeled = _attach_sentiment(
-            labeled, symbols, news_source, sentiment_engine, anonymizer, start, end
+            labeled, symbols, news_source, sentiment_engine, anonymizer, start, end,
+            attach_counts=cfg.features.event_features,
         )
+        if cfg.features.event_features:
+            # Trailing burst z over full per-ticker history (pre-PIT-mask,
+            # like every other per-ticker window feature).
+            labeled = add_news_burst(labeled)
     if cfg.fusion.enabled and cfg.fusion.markov_features:
         labeled = add_markov_regime_features(labeled)
     sector_df = pl.DataFrame(
@@ -163,7 +174,9 @@ def build_training_frame(
         if fundamentals_source is not None and any(
             factor in FUNDAMENTAL_FACTORS for factor in cfg.features.factor_set
         ):
-            joined = attach_fundamentals(joined, fundamentals_source)  # point-in-time
+            joined = attach_fundamentals(  # point-in-time
+                joined, fundamentals_source, keep_as_of=cfg.features.event_features
+            )
             covered = joined.filter(pl.col("book_value_per_share").is_not_null())
             _logger.info(
                 "fundamentals coverage: %.1f%% of rows, %d/%d tickers",
@@ -171,6 +184,11 @@ def build_training_frame(
                 covered["ticker"].n_unique(),
                 joined["ticker"].n_unique(),
             )
+            if cfg.features.event_features:
+                # Filing clock/drift consume the kept as_of. Post-mask by
+                # necessity (the attach is post-mask); membership gaps merely
+                # truncate the drift window for re-entering names.
+                joined = add_filing_event_features(joined)
         joined = add_cross_sectional_factors(
             joined, cfg.features.factor_set,
             sector_neutral=cfg.features.factor_sector_neutral,
@@ -214,16 +232,45 @@ def apply_membership_mask(frame: pl.DataFrame, members) -> pl.DataFrame:
     )
 
 
+def _event_feature_names(cfg) -> list[str]:
+    """Event-time feature names the pipeline will actually materialize.
+
+    Mirrors the build_training_frame gates exactly: the filing pair needs the
+    fundamentals attach (fundamental factors requested), the news burst needs
+    the fusion news path. Registering a name whose column never materializes
+    would crash the tournament, so both sites must share this single rule."""
+    if not cfg.features.event_features:
+        return []
+    names: list[str] = []
+    if cfg.features.factor_set and any(
+        factor in FUNDAMENTAL_FACTORS for factor in cfg.features.factor_set
+    ):
+        names += FILING_EVENT_COLS
+    if cfg.fusion.enabled:
+        names += NEWS_EVENT_COLS
+    return names
+
+
 def _attach_sentiment(
-    labeled, symbols, news_source, sentiment_engine, anonymizer, start, end
+    labeled, symbols, news_source, sentiment_engine, anonymizer, start, end,
+    attach_counts=False,
 ) -> pl.DataFrame:
     """Overwrite the neutral ``sentiment_score`` with a real, causally-aligned
     daily score joined per (ticker, date); no-news days keep the neutral 0.0.
 
     One RANGE fetch per symbol — never a per-(symbol, day) loop, which against a
     live provider like GDELT would mean hundreds of thousands of HTTP calls for
-    an index-scale universe. A failing symbol is skipped, not fatal."""
+    an index-scale universe. A failing symbol is skipped, not fatal.
+
+    ``attach_counts`` additionally joins the builder's per-(ticker, date)
+    ``news_count`` (0.0 on no-news days) for the event-time burst feature;
+    the column is guaranteed present on every return path when requested."""
     from new_pipeline.data.sentiment_feature_builder import SentimentFeatureBuilder
+
+    def _zero_counts(frame):
+        return (
+            frame.with_columns(pl.lit(0.0).alias("news_count")) if attach_counts else frame
+        )
 
     builder = SentimentFeatureBuilder(anonymizer=anonymizer, engine=sentiment_engine)
     records = []
@@ -238,18 +285,20 @@ def _attach_sentiment(
             for item in items
         )
     if not records:
-        return labeled
+        return _zero_counts(labeled)
     daily = builder.build_daily_sentiment(pd.DataFrame(records))
     if daily.empty:
-        return labeled
-    daily_pl = pl.from_pandas(daily[["date", "ticker", "sentiment"]]).with_columns(
-        pl.col("date").cast(pl.Date)
-    )
-    return (
+        return _zero_counts(labeled)
+    columns = ["date", "ticker", "sentiment"] + (["news_count"] if attach_counts else [])
+    daily_pl = pl.from_pandas(daily[columns]).with_columns(pl.col("date").cast(pl.Date))
+    out = (
         labeled.join(daily_pl, on=["date", "ticker"], how="left")
         .with_columns(pl.coalesce(["sentiment", "sentiment_score"]).alias("sentiment_score"))
         .drop("sentiment")
     )
+    if attach_counts:
+        out = out.with_columns(pl.col("news_count").cast(pl.Float64).fill_null(0.0))
+    return out
 
 
 def run_offline_pipeline(
@@ -302,6 +351,7 @@ def run_offline_pipeline(
         feature_cols += factor_feature_names(cfg.features.factor_set)
     if cfg.features.extended_features:
         feature_cols += extended_feature_names(cfg.features.extended_features)
+    feature_cols += _event_feature_names(cfg)  # [] unless features.event_features
     results = run_sector_tournament(frame, feature_cols, output_dir)
     gauntlet_results = results
     summary = {"sectors": list(results)}

@@ -32,8 +32,12 @@ features:
   factor_set: []
   factor_sector_neutral: true
   factor_null_policy: "neutral"
-  # Extended per-ticker families (P1): fracdiff, vol_estimators, microstructure. Empty => off.
+  # Extended per-ticker families: fracdiff, vol_estimators, microstructure,
+  # garch, overnight, residual, flow. Empty => off.
   extended_features: []
+  # Event-time family: days_since_filing/ret_since_filing (needs fundamental
+  # factors in factor_set) + news_burst_21 (needs fusion.enabled). Default off.
+  event_features: false
   fracdiff_d: 0.4
   fracdiff_threshold: 0.001
   vol_window: 20
