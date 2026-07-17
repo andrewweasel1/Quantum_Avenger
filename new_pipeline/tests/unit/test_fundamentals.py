@@ -44,6 +44,18 @@ def test_attach_fundamentals_no_snapshots_yields_null_columns():
     assert out["book_value_per_share"].is_null().all()
 
 
+def test_attach_fundamentals_tolerates_datetime_date_column():
+    """A Datetime `date` column (e.g. after the markov pandas round-trip) must
+    still join: source.history compares against date-typed as_of, so datetime
+    bounds are normalized rather than raising date-vs-datetime TypeError."""
+    frame = pl.DataFrame(
+        {"ticker": ["AAA", "AAA"], "date": [date(2021, 2, 15), date(2021, 5, 15)],
+         "close": [100.0, 100.0]}
+    ).with_columns(pl.col("date").cast(pl.Datetime))
+    out = attach_fundamentals(frame, FakeFundamentalsSource())
+    assert out["book_value_per_share"].null_count() == 0  # joined, no crash
+
+
 def test_static_fundamentals_fixture():
     stat = StaticFundamentalsSource()
     snaps = stat.history("AAPL", date(2020, 1, 1), date(2021, 12, 31))

@@ -6,10 +6,21 @@ strictly causal, no look-ahead. Feeds the value/quality cross-sectional factors.
 """
 
 import warnings
+from datetime import datetime
 
 import polars as pl
 
 FUNDAMENTAL_COLUMNS = ("book_value_per_share", "earnings_per_share", "return_on_equity")
+
+
+def _as_date(value):
+    """Normalize a polars temporal bound to a python ``date``.
+
+    ``frame["date"].max()`` returns ``datetime`` when the column is Datetime
+    (e.g. after an upstream pandas round-trip) and ``date`` when it is Date;
+    the fundamentals sources compare against date-typed snapshot ``as_of``, so
+    a datetime bound would raise ``can't compare datetime to date``."""
+    return value.date() if isinstance(value, datetime) else value
 
 
 def attach_fundamentals(frame: pl.DataFrame, source, keep_as_of: bool = False) -> pl.DataFrame:
@@ -21,7 +32,12 @@ def attach_fundamentals(frame: pl.DataFrame, source, keep_as_of: bool = False) -
     date column for the event-time features (default drop keeps the frame
     schema bit-stable for existing consumers)."""
     symbols = frame["ticker"].unique().to_list()
-    start, end = frame["date"].min(), frame["date"].max()
+    # Snapshots carry a date-typed as_of; a Datetime `date` column would break
+    # both the python bound comparison (below) and the join_asof key match, so
+    # normalize the join key to Date up front (no-op in the normal path).
+    if frame.schema["date"] != pl.Date:
+        frame = frame.with_columns(pl.col("date").cast(pl.Date))
+    start, end = _as_date(frame["date"].min()), _as_date(frame["date"].max())
     rows = [
         {
             "ticker": symbol, "as_of": snap.as_of,

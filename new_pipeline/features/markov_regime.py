@@ -113,4 +113,15 @@ def add_markov_regime_features(
     ]
     if not parts:
         return frame
-    return pl.from_pandas(pd.concat(parts, ignore_index=True))
+    out = pl.from_pandas(pd.concat(parts, ignore_index=True))
+    # The pandas round-trip upcasts a polars Date join key to Datetime
+    # (pandas has no date-only dtype). Restore the input schema so this stage
+    # is transparent to downstream consumers — a Datetime `date` otherwise
+    # yields datetime bounds that can't compare to date-typed fundamentals
+    # snapshots (mirrors the cast guard in _attach_sentiment).
+    restore = [
+        pl.col(name).cast(dtype)
+        for name, dtype in frame.schema.items()
+        if name in out.columns and out.schema[name] != dtype
+    ]
+    return out.with_columns(restore) if restore else out
