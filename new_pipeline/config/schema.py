@@ -186,6 +186,12 @@ class LongShortConfig(BaseModel):
     # min(1, target / trailing annualized vol of the UNIT book). 0 = off.
     vol_target_annual: float = 0.0
     vol_lookback_days: int = 20
+    # Regime-conditional options (independently flaggable; share one causal
+    # expanding-percentile market-vol state decoder, 0 = calmest state):
+    # gate scales exposure per state; experts pick the best-in-state combo.
+    regime_gate_enabled: bool = False
+    regime_experts_enabled: bool = False
+    regime_exposures: list[float] = Field(default_factory=lambda: [1.0, 1.0, 0.0])
     null_iterations: int = 20  # within-date permutation null (synthetic-gauntlet slot)
     null_quantile: float = 0.95  # champion must beat this quantile of the null
 

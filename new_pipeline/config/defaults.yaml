@@ -192,6 +192,9 @@ long_short:
   score_smoothing_days: 1
   vol_target_annual: 0.0
   vol_lookback_days: 20
+  regime_gate_enabled: false
+  regime_experts_enabled: false
+  regime_exposures: [1.0, 1.0, 0.0]
   null_iterations: 20
   null_quantile: 0.95
 

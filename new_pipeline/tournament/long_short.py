@@ -92,6 +92,7 @@ def build_long_short_book(
     rebalance_days: int = 1,
     vol_target_annual: float = 0.0,
     vol_lookback: int = 20,
+    regime_scalars: dict | None = None,
 ) -> LongShortBook:
     """Dollar-neutral rank book from a (date, ticker, sector, score, next_ret)
     panel, re-ranked every ``rebalance_days`` trading days.
@@ -145,6 +146,8 @@ def build_long_short_book(
                 trailing = float(np.std(unit_grosses[-vol_lookback:], ddof=1)) * np.sqrt(252.0)
                 if trailing > 0.0:
                     scalar = min(1.0, vol_target_annual / trailing)
+            if regime_scalars is not None:  # causal per-date regime exposure gate
+                scalar *= float(regime_scalars.get(day["date"][0], 1.0))
             target = {t: w * scalar for t, w in base.items()}
             day_turnover += 0.5 * sum(
                 abs(target.get(t, 0.0) - held.get(t, 0.0)) for t in target.keys() | held.keys()
@@ -182,6 +185,7 @@ def permutation_null_margin(
     rebalance_days: int = 1,
     vol_target_annual: float = 0.0,
     vol_lookback: int = 20,
+    regime_scalars: dict | None = None,
 ) -> tuple[float, list[float]]:
     """Champion Sharpe minus the ``null_quantile`` of its informationless null.
 
@@ -198,7 +202,7 @@ def permutation_null_margin(
         )
         book = build_long_short_book(
             permuted, quantile, cost_bps, min_names, sector_neutral, rebalance_days,
-            vol_target_annual, vol_lookback,
+            vol_target_annual, vol_lookback, regime_scalars,
         )
         null_sharpes.append(sharpe_ratio(book.net))
     margin = champion_sharpe - float(np.quantile(null_sharpes, null_quantile))
@@ -243,6 +247,19 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     smoothing = getattr(ls, "score_smoothing_days", 1)
     vol_target = getattr(ls, "vol_target_annual", 0.0)
     vol_lookback = getattr(ls, "vol_lookback_days", 20)
+    use_gate = getattr(ls, "regime_gate_enabled", False)
+    use_experts = getattr(ls, "regime_experts_enabled", False)
+    states = regime_scalars = None
+    if use_gate or use_experts:
+        from new_pipeline.tournament.regime_state import causal_market_regimes
+
+        exposures = list(getattr(ls, "regime_exposures", [1.0, 1.0, 0.0]))
+        states = causal_market_regimes(
+            pl.concat(panels).select("date", "ticker", "next_ret"),
+            n_states=len(exposures),
+        )
+        if use_gate:
+            regime_scalars = {d: exposures[s] for d, s in states.items()}
 
     def panel_for(score_expr: pl.Expr) -> pl.DataFrame:
         panel = universe.select(
@@ -253,7 +270,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     def book_for(score_expr: pl.Expr) -> LongShortBook:
         return build_long_short_book(
             panel_for(score_expr), ls.quantile, ls.cost_bps, ls.min_names_per_day,
-            ls.sector_neutral, rebalance_days, vol_target, vol_lookback,
+            ls.sector_neutral, rebalance_days, vol_target, vol_lookback, regime_scalars,
         )
 
     combo_mean = [
@@ -271,7 +288,34 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     path_books = [
         book_for(pl.col(f"proba_c{best}_p{p}")) for p in range(phi)
     ]
-    champion_panel = panel_for(combo_mean[best])  # smoothed: the null permutes the book input
+    champion_expr = combo_mean[best]
+    if use_experts:
+        # Mixture of experts over the grid combos: each date uses the combo whose
+        # book performed best IN TODAY'S decoded state over an EXPANDING window of
+        # strictly-prior days (>=60 obs; else the static champion). Appended as an
+        # extra trial column so DSR deflation counts the conditional candidate.
+        date_list = books[best].dates
+        nets = np.stack([b.net for b in books])
+        seq = np.array([states.get(d, 0) for d in date_list])
+        expert_of = {}
+        for i, d in enumerate(date_list):
+            mask = seq[:i] == seq[i]
+            if mask.sum() >= 60:
+                sub = nets[:, :i][:, mask]
+                stds = np.where(sub.std(axis=1) == 0, np.inf, sub.std(axis=1))
+                expert_of[d] = int(np.argmax(sub.mean(axis=1) / stds))
+            else:
+                expert_of[d] = best
+        expert_col = pl.col("date").replace_strict(expert_of, default=best)
+        champion_expr = pl.coalesce(
+            [pl.when(expert_col == j).then(combo_mean[j]) for j in range(n_combos)]
+        )
+        conditional = book_for(champion_expr)
+        books.append(conditional)
+        trial_sharpes.append(sharpe_ratio(conditional.net))
+        best = len(books) - 1
+        champion = conditional
+    champion_panel = panel_for(champion_expr)  # smoothed: the null permutes the book input
     margin, null_sharpes = permutation_null_margin(
         champion_panel, ls.quantile, ls.cost_bps, ls.min_names_per_day, ls.sector_neutral,
         ls.null_iterations, ls.null_quantile, trial_sharpes[best],
@@ -280,7 +324,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
 
     output = Path(output_dir)
     pl.DataFrame(
-        {f"trial_{j}": books[j].net for j in range(n_combos)}
+        {f"trial_{j}": books[j].net for j in range(len(books))}
     ).write_parquet(output / f"{_SLUG}_returns_matrix.parquet")
     pl.DataFrame({"date": champion.dates}).write_parquet(
         output / f"{_SLUG}_sample_dates.parquet"
@@ -325,6 +369,8 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
                     "score_smoothing_days": smoothing,
                     "vol_target_annual": vol_target,
                     "vol_lookback_days": vol_lookback,
+                    "regime_gate_enabled": use_gate,
+                    "regime_experts_enabled": use_experts,
                 },
                 "diagnostics": diagnostics,
             },
