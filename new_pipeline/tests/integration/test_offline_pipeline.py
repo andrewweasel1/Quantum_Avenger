@@ -265,7 +265,10 @@ def test_regime_gate_defaults_on_with_daily_series_and_reasons(tmp_path, monkeyp
     def fake_verdict(champion_returns, trials, cfg):
         captured.append(np.asarray(champion_returns))
         # First sector: a regime failed its DSR; later sectors: nothing testable.
-        per_regime = {0: object()} if len(captured) == 1 else {}
+        from types import SimpleNamespace
+
+        stub = SimpleNamespace(dsr=0.1, sr_annual=-0.5, n_obs=100)
+        per_regime = {0: stub} if len(captured) == 1 else {}
         return RegimeVerdict(promoted=False, per_regime=per_regime, skipped_regimes=[])
 
     monkeypatch.setattr(pipe, "_regime_verdict", fake_verdict)
