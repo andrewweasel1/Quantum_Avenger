@@ -150,6 +150,7 @@ evaluation:
   # zero variance) follow thin_regime_policy: "skip" excludes them, "veto"
   # fails the model; if NO regime is testable the model is rejected.
   regime_gate_enabled: true
+  regime_breakdown_enabled: true
   min_regime_obs: 60
   thin_regime_policy: "skip"
   registry_path: "./models/prod/promotion_registry.json"

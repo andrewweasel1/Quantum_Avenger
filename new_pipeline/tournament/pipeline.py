@@ -604,8 +604,16 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             reality_check_gate_enabled=cfg.evaluation.reality_check_gate_enabled,
             reality_check_threshold=cfg.evaluation.reality_check_threshold,
         )
-        if cfg.evaluation.regime_gate_enabled and decision.promoted:
+        verdict = None
+        if cfg.evaluation.regime_breakdown_enabled or (
+            cfg.evaluation.regime_gate_enabled and decision.promoted
+        ):
             verdict = _regime_verdict(champion_returns, trials, cfg)
+        if cfg.evaluation.regime_breakdown_enabled and verdict is not None:
+            decision = replace(
+                decision, regime_breakdown=_regime_breakdown(verdict, cfg)
+            )
+        if cfg.evaluation.regime_gate_enabled and decision.promoted:
             if not verdict.promoted:
                 # Distinguish "a regime failed its DSR" from "nothing was
                 # testable" (all regimes thin, or the HMM failed to fit).
@@ -686,6 +694,35 @@ def _deflated_sharpe(champion_returns, trials, returns_matrix, cfg) -> float:
         n_eff = effective_number_of_trials(returns_matrix.T)
         return deflated_sharpe_report(champion_returns, n_eff, trial_sharpes=trials).dsr
     return compute_deflated_sharpe_ratio(champion_returns, trials)
+
+
+def _regime_breakdown(verdict, cfg) -> dict:
+    """What the per-regime gate saw: per-state DSR/Sharpe/day-count (pass/fail
+    against the promotion threshold), thin states skipped, and each state's
+    share of days - so a rejection names WHICH regime killed the model."""
+    threshold = cfg.evaluation.dsr_promotion_threshold
+    states = verdict.states
+    shares = {}
+    if states is not None:
+        import numpy as _np
+
+        seq = _np.asarray(states)
+        for s in _np.unique(seq):
+            shares[int(s)] = round(float((seq == s).mean()), 3)
+    return {
+        "per_regime": {
+            int(s): {
+                "dsr": round(float(r.dsr), 4),
+                "sr_annual": round(float(r.sr_annual), 3),
+                "n_days": int(r.n_obs),
+                "share": shares.get(int(s)),
+                "passes": bool(r.dsr >= threshold),
+            }
+            for s, r in verdict.per_regime.items()
+        },
+        "skipped_thin": [int(s) for s in verdict.skipped_regimes],
+        "threshold": threshold,
+    }
 
 
 def _regime_verdict(champion_returns, trials, cfg) -> RegimeVerdict:

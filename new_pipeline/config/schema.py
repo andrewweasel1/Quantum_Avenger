@@ -135,6 +135,9 @@ class EvaluationConfig(BaseModel):
     # Sentiment-fusion (offline core): correlation-adjusted deflation + per-regime DSR.
     use_effective_trials: bool = True
     regime_gate_enabled: bool = True  # see defaults.yaml for the calendar-axis note
+    # Record the per-decoded-regime DSR/Sharpe/day-share breakdown on EVERY
+    # champion registry row (pure observability; one HMM fit per champion).
+    regime_breakdown_enabled: bool = True
     min_regime_obs: int = 60
     thin_regime_policy: str = "skip"
     # CPCV backtest-path DSR gate: require >= cpcv_path_min_fraction of the phi

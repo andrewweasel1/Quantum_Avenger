@@ -32,6 +32,9 @@ class PromotionDecision:
     # Observation count behind the gate statistics (calendar days when the
     # evaluation ran on the daily axis; pooled samples on legacy artifacts).
     n_obs: int | None = None
+    # Per-decoded-regime gate detail ({state: {dsr, sr_annual, n_obs, ...}});
+    # recorded when evaluation.regime_breakdown_enabled - pure observability.
+    regime_breakdown: dict | None = None
 
 
 def assess_promotion(
@@ -130,6 +133,7 @@ class PromotionRegistry:
             "reality_check_pvalue": decision.reality_check_pvalue,
             "n_trades": decision.n_trades,
             "n_obs": decision.n_obs,
+            "regime_breakdown": decision.regime_breakdown,
             "promoted": decision.promoted,
             "reason": decision.reason,
             "timestamp": datetime.now(UTC).isoformat(),

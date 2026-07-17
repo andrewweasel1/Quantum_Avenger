@@ -43,3 +43,26 @@ def test_regime_scalars_flatten_stress_days():
     flat_days = [i for i, d in enumerate(gated.dates) if scalars.get(d) == 0.0]
     assert flat_days and all(gated.gross[i] == 0.0 for i in flat_days)  # stood down
     assert gated.avg_gross_exposure < plain.avg_gross_exposure
+
+
+def test_regime_breakdown_names_the_failing_state():
+    from types import SimpleNamespace
+
+    from new_pipeline.config import base, reload_config
+    from new_pipeline.tournament.pipeline import _regime_breakdown
+
+    reload_config()
+    verdict = SimpleNamespace(
+        per_regime={
+            0: SimpleNamespace(dsr=0.99, sr_annual=1.4, n_obs=900),
+            2: SimpleNamespace(dsr=0.31, sr_annual=-0.2, n_obs=300),
+        },
+        skipped_regimes=[1],
+        states=np.array([0] * 900 + [1] * 40 + [2] * 300),
+    )
+    out = _regime_breakdown(verdict, base.get_config())
+    assert out["per_regime"][0]["passes"] is True
+    assert out["per_regime"][2]["passes"] is False  # THE failing regime, named
+    assert out["per_regime"][2]["n_days"] == 300
+    assert out["skipped_thin"] == [1]
+    assert abs(out["per_regime"][0]["share"] - 900 / 1240) < 0.01

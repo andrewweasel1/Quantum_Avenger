@@ -47,6 +47,7 @@ class RegimeVerdict:
     promoted: bool
     per_regime: dict[int, DSRResult]
     skipped_regimes: list[int]
+    states: object = None  # decoded per-day state sequence (np.ndarray) when available
 
 
 class QuantitativeEvaluator:
@@ -87,7 +88,7 @@ class QuantitativeEvaluator:
 
         states = self._decode_regimes(returns, volatility, sent)
         if states is None:
-            return RegimeVerdict(False, {}, [])
+            return RegimeVerdict(False, {}, [], None)
 
         per_regime: dict[int, DSRResult] = {}
         skipped: list[int] = []
@@ -126,7 +127,7 @@ class QuantitativeEvaluator:
             promoted = False  # no regime had enough observations to test
             logger.warning("VETO: no regime had enough observations to test.")
 
-        return RegimeVerdict(promoted, per_regime, skipped)
+        return RegimeVerdict(promoted, per_regime, skipped, states)
 
     # ----------------------------------------------------------------- private
     def _decode_regimes(self, returns, volatility, sentiment) -> np.ndarray | None:
