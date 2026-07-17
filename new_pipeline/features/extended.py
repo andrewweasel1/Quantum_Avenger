@@ -18,14 +18,24 @@ from new_pipeline.core.exceptions import SchemaValidationError
 from new_pipeline.features.fracdiff import FRACDIFF_FEATURE_NAMES, add_fracdiff
 from new_pipeline.features.garch import GARCH_FEATURE_NAMES, add_garch
 from new_pipeline.features.microstructure import MICRO_FEATURE_NAMES, add_microstructure
+from new_pipeline.features.signals_v2 import (
+    OVERNIGHT_COLS,
+    RESIDUAL_COLS,
+    add_overnight_features,
+    add_residual_features,
+)
 from new_pipeline.features.vol_estimators import VOL_FEATURE_NAMES, add_vol_estimators
 
-SUPPORTED_FAMILIES = ("fracdiff", "vol_estimators", "microstructure", "garch")
+SUPPORTED_FAMILIES = (
+    "fracdiff", "vol_estimators", "microstructure", "garch", "overnight", "residual"
+)
 _FAMILY_FEATURE_NAMES = {
     "fracdiff": FRACDIFF_FEATURE_NAMES,
     "vol_estimators": VOL_FEATURE_NAMES,
     "microstructure": MICRO_FEATURE_NAMES,
     "garch": GARCH_FEATURE_NAMES,
+    "overnight": OVERNIGHT_COLS,
+    "residual": RESIDUAL_COLS,
 }
 
 
@@ -58,5 +68,10 @@ def add_extended_features(
             group = add_microstructure(group, micro_window)
         if "garch" in families:
             group = add_garch(group, garch_fit_window)
+        if "overnight" in families:
+            group = add_overnight_features(group)
         groups.append(group)
-    return pl.concat(groups) if groups else frame
+    out = pl.concat(groups)
+    if "residual" in families:  # cross-ticker: needs the market return
+        out = add_residual_features(out)
+    return out if groups else frame
