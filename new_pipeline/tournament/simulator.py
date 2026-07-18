@@ -6,15 +6,17 @@ otherwise the close-to-close move — both scaled by the risk-based position
 fraction. Shares the Shield Agent's stop/sizing math (``features.shields``) so
 backtest and live risk stay consistent (the roadmap "central invariant").
 
-The ``_net`` variants additionally debit round-trip transaction costs from each
-realized trade using the SAME hydrodynamic impact model the Shield Agent vetoes
-on (``features.slippage``): one-way cost = ``c·σ·sqrt(Q/V)`` in bps, charged at
-both entry and exit, and the trade is skipped entirely when the one-way estimate
-exceeds ``max_slippage_bps`` (backtest parity with Shield gate #4). ``V`` is the
-name's *dollar* ADV so ``Q/V`` is a dimensionless participation rate — the
-dimensionally-correct usage of the model (the live shield passes raw share
-volume; see the audit note in the promotion pipeline). Gross behaviour is left
-byte-for-byte intact so goldens and the default suite stay bit-stable.
+The ``_net`` variants additionally debit transaction costs using the SAME
+hydrodynamic impact model the Shield Agent vetoes on (``features.slippage``):
+cost = ``c·σ·sqrt(Q/V)`` bps charged on TURNOVER (the change in position between
+bars), so a held position pays a full round-trip once across its enter→exit — not
+a round-trip every bar it is held — while daily churn pays daily (matches the
+long-short book's turnover costing). A fill is vetoed when the target position's
+one-way estimate exceeds ``max_slippage_bps`` (backtest parity with Shield gate
+#4). ``V`` is the name's *dollar* ADV so ``Q/V`` is a dimensionless participation
+rate — the dimensionally-correct usage of the model (the live shield passes raw
+share volume; see the audit note in the promotion pipeline). Gross behaviour is
+left byte-for-byte intact so goldens and the default suite stay bit-stable.
 """
 
 import numpy as np
@@ -53,41 +55,63 @@ def simulate_t1_returns_net(
     signals, close, low, atr, adv_20, volatility, atr_multiplier, max_risk_pct,
     account_capital, slippage_constant, bps_scaler, max_slippage_bps,
 ):
-    """:func:`simulate_t1_returns` net of dynamic round-trip slippage.
+    """:func:`simulate_t1_returns` net of dynamic slippage on TURNOVER.
 
-    Order notional ``Q = size_fraction · account_capital``; one-way impact is
-    ``hydrodynamic_slippage_bps(Q, volatility[i], adv_20[i])`` (dollar ADV ⇒
-    participation rate). A one-way estimate above ``max_slippage_bps`` vetoes the
-    trade (0.0, like the live Shield). Otherwise the round-trip cost
-    ``2·bps/10000`` is subtracted from the per-share return before position
-    scaling, so cost scales with participation exactly as the impact model does.
+    A persistent signal (fires on consecutive bars) is a *held* position, not a
+    daily round-trip, so cost is charged only on the traded delta — mirroring the
+    long-short book's turnover costing. Each bar targets position
+    ``p = size_fraction`` (0 when unsignalled or liquidity-vetoed); the turnover
+    ``|p_i − p_{i-1}|`` is executed at ``close[i]`` and charged
+    ``impact(turnover·capital)/10000 · turnover`` (one-way hydrodynamic impact of
+    the delta traded). Holding the same size costs nothing; a genuine enter→exit
+    still pays a full round-trip (one-way at entry + one-way at exit). The gross
+    leg is unchanged: hold ``p`` over ``[i, i+1]`` for the close-to-close move or
+    the ATR stop. A stop-out flattens the book into the next bar (its re-entry is
+    then real turnover). ``Q/V`` uses dollar ADV ⇒ dimensionless participation.
     """
     n = close.shape[0]
     out = np.zeros(n, dtype=np.float64)
+    prev_pos = 0.0
     for i in range(n - 1):
-        if signals[i] != 1:
-            continue
         entry = close[i]
-        if entry <= 0.0 or atr[i] <= 0.0:
-            continue
-        stop = entry - atr_multiplier * atr[i]
-        risk_distance = (entry - stop) / entry
-        if risk_distance <= 0.0:
-            continue
-        size_fraction = max_risk_pct / risk_distance
-        if size_fraction > 1.0:
-            size_fraction = 1.0
-        order_notional = size_fraction * account_capital
-        one_way_bps = hydrodynamic_slippage_bps(
-            order_notional, volatility[i], adv_20[i], slippage_constant, bps_scaler
-        )
-        if one_way_bps > max_slippage_bps:
-            continue  # illiquid: no fill (Shield gate #4 parity)
-        cost = 2.0 * one_way_bps / 10000.0  # round trip, bps -> return fraction
-        if low[i + 1] <= stop:
-            out[i] = (-risk_distance - cost) * size_fraction
-        else:
-            out[i] = ((close[i + 1] - entry) / entry - cost) * size_fraction
+        want = 0.0
+        risk_distance = 0.0
+        if signals[i] == 1 and entry > 0.0 and atr[i] > 0.0:
+            stop = entry - atr_multiplier * atr[i]
+            risk_distance = (entry - stop) / entry
+            if risk_distance > 0.0:
+                size_fraction = max_risk_pct / risk_distance
+                if size_fraction > 1.0:
+                    size_fraction = 1.0
+                target_bps = hydrodynamic_slippage_bps(
+                    size_fraction * account_capital, volatility[i], adv_20[i],
+                    slippage_constant, bps_scaler,
+                )
+                if target_bps <= max_slippage_bps:  # Shield gate #4 parity
+                    want = size_fraction
+
+        turnover = want - prev_pos
+        if turnover < 0.0:
+            turnover = -turnover
+        cost = 0.0
+        if turnover > 0.0:
+            trade_bps = hydrodynamic_slippage_bps(
+                turnover * account_capital, volatility[i], adv_20[i],
+                slippage_constant, bps_scaler,
+            )
+            cost = trade_bps / 10000.0 * turnover
+
+        stopped = False
+        gross = 0.0
+        if want > 0.0:
+            stop = entry - atr_multiplier * atr[i]
+            if low[i + 1] <= stop:
+                gross = -risk_distance * want
+                stopped = True
+            else:
+                gross = (close[i + 1] - entry) / entry * want
+        out[i] = gross - cost
+        prev_pos = 0.0 if stopped else want  # forced flat after a stop-out
     return out
 
 

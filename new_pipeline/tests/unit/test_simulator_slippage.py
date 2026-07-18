@@ -24,20 +24,50 @@ def _win_series():
     return sig, close, low, atr
 
 
-def test_net_charges_exact_round_trip_cost():
+def test_net_isolated_trade_pays_round_trip_split_across_entry_and_exit():
+    # Fire only at bar 0: enter at close[0], hold [0,1], flat at bar 1.
+    # Turnover cost = one-way at entry (bar 0) + one-way at exit (bar 1) =
+    # a full round-trip, but SPLIT across the two bars (not both on bar 0).
     sig, close, low, atr = _win_series()
     adv = np.array([2.0e8, 2.0e8, 2.0e8])   # $200M dollar ADV
     vol = np.array([0.30, 0.30, 0.30])       # annualized
-    gross = simulate_t1_returns(sig, close, low, atr, ATR_MULT, MAX_RISK)[0]
+    sf = 1.0
+    gross0 = simulate_t1_returns(sig, close, low, atr, ATR_MULT, MAX_RISK)[0]
     net = simulate_t1_returns_net(
         sig, close, low, atr, adv, vol, ATR_MULT, MAX_RISK, CAP, C, SCALER, CEIL
-    )[0]
-    size_fraction = 1.0
-    one_way = hydrodynamic_slippage_bps(size_fraction * CAP, 0.30, 2.0e8, C, SCALER)
-    cost = 2.0 * one_way / 10_000.0
-    assert gross == (103.0 - 100.0) / 100.0 * size_fraction  # 0.03
-    np.testing.assert_allclose(net, gross - cost * size_fraction, rtol=1e-12)
+    )
+    one_way = hydrodynamic_slippage_bps(sf * CAP, 0.30, 2.0e8, C, SCALER)
+    leg = one_way / 10_000.0 * sf  # one-way turnover cost, sf traded
+    assert gross0 == 0.03  # gross bar-0 move
+    np.testing.assert_allclose(net[0], gross0 - leg, rtol=1e-12)   # entry leg
+    np.testing.assert_allclose(net[1], -leg, rtol=1e-12)           # exit leg
+    np.testing.assert_allclose(net[0] + net[1], gross0 - 2.0 * leg, rtol=1e-12)
     assert 0.0 < one_way < CEIL  # liquid: charged, not vetoed
+
+
+def test_net_held_position_pays_no_mid_hold_cost():
+    # Fire on bars 0 AND 1 with identical size -> position is HELD from 0->2,
+    # so bar 1 incurs ZERO turnover cost (only entry@0 and exit@2 are charged).
+    sig = np.array([1, 1, 0, 0], dtype=np.int64)
+    close = np.array([100.0, 101.0, 102.0, 102.0])
+    low = np.array([100.0, 100.5, 101.5, 101.5])
+    atr = np.array([1.0, 1.0, 1.0, 1.0])     # constant -> constant size_fraction
+    adv = np.full(4, 2.0e8)
+    vol = np.full(4, 0.30)
+    net = simulate_t1_returns_net(
+        sig, close, low, atr, adv, vol, ATR_MULT, MAX_RISK, CAP, C, SCALER, CEIL
+    )
+    sf = 1.0
+    one_way = hydrodynamic_slippage_bps(sf * CAP, 0.30, 2.0e8, C, SCALER)
+    leg = one_way / 10_000.0 * sf
+    g0 = (101.0 - 100.0) / 100.0        # bar-0 hold move
+    g1 = (102.0 - 101.0) / 101.0        # bar-1 hold move
+    np.testing.assert_allclose(net[0], g0 - leg, rtol=1e-12)   # entry only
+    np.testing.assert_allclose(net[1], g1, rtol=1e-12)         # HELD: no cost
+    np.testing.assert_allclose(net[2], -leg, rtol=1e-12)       # exit only
+    # total cost over the 2-day hold is one round-trip, not two
+    total_cost = (g0 + g1) - (net[0] + net[1] + net[2])
+    np.testing.assert_allclose(total_cost, 2.0 * leg, rtol=1e-12)
 
 
 def test_net_vetoes_illiquid_fill():
@@ -52,7 +82,7 @@ def test_net_vetoes_illiquid_fill():
     assert net[0] == 0.0  # vetoed -> no position, no return
 
 
-def test_net_stop_out_also_charged():
+def test_net_stop_out_charged_entry_then_flattens():
     sig = np.array([1, 0, 0], dtype=np.int64)
     close = np.array([100.0, 97.0, 97.0])
     low = np.array([100.0, 97.0, 97.0])      # bar1 low 97 <= stop 98 -> stop-out
@@ -62,11 +92,15 @@ def test_net_stop_out_also_charged():
     gross = simulate_t1_returns(sig, close, low, atr, ATR_MULT, MAX_RISK)[0]
     net = simulate_t1_returns_net(
         sig, close, low, atr, adv, vol, ATR_MULT, MAX_RISK, CAP, C, SCALER, CEIL
-    )[0]
+    )
     assert gross == -0.02  # -risk_distance * size_fraction(1.0)
     one_way = hydrodynamic_slippage_bps(1.0 * CAP, 0.30, 2.0e8, C, SCALER)
-    np.testing.assert_allclose(net, gross - 2.0 * one_way / 10_000.0, rtol=1e-12)
-    assert net < gross  # cost deepens the loss
+    leg = one_way / 10_000.0
+    # entry turnover charged at bar 0; the stop-out flattens the book, so bar 1
+    # sees prev_pos == 0 (no spurious exit turnover on the already-exited name).
+    np.testing.assert_allclose(net[0], gross - leg, rtol=1e-12)
+    assert net[1] == 0.0
+    assert net[0] < gross  # cost deepens the loss
 
 
 def test_zero_cost_reduces_to_gross():
