@@ -199,6 +199,9 @@ long_short:
   sector_neutral: true
   rebalance_days: 1
   score_smoothing_days: 1
+  # No-trade band (rank hysteresis): hold until rank leaves quantile*(1+band),
+  # enter from the tight core. Cuts turnover without gross decay. 0 = off.
+  rebalance_band: 0.0
   vol_target_annual: 0.0
   vol_lookback_days: 20
   regime_gate_enabled: false

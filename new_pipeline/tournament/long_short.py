@@ -83,6 +83,28 @@ def smooth_scores(panel: pl.DataFrame, days: int) -> pl.DataFrame:
     )
 
 
+def _band_leg(prev, ranked, rank, k, k_exit, n, short) -> list[str]:
+    """No-trade-band leg membership: retain previously-held names still inside
+    the widened exit band (best-ranked first, capped at ``k``), then fill the
+    remaining slots from the tight core by rank. Reduces churn from names
+    oscillating around the quantile cut while keeping exactly ``k`` names."""
+    if short:  # bottom of the ranking: best short == highest rank index
+        keep = sorted((t for t in prev if rank.get(t, -1) >= n - k_exit),
+                      key=lambda t: -rank[t])[:k]
+        pool = reversed(ranked[n - k_exit:])
+    else:
+        keep = sorted((t for t in prev if rank.get(t, n) < k_exit), key=lambda t: rank[t])[:k]
+        pool = ranked[:k_exit]
+    chosen = set(keep)
+    for t in pool:
+        if len(keep) >= k:
+            break
+        if t not in chosen:
+            keep.append(t)
+            chosen.add(t)
+    return keep
+
+
 def build_long_short_book(
     panel: pl.DataFrame,
     quantile: float,
@@ -93,6 +115,7 @@ def build_long_short_book(
     vol_target_annual: float = 0.0,
     vol_lookback: int = 20,
     regime_scalars: dict | None = None,
+    rebalance_band: float = 0.0,
 ) -> LongShortBook:
     """Dollar-neutral rank book from a (date, ticker, sector, score, next_ret)
     panel, re-ranked every ``rebalance_days`` trading days.
@@ -132,14 +155,24 @@ def build_long_short_book(
             n = day.height
             base: dict[str, float] = {}
             if n >= min_names:
-                order = day.sort("score", descending=True)
-                ranked = order["ticker"].to_list()
+                ranked = day.sort("score", descending=True)["ticker"].to_list()
                 k = max(1, int(n * quantile))
-                for i in range(k):
-                    base[ranked[i]] = 1.0 / (2 * k)
-                    base[ranked[n - 1 - i]] = base.get(ranked[n - 1 - i], 0.0) - 1.0 / (
-                        2 * k
-                    )
+                if rebalance_band > 0.0:
+                    # Hysteresis: hold a name until its rank leaves the widened
+                    # exit band; a new name enters only from the tight core. Cuts
+                    # turnover (cost) without the gross decay of a slower cadence.
+                    k_exit = max(k, int(n * quantile * (1.0 + rebalance_band)))
+                    rank = {t: i for i, t in enumerate(ranked)}
+                    longs = _band_leg([t for t, w in held.items() if w > 0.0],
+                                      ranked, rank, k, k_exit, n, short=False)
+                    shorts = _band_leg([t for t, w in held.items() if w < 0.0],
+                                       ranked, rank, k, k_exit, n, short=True)
+                else:
+                    longs, shorts = ranked[:k], ranked[n - k:]
+                for t in longs:
+                    base[t] = 1.0 / (2 * k)
+                for t in shorts:
+                    base[t] = base.get(t, 0.0) - 1.0 / (2 * k)
                 leg_sizes.append(k)
             scalar = 1.0
             if vol_target_annual > 0.0 and len(unit_grosses) >= vol_lookback:
@@ -186,6 +219,7 @@ def permutation_null_margin(
     vol_target_annual: float = 0.0,
     vol_lookback: int = 20,
     regime_scalars: dict | None = None,
+    rebalance_band: float = 0.0,
 ) -> tuple[float, list[float]]:
     """Champion Sharpe minus the ``null_quantile`` of its informationless null.
 
@@ -202,7 +236,7 @@ def permutation_null_margin(
         )
         book = build_long_short_book(
             permuted, quantile, cost_bps, min_names, sector_neutral, rebalance_days,
-            vol_target_annual, vol_lookback, regime_scalars,
+            vol_target_annual, vol_lookback, regime_scalars, rebalance_band,
         )
         null_sharpes.append(sharpe_ratio(book.net))
     margin = champion_sharpe - float(np.quantile(null_sharpes, null_quantile))
@@ -247,6 +281,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     smoothing = getattr(ls, "score_smoothing_days", 1)
     vol_target = getattr(ls, "vol_target_annual", 0.0)
     vol_lookback = getattr(ls, "vol_lookback_days", 20)
+    rebalance_band = getattr(ls, "rebalance_band", 0.0)
     use_gate = getattr(ls, "regime_gate_enabled", False)
     use_experts = getattr(ls, "regime_experts_enabled", False)
     states = regime_scalars = None
@@ -271,6 +306,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         return build_long_short_book(
             panel_for(score_expr), ls.quantile, ls.cost_bps, ls.min_names_per_day,
             ls.sector_neutral, rebalance_days, vol_target, vol_lookback, regime_scalars,
+            rebalance_band,
         )
 
     combo_mean = [
@@ -320,6 +356,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         champion_panel, ls.quantile, ls.cost_bps, ls.min_names_per_day, ls.sector_neutral,
         ls.null_iterations, ls.null_quantile, trial_sharpes[best],
         rebalance_days=rebalance_days, vol_target_annual=vol_target, vol_lookback=vol_lookback,
+        rebalance_band=rebalance_band,
     )
 
     output = Path(output_dir)

@@ -196,6 +196,10 @@ class LongShortConfig(BaseModel):
     # per-ticker mean before ranking. 1/1 = the original daily book.
     rebalance_days: int = 1
     score_smoothing_days: int = 1
+    # No-trade band: hold a name until its rank leaves the widened exit band
+    # (top/bottom quantile*(1+band)); new names enter only from the tight core.
+    # Cuts turnover without the gross decay of a slower cadence. 0 = off.
+    rebalance_band: float = 0.0
     # Vol-targeted de-risking (never levers up): scale rebalance weights by
     # min(1, target / trailing annualized vol of the UNIT book). 0 = off.
     vol_target_annual: float = 0.0

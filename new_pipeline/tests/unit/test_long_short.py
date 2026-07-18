@@ -124,6 +124,44 @@ def test_rebalance_days_holds_between_and_charges_forced_exits():
     np.testing.assert_allclose(book.turnover[2], 0.25)
 
 
+def _churn_panel():
+    # 5 names, quantile 0.4 -> k=2. Day1 top-2 = A,B. Day2 C overtakes B, pushing
+    # B to rank 2 (still inside a band of k_exit=3): a band holds B; band=0 swaps B->C.
+    from datetime import timedelta
+    d = [date(2021, 1, 4) + timedelta(days=i) for i in range(2)]
+    rows = [
+        (d[0], "A", "X", 5.0, 0.01), (d[0], "B", "X", 4.0, 0.02),
+        (d[0], "C", "X", 3.0, 0.0), (d[0], "D", "X", 2.0, -0.01), (d[0], "E", "X", 1.0, -0.02),
+        (d[1], "A", "X", 5.0, 0.01), (d[1], "C", "X", 4.0, 0.0),
+        (d[1], "B", "X", 3.0, 0.02), (d[1], "D", "X", 2.0, -0.01), (d[1], "E", "X", 1.0, -0.02),
+    ]
+    return _panel(rows)
+
+
+def test_rebalance_band_zero_is_identical_to_no_band():
+    panel = _churn_panel()
+    kw = dict(quantile=0.4, cost_bps=50.0, min_names=5, sector_neutral=False, rebalance_days=1)
+    base = build_long_short_book(panel, **kw)
+    banded0 = build_long_short_book(panel, **kw, rebalance_band=0.0)
+    np.testing.assert_array_equal(base.net, banded0.net)
+    np.testing.assert_array_equal(base.turnover, banded0.turnover)  # default path untouched
+
+
+def test_rebalance_band_holds_boundary_name_and_cuts_turnover():
+    panel = _churn_panel()
+    kw = dict(quantile=0.4, cost_bps=50.0, min_names=5, sector_neutral=False, rebalance_days=1)
+    no_band = build_long_short_book(panel, **kw, rebalance_band=0.0)
+    band = build_long_short_book(panel, **kw, rebalance_band=0.5)  # k_exit=int(5*0.4*1.5)=3
+    # Day 2: band retains B (rank 2, inside the band) instead of swapping to C,
+    # so its day-2 turnover is strictly lower than the churny no-band book.
+    assert band.turnover[1] < no_band.turnover[1]
+    assert band.turnover.sum() < no_band.turnover.sum()
+    # Day-1 inception is identical (no prior holdings to retain).
+    np.testing.assert_allclose(band.turnover[0], no_band.turnover[0])
+    # Both legs stay unit-gross / dollar-neutral under the band.
+    assert band.avg_names_per_leg == 2.0
+
+
 def test_daily_rebalance_matches_legacy_semantics():
     # rebalance_days=1 must reproduce the original daily book bit-for-bit.
     rows = [
