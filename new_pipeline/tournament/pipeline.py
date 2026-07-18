@@ -658,7 +658,7 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
         if cfg.evaluation.regime_breakdown_enabled or (
             cfg.evaluation.regime_gate_enabled and decision.promoted
         ):
-            verdict = _regime_verdict(champion_returns, trials, cfg)
+            verdict = _regime_verdict(champion_returns, trials, eval_matrix, cfg)
         if cfg.evaluation.regime_breakdown_enabled and verdict is not None:
             decision = replace(
                 decision, regime_breakdown=_regime_breakdown(verdict, cfg)
@@ -715,6 +715,23 @@ def _load_sample_dates(candidate_path):
     return pl.read_parquet(dates_file)["date"]
 
 
+def _per_period_trials(trial_sharpes) -> np.ndarray:
+    """De-annualize trial Sharpes for deflation statistics.
+
+    ``grid_search``/``long_short`` store ANNUALIZED trial Sharpes (via
+    ``sharpe_ratio``, x sqrt(252)) — the right unit for reporting. Every
+    deflation statistic, however, runs on the per-period (daily) axis:
+    ``deflated_sharpe_report`` benchmarks the champion's per-period Sharpe
+    against ``expected_max_sharpe(var(trial_sharpes), N)``. Feeding annualized
+    numbers inflates that benchmark by sqrt(252) (~16x) — which silently made
+    the per-regime gate unclearable (implied hurdles of 2.4-4.7 ANNUALIZED
+    Sharpe per regime slice; run 57e4507c774f rejected slices with OOS
+    annualized Sharpe 2.7 at DSR 0.005). Convert at this boundary only, so
+    manifests/diagnostics keep their human-readable annualized values.
+    """
+    return np.asarray(trial_sharpes, dtype=np.float64) / np.sqrt(252.0)
+
+
 def _path_dsr_stats(paths, trials, returns_matrix, cfg):
     """Per-path Deflated Sharpe over the phi CPCV paths: (pass_fraction, median).
 
@@ -724,13 +741,14 @@ def _path_dsr_stats(paths, trials, returns_matrix, cfg):
     """
     if paths is None or paths.shape[0] == 0:
         return None, None
+    trials_pp = _per_period_trials(trials)
     if cfg.evaluation.use_effective_trials:
         n_eff = effective_number_of_trials(returns_matrix.T)
         path_dsrs = np.array(
-            [deflated_sharpe_report(path, n_eff, trial_sharpes=trials).dsr for path in paths]
+            [deflated_sharpe_report(path, n_eff, trial_sharpes=trials_pp).dsr for path in paths]
         )
     else:
-        path_dsrs = np.array([compute_deflated_sharpe_ratio(path, trials) for path in paths])
+        path_dsrs = np.array([compute_deflated_sharpe_ratio(path, trials_pp) for path in paths])
     pass_fraction = float(np.mean(path_dsrs >= cfg.evaluation.dsr_promotion_threshold))
     return pass_fraction, float(np.median(path_dsrs))
 
@@ -738,12 +756,14 @@ def _path_dsr_stats(paths, trials, returns_matrix, cfg):
 def _deflated_sharpe(champion_returns, trials, returns_matrix, cfg) -> float:
     """Deflated Sharpe for the champion. With ``use_effective_trials`` the trial
     count is the correlation-adjusted N_eff (correlated grid configs otherwise
-    over-deflate the DSR); the per-trial Sharpes still supply the variance.
+    over-deflate the DSR); the per-trial Sharpes still supply the variance
+    (de-annualized — see :func:`_per_period_trials`).
     ``returns_matrix`` is the (n_obs x n_trials) numpy evaluation matrix."""
+    trials_pp = _per_period_trials(trials)
     if cfg.evaluation.use_effective_trials:
         n_eff = effective_number_of_trials(returns_matrix.T)
-        return deflated_sharpe_report(champion_returns, n_eff, trial_sharpes=trials).dsr
-    return compute_deflated_sharpe_ratio(champion_returns, trials)
+        return deflated_sharpe_report(champion_returns, n_eff, trial_sharpes=trials_pp).dsr
+    return compute_deflated_sharpe_ratio(champion_returns, trials_pp)
 
 
 def _regime_breakdown(verdict, cfg) -> dict:
@@ -775,10 +795,16 @@ def _regime_breakdown(verdict, cfg) -> dict:
     }
 
 
-def _regime_verdict(champion_returns, trials, cfg) -> RegimeVerdict:
+def _regime_verdict(champion_returns, trials, returns_matrix, cfg) -> RegimeVerdict:
     """Per-regime DSR gate over the champion's OOS returns: volatility is the
     champion's own rolling std, regimes are decoded by a Gaussian HMM, and DSR
-    must clear the threshold in every testable regime (thin regimes per policy)."""
+    must clear the threshold in every testable regime (thin regimes per policy).
+
+    Deflation inputs mirror the full-sample gate exactly: the SAME effective
+    trial count (N_eff under ``use_effective_trials``, raw count otherwise) and
+    the SAME per-period trial-Sharpe variance. The pre-correction gate passed
+    the raw count with ANNUALIZED trial Sharpes, an inconsistent and
+    unclearable benchmark (see ``_per_period_trials``)."""
     volatility = pd.Series(champion_returns).rolling(10).std().bfill().fillna(0.0).to_numpy()
     evaluator = QuantitativeEvaluator(
         min_dsr_threshold=cfg.evaluation.dsr_promotion_threshold,
@@ -786,6 +812,11 @@ def _regime_verdict(champion_returns, trials, cfg) -> RegimeVerdict:
         min_regime_obs=cfg.evaluation.min_regime_obs,
         thin_policy=ThinRegimePolicy(cfg.evaluation.thin_regime_policy),
     )
+    n_trials = (
+        effective_number_of_trials(returns_matrix.T)
+        if cfg.evaluation.use_effective_trials
+        else len(trials)
+    )
     return evaluator.evaluate_model_robustness(
-        champion_returns, volatility, len(trials), trial_sharpes=trials
+        champion_returns, volatility, n_trials, trial_sharpes=_per_period_trials(trials)
     )

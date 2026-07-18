@@ -79,8 +79,11 @@ class QuantitativeEvaluator:
     ) -> RegimeVerdict:
         """Decode regimes and require DSR > threshold in every testable regime.
 
-        ``n_trials`` / ``trial_sharpes`` come from the tournament. Pass
-        ``sentiment`` to decode regimes in the fused 3-D space.
+        ``n_trials`` / ``trial_sharpes`` come from the tournament and MUST be on
+        the same per-period axis as ``strategy_returns`` (annualized trial
+        Sharpes inflate the deflation benchmark by sqrt(periods_per_year));
+        ``n_trials`` may be a fractional effective count. Pass ``sentiment`` to
+        decode regimes in the fused 3-D space.
         """
         returns = np.asarray(strategy_returns, dtype=np.float64)
         volatility = np.asarray(market_volatility, dtype=np.float64)

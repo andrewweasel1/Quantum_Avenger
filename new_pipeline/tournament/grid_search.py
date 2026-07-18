@@ -158,6 +158,9 @@ def run_grid_search(
         proba_paths_per_combo.append(splitter.assemble_paths(n, proba_segments))
         oos = paths.mean(axis=0)  # == canonical per-sample OOS average across folds
         rows.append(oos)
+        # ANNUALIZED (sharpe_ratio x sqrt(252)) — reporting/selection units.
+        # Deflation statistics consume these via _per_period_trials, which
+        # de-annualizes; never feed them to a DSR benchmark raw.
         sharpe = sharpe_ratio(oos if dates is None else collapse_to_daily(dates, oos)[1])
         sharpes.append(sharpe)
         if sharpe > best_sharpe:
