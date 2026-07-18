@@ -64,6 +64,12 @@ class ExecutionConfig(BaseModel):
     max_retries: int = 3
     tif: str = "day"
     account_capital: float = 100_000.0
+    # Charge dynamic hydrodynamic slippage (features.slippage) on the gauntlet's
+    # simulated t+1 returns: round-trip cost per fill + a veto above
+    # features.max_slippage_bps. Default off keeps the suite/goldens bit-stable;
+    # honest net-of-cost validation runs turn it on. account_capital sets the
+    # order notional that drives the participation-rate impact.
+    backtest_slippage_enabled: bool = False
 
 
 class LoggingConfig(BaseModel):

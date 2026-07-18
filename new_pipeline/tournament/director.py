@@ -222,6 +222,13 @@ def _process_sector(clean, feature_cols, output, cfg, use_cfs):
     sector = clean["sector"][0]
     labels = clean["target_label"].to_numpy().astype(np.float64)
     prices = {col: clean[col].to_numpy().astype(np.float64) for col in _PRICE_COLUMNS}
+    # adv_20 + volatility ride along for the net-of-slippage simulator; both are
+    # FEATURE_COLS (already in `required`), so they are guaranteed non-null here
+    # and this does not alter the gross path. Consumed only when
+    # execution.backtest_slippage_enabled.
+    for col in ("adv_20", "volatility"):
+        if col in clean.columns:
+            prices[col] = clean[col].to_numpy().astype(np.float64)
     t1_offset = clean["label_t1_offset"].to_numpy() if "label_t1_offset" in clean.columns else None
     # Per-ticker run ids: cap label spans / t+1 sim at ticker boundaries (no cross-ticker leak).
     block_ids = clean["ticker"].rle_id().to_numpy() if "ticker" in clean.columns else None

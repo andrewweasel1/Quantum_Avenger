@@ -66,6 +66,10 @@ execution:
   max_retries: 3
   tif: "day"
   account_capital: 100000.0
+  # Charge dynamic hydrodynamic slippage on simulated t+1 gauntlet returns
+  # (round-trip cost per fill + veto above features.max_slippage_bps). Off keeps
+  # the suite bit-stable; honest net-of-cost validation runs override to true.
+  backtest_slippage_enabled: false
 
 logging:
   level: "INFO"

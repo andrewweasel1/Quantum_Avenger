@@ -16,7 +16,11 @@ from new_pipeline.tournament.accounting import collapse_to_daily
 from new_pipeline.tournament.cpcv import CPCVSplitGenerator, absolute_t1
 from new_pipeline.tournament.meta_labeling import MIN_FIRED_TRAIN, meta_filtered_signal
 from new_pipeline.tournament.sample_weights import uniqueness_sample_weights
-from new_pipeline.tournament.simulator import sharpe_ratio, simulate_t1_returns_blockwise
+from new_pipeline.tournament.simulator import (
+    sharpe_ratio,
+    simulate_t1_returns_blockwise,
+    simulate_t1_returns_blockwise_net,
+)
 from new_pipeline.tournament.trainer import default_params, predict_proba, train_booster
 
 _DEFAULT_GRID = {"max_depth": [1, 2], "learning_rate": [0.01, 0.05]}
@@ -90,6 +94,13 @@ def run_grid_search(
         embargo_pct=cfg.tournament.embargo_pct,
     )
     n = len(labels)
+    # Net-of-slippage accounting requires the liquidity/vol columns in `prices`;
+    # off (or absent) => the byte-for-byte gross path.
+    net_slippage = (
+        cfg.execution.backtest_slippage_enabled
+        and "adv_20" in prices
+        and "volatility" in prices
+    )
     t1 = absolute_t1(t1_offset, n, block_ids)
     weights = (
         uniqueness_sample_weights(t1)
@@ -145,15 +156,32 @@ def run_grid_search(
                         signals, meta_predict(features[block]), cfg.tournament.meta_threshold
                     )
                 group_ids = np.zeros(gend - gstart + 1) if block_ids is None else block_ids[block]
-                segments[(combo_index, g)] = simulate_t1_returns_blockwise(
-                    signals,
-                    prices["close"][block],
-                    prices["low"][block],
-                    prices["atr"][block],
-                    group_ids,
-                    cfg.execution.atr_stop_multiplier,
-                    cfg.execution.max_risk_per_trade,
-                )
+                if net_slippage:
+                    segments[(combo_index, g)] = simulate_t1_returns_blockwise_net(
+                        signals,
+                        prices["close"][block],
+                        prices["low"][block],
+                        prices["atr"][block],
+                        prices["adv_20"][block],
+                        prices["volatility"][block],
+                        group_ids,
+                        cfg.execution.atr_stop_multiplier,
+                        cfg.execution.max_risk_per_trade,
+                        cfg.execution.account_capital,
+                        cfg.features.slippage_constant,
+                        cfg.features.bps_scaler,
+                        cfg.features.max_slippage_bps,
+                    )
+                else:
+                    segments[(combo_index, g)] = simulate_t1_returns_blockwise(
+                        signals,
+                        prices["close"][block],
+                        prices["low"][block],
+                        prices["atr"][block],
+                        group_ids,
+                        cfg.execution.atr_stop_multiplier,
+                        cfg.execution.max_risk_per_trade,
+                    )
         paths = splitter.assemble_paths(n, segments)
         proba_paths_per_combo.append(splitter.assemble_paths(n, proba_segments))
         oos = paths.mean(axis=0)  # == canonical per-sample OOS average across folds
