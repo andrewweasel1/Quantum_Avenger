@@ -17,6 +17,7 @@ and are recorded as empty — the backtest neutral-fills those dates.
 import argparse
 import csv
 import time
+import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
@@ -32,16 +33,31 @@ from new_pipeline.data.finra_short_volume import (
 _UA = "Quantum Avenger Research (contact: research@example.com)"
 
 
-def fetch_text(url: str) -> str | None:  # pragma: no cover - egress
-    """GET a daily file; None on 403/404 (before the rolling window, or holiday)."""
+def fetch_text(url: str, retries: int = 4) -> str | None:  # pragma: no cover - egress
+    """GET a daily file; None on 403/404 (before the rolling window, or holiday).
+
+    Retries transient network errors (connection reset, timeout) with backoff so
+    a single hiccup mid-ingest doesn't abort the whole run; after ``retries``
+    failures the day is treated as no-data (None) and the ingest moves on
+    (a resume pass can re-attempt it, since no by_date file is written... but the
+    caller DOES write an empty file — re-run with that day's file deleted to
+    retry a genuinely-transient miss)."""
     request = urllib.request.Request(url, headers={"User-Agent": _UA})
-    try:
-        with urllib.request.urlopen(request, timeout=60) as resp:
-            return resp.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        if exc.code in (403, 404):
-            return None
-        raise
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(request, timeout=60) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            if exc.code in (403, 404):
+                return None
+            if attempt == retries - 1:
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt == retries - 1:
+                print(f"  transient fetch failure (giving up): {url}", flush=True)
+                return None
+        time.sleep(2.0 * (attempt + 1))  # linear backoff: 2s, 4s, 6s
+    return None
 
 
 def write_day_csv(path: Path, records: list[dict]) -> None:
