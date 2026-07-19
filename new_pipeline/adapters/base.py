@@ -62,12 +62,23 @@ class Bar:
 class FundamentalSnapshot:
     """Point-in-time fundamentals: the values knowable on/after ``as_of`` (the filing
     date), used for value/quality cross-sectional factors. Per-share so they divide
-    cleanly into price."""
+    cleanly into price.
+
+    The first three fields are always present (the core value/quality set); the
+    quality/growth extensions are optional (``None`` when the issuer's filing did
+    not expose the underlying XBRL concept) and neutral-filled by the factor
+    layer so coverage is never reduced."""
 
     as_of: date
     book_value_per_share: float
     earnings_per_share: float
     return_on_equity: float
+    return_on_assets: float | None = None
+    gross_margin: float | None = None
+    accruals: float | None = None
+    ocf_per_share: float | None = None
+    revenue_growth: float | None = None
+    earnings_growth: float | None = None
 
 
 @dataclass(frozen=True)

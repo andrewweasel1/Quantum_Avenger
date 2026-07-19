@@ -19,6 +19,43 @@ from new_pipeline.features.factors import (
 )
 
 
+def test_quality_growth_factors_zscore_and_accruals_sign():
+    from new_pipeline.features.factors import FUNDAMENTAL_FACTORS, SUPPORTED_FACTORS
+
+    new = ["roa", "gross_margin", "accruals", "fcf_yield", "revenue_growth", "earnings_growth"]
+    assert set(new) <= set(SUPPORTED_FACTORS) and set(new) <= FUNDAMENTAL_FACTORS
+    frame = pl.DataFrame({
+        "date": [date(2021, 6, 1)] * 3,
+        "ticker": ["A", "B", "C"], "sector": ["S"] * 3, "close": [100.0, 100.0, 100.0],
+        "return_on_assets": [0.02, 0.08, 0.14], "gross_margin": [0.3, 0.5, 0.7],
+        "accruals": [-0.04, 0.0, 0.04],  # LOW accruals = high quality -> sign flips
+        "ocf_per_share": [2.0, 5.0, 8.0], "revenue_growth": [0.0, 0.1, 0.2],
+        "earnings_growth": [-0.1, 0.05, 0.2],
+    })
+    out = add_cross_sectional_factors(frame, new, sector_neutral=True, null_policy="neutral")
+    # accruals raw is negated: the LOW-accrual name (A, -0.04) must score HIGHEST.
+    z = out.sort("ticker")["xf_accruals"].to_numpy()
+    assert z[0] > z[1] > z[2]  # A > B > C after negation
+    # roa is monotone increasing -> highest-roa name scores highest.
+    assert out.sort("ticker")["xf_roa"].to_numpy()[2] > out.sort("ticker")["xf_roa"].to_numpy()[0]
+
+
+def test_quality_factors_neutral_fill_on_missing_fundamentals():
+    # A name with null quality inputs (uncovered issuer) must neutral-fill to 0.0
+    # under null_policy="neutral" so it survives the tournament drop_nulls.
+    frame = pl.DataFrame({
+        "date": [date(2021, 6, 1)] * 2, "ticker": ["A", "B"], "sector": ["S"] * 2,
+        "close": [100.0, 100.0], "return_on_assets": [0.05, None],
+        "gross_margin": [0.4, None], "accruals": [0.0, None], "ocf_per_share": [3.0, None],
+        "revenue_growth": [0.1, None], "earnings_growth": [0.05, None],
+    })
+    out = add_cross_sectional_factors(
+        frame, ["roa", "revenue_growth"], sector_neutral=True, null_policy="neutral"
+    )
+    assert out["xf_roa"].null_count() == 0  # null input -> filled 0.0, row survives
+    assert out["xf_revenue_growth"].null_count() == 0
+
+
 def _single_date_frame(vols, sectors=None) -> pl.DataFrame:
     """One date, one row per ticker, with explicit ``volatility`` (drives low_vol)."""
     n = len(vols)

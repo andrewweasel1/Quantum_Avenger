@@ -11,6 +11,13 @@ from datetime import datetime
 import polars as pl
 
 FUNDAMENTAL_COLUMNS = ("book_value_per_share", "earnings_per_share", "return_on_equity")
+# Optional quality/growth extensions (None where the issuer's XBRL lacked the
+# concept); joined alongside the core columns and neutral-filled by the factors.
+FUNDAMENTAL_EXTENDED_COLUMNS = (
+    "return_on_assets", "gross_margin", "accruals", "ocf_per_share",
+    "revenue_growth", "earnings_growth",
+)
+ALL_FUNDAMENTAL_COLUMNS = FUNDAMENTAL_COLUMNS + FUNDAMENTAL_EXTENDED_COLUMNS
 
 
 def _as_date(value):
@@ -41,16 +48,14 @@ def attach_fundamentals(frame: pl.DataFrame, source, keep_as_of: bool = False) -
     rows = [
         {
             "ticker": symbol, "as_of": snap.as_of,
-            "book_value_per_share": snap.book_value_per_share,
-            "earnings_per_share": snap.earnings_per_share,
-            "return_on_equity": snap.return_on_equity,
+            **{column: getattr(snap, column) for column in ALL_FUNDAMENTAL_COLUMNS},
         }
         for symbol in symbols
         for snap in source.history(symbol, start, end)
     ]
     if not rows:
         out = frame.with_columns(
-            [pl.lit(None, dtype=pl.Float64).alias(column) for column in FUNDAMENTAL_COLUMNS]
+            [pl.lit(None, dtype=pl.Float64).alias(column) for column in ALL_FUNDAMENTAL_COLUMNS]
         )
         if keep_as_of:
             out = out.with_columns(pl.lit(None, dtype=pl.Date).alias("as_of"))

@@ -30,9 +30,15 @@ REVERSAL_WINDOW = 21  # short-term (one-month) reversal
 SUPPORTED_FACTORS = (
     "mom_12_1", "reversal_21", "low_vol", "seasonality",  # price-derived
     "book_to_market", "earnings_yield", "roe",  # fundamental (value / quality)
+    # fundamental quality + growth (richer composite; each an orthogonal input
+    # the model combines — raises COMBINED IC without a new data source):
+    "roa", "gross_margin", "accruals", "fcf_yield", "revenue_growth", "earnings_growth",
 )
 # Factors needing point-in-time fundamentals joined onto the frame first.
-FUNDAMENTAL_FACTORS = frozenset({"book_to_market", "earnings_yield", "roe"})
+FUNDAMENTAL_FACTORS = frozenset({
+    "book_to_market", "earnings_yield", "roe",
+    "roa", "gross_margin", "accruals", "fcf_yield", "revenue_growth", "earnings_growth",
+})
 
 
 def factor_feature_names(factor_set) -> list[str]:
@@ -67,6 +73,25 @@ def _raw_signal(name: str) -> pl.Expr:
     if name == "roe":
         # quality: return on equity (higher ⇒ more profitable).
         return pl.col("return_on_equity")
+    if name == "roa":
+        # quality: return on assets (profitability per dollar of assets).
+        return pl.col("return_on_assets")
+    if name == "gross_margin":
+        # quality: gross profit per dollar of revenue (pricing power / moat).
+        return pl.col("gross_margin")
+    if name == "accruals":
+        # quality: LOW accruals ⇒ higher-quality (cash-backed) earnings, so the
+        # signal is the negative (Sloan accrual anomaly).
+        return -pl.col("accruals")
+    if name == "fcf_yield":
+        # value: operating cash flow per dollar of price.
+        return pl.col("ocf_per_share") / close
+    if name == "revenue_growth":
+        # growth: year-over-year revenue growth.
+        return pl.col("revenue_growth")
+    if name == "earnings_growth":
+        # growth: year-over-year EPS growth.
+        return pl.col("earnings_growth")
     raise SchemaValidationError(f"Unknown cross-sectional factor: {name!r}")
 
 
@@ -190,6 +215,30 @@ def _factor_metadata() -> dict[str, FeatureMetadata]:
         "roe": FeatureMetadata(
             "xf_roe", "Cross-sectional return-on-equity quality (z-scored).",
             "fundamental", "quarterly",
+        ),
+        "roa": FeatureMetadata(
+            "xf_roa", "Cross-sectional return-on-assets quality (z-scored).",
+            "fundamental", "quarterly",
+        ),
+        "gross_margin": FeatureMetadata(
+            "xf_gross_margin", "Cross-sectional gross-margin quality (z-scored).",
+            "fundamental", "quarterly",
+        ),
+        "accruals": FeatureMetadata(
+            "xf_accruals", "Cross-sectional (negative) accruals quality (z-scored).",
+            "fundamental", "quarterly",
+        ),
+        "fcf_yield": FeatureMetadata(
+            "xf_fcf_yield", "Cross-sectional operating-cash-flow yield (z-scored).",
+            "fundamental", "quarterly",
+        ),
+        "revenue_growth": FeatureMetadata(
+            "xf_revenue_growth", "Cross-sectional YoY revenue growth (z-scored).",
+            "fundamental", "annual",
+        ),
+        "earnings_growth": FeatureMetadata(
+            "xf_earnings_growth", "Cross-sectional YoY EPS growth (z-scored).",
+            "fundamental", "annual",
         ),
     }
 

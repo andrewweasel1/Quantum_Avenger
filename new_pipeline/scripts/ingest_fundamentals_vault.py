@@ -28,8 +28,9 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-_COLUMNS = ["ticker", "as_of", "book_value_per_share", "earnings_per_share",
-            "return_on_equity"]
+from new_pipeline.data.fundamentals import ALL_FUNDAMENTAL_COLUMNS
+
+_COLUMNS = ["ticker", "as_of", *ALL_FUNDAMENTAL_COLUMNS]
 
 
 def write_ticker_csv(path: Path, ticker: str, records: list[dict]) -> None:
@@ -37,7 +38,7 @@ def write_ticker_csv(path: Path, ticker: str, records: list[dict]) -> None:
         writer = csv.DictWriter(handle, _COLUMNS)
         writer.writeheader()
         for rec in records:
-            writer.writerow({"ticker": ticker, **{k: rec[k] for k in _COLUMNS[1:]}})
+            writer.writerow({"ticker": ticker, **{k: rec.get(k) for k in _COLUMNS[1:]}})
 
 
 def merge_vault(by_ticker_dir: Path, out_path: Path) -> int:

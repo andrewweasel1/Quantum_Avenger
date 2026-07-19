@@ -34,6 +34,9 @@ _FORMS = {"10-K", "10-Q", "10-K/A", "10-Q/A"}
 
 # Ordered fallbacks: many issuers file variant tags (consolidated-equity,
 # diluted-only EPS, IFRS-style ProfitLoss); first present-and-usable tag wins.
+# CORE concepts must all resolve for a snapshot to exist; EXTRA concepts are
+# best-effort (missing -> the derived quality/growth ratio is null -> neutral-
+# filled downstream), so adding them never shrinks coverage.
 TAG_FALLBACKS = {
     "equity": [
         ("us-gaap", "StockholdersEquity", "USD"),
@@ -55,7 +58,31 @@ TAG_FALLBACKS = {
         ("us-gaap", "ProfitLoss", "USD"),
     ],
 }
-_FLOW_CONCEPTS = {"eps", "net_income"}  # period measures -> annualize
+_CORE_CONCEPTS = ("equity", "shares", "eps", "net_income")
+
+# Extra concepts for the quality/growth factor families (best-effort).
+_EXTRA_TAGS = {
+    "revenue": [
+        ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax", "USD"),
+        ("us-gaap", "Revenues", "USD"),
+        ("us-gaap", "SalesRevenueNet", "USD"),
+        ("us-gaap", "RevenueFromContractWithCustomerIncludingAssessedTax", "USD"),
+    ],
+    "assets": [
+        ("us-gaap", "Assets", "USD"),
+    ],
+    "gross_profit": [
+        ("us-gaap", "GrossProfit", "USD"),
+    ],
+    "operating_cash_flow": [
+        ("us-gaap", "NetCashProvidedByUsedInOperatingActivities", "USD"),
+        ("us-gaap",
+         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations", "USD"),
+    ],
+}
+# period measures (flows) -> annualize by span; balances (equity, shares,
+# assets) are point-in-time and taken as-is.
+_FLOW_CONCEPTS = {"eps", "net_income", "revenue", "gross_profit", "operating_cash_flow"}
 
 
 def _entries(facts: dict, taxonomy: str, tag: str, unit: str) -> list[dict]:
@@ -74,11 +101,14 @@ def _annualization(entry: dict) -> float | None:
     return 365.0 / span
 
 
+_ALL_TAGS = {**TAG_FALLBACKS, **_EXTRA_TAGS}
+
+
 def _per_accession(facts: dict, concept: str) -> dict[str, tuple[float, str]]:
     """{accession: (value, filed)} for a concept — first fallback tag that
     yields usable entries wins; within an accession the latest period end wins;
     flow concepts are annualized by their period length."""
-    for taxonomy, tag, unit in TAG_FALLBACKS[concept]:
+    for taxonomy, tag, unit in _ALL_TAGS[concept]:
         best: dict[str, tuple[str, float, str]] = {}  # accn -> (end, value, filed)
         for entry in _entries(facts, taxonomy, tag, unit):
             if entry.get("form") not in _FORMS or entry.get("val") is None:
@@ -99,15 +129,35 @@ def _per_accession(facts: dict, concept: str) -> dict[str, tuple[float, str]]:
     return {}
 
 
+def _ratio(numerator, denominator):
+    """Safe ratio: None when either input is missing or the denominator is 0."""
+    if numerator is None or denominator in (None, 0.0):
+        return None
+    return numerator / denominator
+
+
+def _yoy_growth(current, prior):
+    """Year-over-year growth on a comparable-scale base (|prior|); None if either
+    is missing or prior is ~0 (growth off a zero base is meaningless)."""
+    if current is None or prior in (None, 0.0):
+        return None
+    return (current - prior) / abs(prior)
+
+
 def snapshot_records(facts: dict, start: date, end: date) -> list[dict]:
     """Complete PIT snapshots from one companyfacts JSON, sorted by ``as_of``.
 
-    A snapshot is emitted per accession where all four concepts resolve
-    (incomplete filings are skipped — the fixture schema carries no nulls);
-    ``as_of`` = the accession's filed date; one snapshot per as_of (latest
-    accession wins)."""
-    per = {concept: _per_accession(facts, concept) for concept in TAG_FALLBACKS}
-    common = set.intersection(*(set(m) for m in per.values())) if all(per.values()) else set()
+    A snapshot is emitted per accession where the four CORE concepts resolve
+    (equity/shares/eps/net_income); ``as_of`` = the accession's filed date; one
+    snapshot per as_of (latest accession wins). Quality ratios (roa,
+    gross_margin, accruals, ocf_per_share) are best-effort — null when an EXTRA
+    concept is missing for that accession (never dropping the snapshot).
+    Year-over-year revenue/earnings growth is computed against the snapshot
+    ~365 days prior within this issuer (null when no comparable prior exists).
+    """
+    per = {concept: _per_accession(facts, concept) for concept in _ALL_TAGS}
+    core = [per[c] for c in _CORE_CONCEPTS]
+    common = set.intersection(*(set(m) for m in core)) if all(core) else set()
     records = {}
     for accn in common:
         equity, filed = per["equity"][accn]
@@ -117,13 +167,46 @@ def snapshot_records(facts: dict, start: date, end: date) -> list[dict]:
         as_of = date.fromisoformat(filed)
         if as_of < start or as_of > end or equity == 0.0 or shares == 0.0:
             continue
+        revenue = per["revenue"].get(accn, (None,))[0]
+        assets = per["assets"].get(accn, (None,))[0]
+        gross_profit = per["gross_profit"].get(accn, (None,))[0]
+        ocf = per["operating_cash_flow"].get(accn, (None,))[0]
+        accruals = None if (assets in (None, 0.0) or ocf is None) else (net_income - ocf) / assets
         records[as_of] = {
             "as_of": as_of.isoformat(),
             "book_value_per_share": equity / shares,
             "earnings_per_share": eps,
             "return_on_equity": net_income / equity,
+            "return_on_assets": _ratio(net_income, assets),
+            "gross_margin": _ratio(gross_profit, revenue),
+            "accruals": accruals,
+            "ocf_per_share": _ratio(ocf, shares),
+            "_revenue": revenue,  # scratch: growth basis, dropped before return
         }
-    return [records[k] for k in sorted(records)]
+    ordered = [records[k] for k in sorted(records)]
+    _attach_growth(ordered)
+    return ordered
+
+
+def _attach_growth(ordered: list[dict]) -> None:
+    """In-place YoY revenue/earnings growth vs the snapshot ~365d earlier (a
+    300-430d window tolerates quarterly cadence); drops the scratch revenue."""
+    dates = [date.fromisoformat(r["as_of"]) for r in ordered]
+    revenues = [r["_revenue"] for r in ordered]  # snapshot before mutating
+    eps = [r["earnings_per_share"] for r in ordered]
+    for i, rec in enumerate(ordered):
+        prior = None
+        for j in range(i - 1, -1, -1):
+            gap = (dates[i] - dates[j]).days
+            if 300 <= gap <= 430:
+                prior = j
+                break
+            if gap > 430:
+                break
+        p = prior  # None when no comparable prior-year filing exists
+        rec["revenue_growth"] = _yoy_growth(revenues[i], revenues[p]) if p is not None else None
+        rec["earnings_growth"] = _yoy_growth(eps[i], eps[p]) if p is not None else None
+        del rec["_revenue"]
 
 
 def load_ticker_map(fetch_json) -> dict[str, int]:

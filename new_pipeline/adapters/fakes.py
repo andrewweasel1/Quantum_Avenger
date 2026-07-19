@@ -132,6 +132,10 @@ class FakeFundamentalsSource(FundamentalsSource):
         bvps0 = 10.0 + (seed % 40)  # book value per share, 10..50
         eps0 = 1.0 + (seed % 8)  # earnings per share, 1..9
         roe0 = 0.05 + (seed % 25) / 100.0  # return on equity, 0.05..0.30
+        roa0 = 0.02 + (seed % 15) / 100.0  # return on assets, 0.02..0.17
+        gm0 = 0.20 + (seed % 50) / 100.0  # gross margin, 0.20..0.70
+        acc0 = -0.05 + (seed % 10) / 100.0  # accruals, -0.05..0.05
+        ocfps0 = eps0 * (1.1 + (seed % 5) / 10.0)  # ocf/share tracks eps
         snapshots: list[FundamentalSnapshot] = []
         for i, as_of in enumerate(_quarter_dates(start.year - 1, end.year)):
             if as_of > end:
@@ -142,6 +146,13 @@ class FakeFundamentalsSource(FundamentalsSource):
                     book_value_per_share=round(bvps0 * (1.0 + 0.01 * i), 4),
                     earnings_per_share=round(eps0 * (1.0 + 0.005 * i), 4),
                     return_on_equity=round(roe0, 4),
+                    return_on_assets=round(roa0, 4),
+                    gross_margin=round(gm0, 4),
+                    accruals=round(acc0, 4),
+                    ocf_per_share=round(ocfps0 * (1.0 + 0.005 * i), 4),
+                    # growth appears once a year of history exists (>= 4 quarters).
+                    revenue_growth=round(0.02 + (seed % 12) / 100.0, 4) if i >= 4 else None,
+                    earnings_growth=round(0.005 * 4, 4) if i >= 4 else None,
                 )
             )
         return snapshots

@@ -56,6 +56,43 @@ def test_attach_fundamentals_tolerates_datetime_date_column():
     assert out["book_value_per_share"].null_count() == 0  # joined, no crash
 
 
+def test_static_source_reads_extended_columns_and_legacy_backward_compat(tmp_path):
+    from new_pipeline.adapters.fundamentals_static import StaticFundamentalsSource
+
+    # Extended CSV: new quality/growth columns parsed; blanks -> None.
+    ext = tmp_path / "ext.csv"
+    ext.write_text(
+        "ticker,as_of,book_value_per_share,earnings_per_share,return_on_equity,"
+        "return_on_assets,gross_margin,accruals,ocf_per_share,revenue_growth,earnings_growth\n"
+        "AAA,2021-05-01,20.0,1.5,0.15,0.08,0.55,0.01,2.2,0.12,0.09\n"
+        "AAA,2021-08-01,20.5,1.6,0.16,0.09,0.56,,2.3,,\n",  # blanks -> None
+        encoding="utf-8",
+    )
+    snaps = StaticFundamentalsSource(str(ext)).history("AAA", date(2021, 1, 1), date(2021, 12, 31))
+    assert snaps[0].return_on_assets == 0.08 and snaps[0].gross_margin == 0.55
+    assert snaps[1].accruals is None and snaps[1].revenue_growth is None  # blank cells
+
+    # Legacy 3-column CSV: new fields default to None, no crash.
+    legacy = tmp_path / "legacy.csv"
+    legacy.write_text(
+        "ticker,as_of,book_value_per_share,earnings_per_share,return_on_equity\n"
+        "BBB,2021-05-01,10.0,2.0,0.20\n",
+        encoding="utf-8",
+    )
+    src = StaticFundamentalsSource(str(legacy))
+    snap = src.history("BBB", date(2021, 1, 1), date(2021, 12, 31))[0]
+    assert snap.book_value_per_share == 10.0 and snap.return_on_assets is None
+
+
+def test_attach_emits_all_extended_columns():
+    from new_pipeline.data.fundamentals import ALL_FUNDAMENTAL_COLUMNS
+
+    frame = pl.DataFrame({"ticker": ["AAA"], "date": [date(2021, 6, 1)], "close": [100.0]})
+    out = attach_fundamentals(frame, FakeFundamentalsSource())
+    for column in ALL_FUNDAMENTAL_COLUMNS:
+        assert column in out.columns
+
+
 def test_static_fundamentals_fixture():
     stat = StaticFundamentalsSource()
     snaps = stat.history("AAPL", date(2020, 1, 1), date(2021, 12, 31))
