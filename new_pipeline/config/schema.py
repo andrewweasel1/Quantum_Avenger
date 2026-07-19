@@ -42,6 +42,9 @@ class FeatureConfig(BaseModel):
     # materializes when its source is active: filing features need fundamental
     # factors in factor_set; the news burst needs fusion.enabled.
     event_features: bool = False
+    # Short-flow family (FINRA daily short-volume): short_ratio + trailing
+    # z-score + change. Needs short_volume.vault_path set. Default off.
+    short_flow_features: bool = False
     fracdiff_d: float = 0.4  # fractional-differencing order
     fracdiff_threshold: float = 1e-3  # weight-truncation threshold (sets the window width)
     vol_window: int = 20  # range vol-estimator rolling window
@@ -262,6 +265,12 @@ class FundamentalsConfig(BaseModel):
     edgar_identity: str = ""  # SEC "Name email" User-Agent for the live EDGAR source
 
 
+class ShortVolumeConfig(BaseModel):
+    """FINRA Reg SHO daily short-volume vault for the short-flow feature family."""
+
+    vault_path: str = ""  # StaticShortVolumeSource CSV; "" -> feature family off
+
+
 class DashboardConfig(BaseModel):
     veto_ledger_path: str = "./data/ledger/veto_ledger.parquet"
     trade_log_path: str = "./data/ledger/trade_log.parquet"
@@ -312,5 +321,6 @@ class AppConfig(BaseModel):
     rag: RAGConfig = Field(default_factory=RAGConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
     fundamentals: FundamentalsConfig = Field(default_factory=FundamentalsConfig)
+    short_volume: ShortVolumeConfig = Field(default_factory=ShortVolumeConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     alpaca: AlpacaConfig = Field(default_factory=AlpacaConfig)

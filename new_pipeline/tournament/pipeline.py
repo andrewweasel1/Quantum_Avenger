@@ -20,6 +20,7 @@ from new_pipeline.adapters import FakeMarketDataSource, StaticUniverseProvider
 from new_pipeline.config import get_config
 from new_pipeline.core.exceptions import MarketDataError
 from new_pipeline.data.fundamentals import attach_fundamentals
+from new_pipeline.data.short_volume import attach_short_volume
 from new_pipeline.evaluation.alpha_eval import alpha_eval_report
 from new_pipeline.evaluation.dsr import (
     compute_deflated_sharpe_ratio,
@@ -53,6 +54,7 @@ from new_pipeline.features.factors import (
 from new_pipeline.features.labels import add_labels
 from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES, add_markov_regime_features
 from new_pipeline.features.polars_engine import compile_features
+from new_pipeline.features.short_flow import SHORT_FLOW_COLS, add_short_flow_features
 from new_pipeline.portfolio.combination import combine_returns
 from new_pipeline.tournament.accounting import collapse_to_daily
 from new_pipeline.tournament.director import run_sector_tournament
@@ -80,6 +82,7 @@ def build_training_frame(
     sentiment_engine=None,
     anonymizer=None,
     fundamentals_source=None,
+    short_volume_source=None,
     membership=None,
 ) -> pl.DataFrame:
     """Synthetic OHLCV -> features -> sector join + target_label, one frame.
@@ -150,6 +153,11 @@ def build_training_frame(
     labeled = labeled.with_columns(
         (pl.col("close").shift(-1).over("ticker") / pl.col("close") - 1.0).alias("next_ret")
     )
+    if short_volume_source is not None and cfg.features.short_flow_features:
+        # Fast per-ticker daily short-flow signals; joined + transformed on full
+        # per-ticker history (pre-PIT-mask) so the trailing z-score warms up.
+        labeled = attach_short_volume(labeled, short_volume_source)
+        labeled = add_short_flow_features(labeled)
     if news_source is not None and sentiment_engine is not None and anonymizer is not None:
         labeled = _attach_sentiment(
             labeled, symbols, news_source, sentiment_engine, anonymizer, start, end,
@@ -331,10 +339,15 @@ def run_offline_pipeline(
         from new_pipeline.adapters.factory import build_fundamentals_source
 
         fundamentals_source = build_fundamentals_source(cfg, universe)
+    short_volume_source = None
+    if cfg.features.short_flow_features and cfg.short_volume.vault_path:
+        from new_pipeline.adapters.short_volume_static import StaticShortVolumeSource
+
+        short_volume_source = StaticShortVolumeSource(cfg.short_volume.vault_path)
     frame = build_training_frame(
         symbols, sectors, start, end, source, cfg,
         news_source=news_source, sentiment_engine=sentiment_engine, anonymizer=anonymizer,
-        fundamentals_source=fundamentals_source,
+        fundamentals_source=fundamentals_source, short_volume_source=short_volume_source,
         # PIT masking: with a dated fixture (sp500_pit.csv or membership.csv)
         # a ticker only contributes rows while an actual index member.
         membership=universe.members(),
@@ -352,6 +365,8 @@ def run_offline_pipeline(
     if cfg.features.extended_features:
         feature_cols += extended_feature_names(cfg.features.extended_features)
     feature_cols += _event_feature_names(cfg)  # [] unless features.event_features
+    if cfg.features.short_flow_features and short_volume_source is not None:
+        feature_cols += SHORT_FLOW_COLS
     results = run_sector_tournament(frame, feature_cols, output_dir)
     gauntlet_results = results
     summary = {"sectors": list(results)}

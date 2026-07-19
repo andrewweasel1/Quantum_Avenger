@@ -252,6 +252,11 @@ fundamentals:
   fixture_path: ""
   edgar_identity: ""
 
+# FINRA Reg SHO daily short-volume vault for the short-flow feature family
+# (features.short_flow_features). Empty vault_path -> family off.
+short_volume:
+  vault_path: ""
+
 dashboard:
   veto_ledger_path: "./data/ledger/veto_ledger.parquet"
   trade_log_path: "./data/ledger/trade_log.parquet"

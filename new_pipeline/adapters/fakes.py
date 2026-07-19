@@ -158,6 +158,38 @@ class FakeFundamentalsSource(FundamentalsSource):
         return snapshots
 
 
+class FakeShortVolumeSource:
+    """Deterministic daily short-volume panel for the given symbols (no RNG):
+    the short fraction is a bounded sinusoid per symbol so trailing z-scores and
+    changes have real, testable structure."""
+
+    def __init__(self, symbols) -> None:
+        self._symbols = list(symbols)
+
+    def panel(self, start: date, end: date):
+        import polars as pl
+
+        rows = []
+        for symbol in self._symbols:
+            seed = sum(ord(c) for c in symbol)
+            day, i = start, 0
+            while day <= end:
+                if day.weekday() < 5:  # weekday tape only
+                    frac = 0.45 + 0.15 * math.sin((i + seed) / 9.0)  # short fraction 0.30..0.60
+                    total = 100_000 + (seed % 50) * 1000 + 500 * (i % 20)
+                    rows.append({
+                        "date": day, "ticker": symbol,
+                        "short_volume": int(total * frac), "total_volume": int(total),
+                    })
+                    i += 1
+                day += timedelta(days=1)
+        return pl.DataFrame(
+            rows,
+            schema={"date": pl.Date, "ticker": pl.Utf8,
+                    "short_volume": pl.Int64, "total_volume": pl.Int64},
+        )
+
+
 class FakeBroker(BrokerAdapter):
     """In-memory broker: records orders and tracks net positions."""
 
