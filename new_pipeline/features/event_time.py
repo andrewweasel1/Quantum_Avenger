@@ -17,6 +17,14 @@ survivorship the PIT universe removed.
 ret_since_filing: compounded close-to-close return from the filing date to
 today — the drift-so-far along that clock (PEAD-style state); 0.0 when no
 filing is knowable.
+filing_reaction: the market's return over the ~3 trading days immediately
+after the filing — with no analyst estimates, the market's OWN verdict is
+the earnings-surprise proxy. Exposed only once the window has fully elapsed
+(``days_since_filing >= FILING_REACTION_VISIBLE_DAYS``) so it is strictly
+causal; 0.0 before that / no filing.
+pead_drift: ``ret_since_filing * sign(filing_reaction)`` — post-earnings
+drift IN THE DIRECTION of the initial reaction (the textbook PEAD
+refinement of the already-selected ret_since_filing).
 news_burst_21: today's headline count vs its own trailing 21d distribution
 (z-score; 0.0 in warmup/degenerate windows) — coverage volume, not
 polarity; bursts mark event days the filing calendar cannot see.
@@ -26,12 +34,16 @@ import warnings
 
 import polars as pl
 
-FILING_EVENT_COLS = ["days_since_filing", "ret_since_filing"]
+FILING_EVENT_COLS = ["days_since_filing", "ret_since_filing", "filing_reaction", "pead_drift"]
 NEWS_EVENT_COLS = ["news_burst_21"]
 
 # One saturation constant for "stale filing" and "no filing knowable": past a
 # year the filing clock carries no post-announcement information either way.
 FILING_CLOCK_CAP_DAYS = 365.0
+# Calendar-day lag after which the 3-trading-day filing reaction is fully in the
+# past (a conservative bound covering long weekends/holidays -> no look-ahead).
+FILING_REACTION_VISIBLE_DAYS = 7.0
+_REACTION_TRADING_DAYS = 3
 
 
 def add_filing_event_features(frame: pl.DataFrame) -> pl.DataFrame:
@@ -46,21 +58,36 @@ def add_filing_event_features(frame: pl.DataFrame) -> pl.DataFrame:
         .clip(upper_bound=FILING_CLOCK_CAP_DAYS).alias("days_since_filing"),
         pl.col("returns").fill_null(0.0).log1p().cum_sum().over("ticker").alias("_cumlog"),
     )
+    # cumlog 3 trading rows ahead: at a filing row this is the cumulative return
+    # through the close of the 3rd post-filing day (the reaction window's end).
+    out = out.with_columns(
+        pl.col("_cumlog").shift(-_REACTION_TRADING_DAYS).over("ticker").alias("_cumlog_fwd")
+    )
     anchors = out.select(
         pl.col("ticker"),
         pl.col("date").alias("as_of"),
         pl.col("_cumlog").alias("_cumlog_filing"),
+        pl.col("_cumlog_fwd").alias("_cumlog_reaction"),
     )
     with warnings.catch_warnings():  # both sorted within ticker; polars can't verify with `by`
         warnings.filterwarnings("ignore", message="Sortedness of columns")
         out = out.join_asof(
             anchors, left_on="as_of", right_on="as_of", by="ticker", strategy="backward"
         )
+    reaction = (pl.col("_cumlog_reaction") - pl.col("_cumlog_filing")).exp() - 1.0
+    ret_since = ((pl.col("_cumlog") - pl.col("_cumlog_filing")).exp() - 1.0).fill_null(0.0)
+    # visible only once the whole 3-day window is in the past -> strictly causal.
+    filing_reaction = (
+        pl.when(pl.col("days_since_filing") >= FILING_REACTION_VISIBLE_DAYS)
+        .then(reaction).otherwise(0.0).fill_null(0.0)
+    )
     return out.with_columns(
         pl.col("days_since_filing").fill_null(FILING_CLOCK_CAP_DAYS),
-        ((pl.col("_cumlog") - pl.col("_cumlog_filing")).exp() - 1.0)
-        .fill_null(0.0).alias("ret_since_filing"),
-    ).drop("as_of", "_cumlog", "_cumlog_filing")
+        ret_since.alias("ret_since_filing"),
+        filing_reaction.alias("filing_reaction"),
+    ).with_columns(
+        (pl.col("ret_since_filing") * pl.col("filing_reaction").sign()).alias("pead_drift")
+    ).drop("as_of", "_cumlog", "_cumlog_fwd", "_cumlog_filing", "_cumlog_reaction")
 
 
 def add_news_burst(frame: pl.DataFrame) -> pl.DataFrame:

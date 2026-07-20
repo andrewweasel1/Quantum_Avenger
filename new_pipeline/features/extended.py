@@ -15,6 +15,7 @@ milestone. See ``docs/OFFENSE_ROADMAP.md`` (P1).
 import polars as pl
 
 from new_pipeline.core.exceptions import SchemaValidationError
+from new_pipeline.features.event_drift import EVENT_DRIFT_COLS, add_event_drift_features
 from new_pipeline.features.fracdiff import FRACDIFF_FEATURE_NAMES, add_fracdiff
 from new_pipeline.features.garch import GARCH_FEATURE_NAMES, add_garch
 from new_pipeline.features.microstructure import MICRO_FEATURE_NAMES, add_microstructure
@@ -29,7 +30,8 @@ from new_pipeline.features.signals_v2 import (
 from new_pipeline.features.vol_estimators import VOL_FEATURE_NAMES, add_vol_estimators
 
 SUPPORTED_FAMILIES = (
-    "fracdiff", "vol_estimators", "microstructure", "garch", "overnight", "residual", "flow"
+    "fracdiff", "vol_estimators", "microstructure", "garch", "overnight", "residual", "flow",
+    "event_drift",
 )
 _FAMILY_FEATURE_NAMES = {
     "fracdiff": FRACDIFF_FEATURE_NAMES,
@@ -39,6 +41,7 @@ _FAMILY_FEATURE_NAMES = {
     "overnight": OVERNIGHT_COLS,
     "residual": RESIDUAL_COLS,
     "flow": FLOW_COLS,
+    "event_drift": EVENT_DRIFT_COLS,
 }
 
 
@@ -75,6 +78,8 @@ def add_extended_features(
             group = add_overnight_features(group)
         if "flow" in families:
             group = add_flow_features(group)
+        if "event_drift" in families:
+            group = add_event_drift_features(group)
         groups.append(group)
     out = pl.concat(groups)
     if "residual" in families:  # cross-ticker: needs the market return

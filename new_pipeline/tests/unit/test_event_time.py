@@ -110,15 +110,36 @@ def test_event_feature_names_gates():
             fusion=SimpleNamespace(enabled=fusion),
         )
 
+    filing = ["days_since_filing", "ret_since_filing", "filing_reaction", "pead_drift"]
     assert _event_feature_names(cfg(False, ["book_to_market"], True)) == []
     assert _event_feature_names(cfg(True, ["book_to_market"], True)) == [
-        "days_since_filing", "ret_since_filing", "news_burst_21"
+        *filing, "news_burst_21"
     ]
-    assert _event_feature_names(cfg(True, ["roe"], False)) == [
-        "days_since_filing", "ret_since_filing"
-    ]
+    assert _event_feature_names(cfg(True, ["roe"], False)) == filing
     assert _event_feature_names(cfg(True, [], True)) == ["news_burst_21"]
     assert _event_feature_names(cfg(True, ["mom_12_1"], True)) == ["news_burst_21"]
+
+
+def test_filing_reaction_causal_mask_and_pead_sign():
+    """The 3-day filing reaction must be INVISIBLE until the window has fully
+    elapsed (days_since < 7 -> 0.0), exact once visible, and pead_drift must
+    carry ret_since_filing with the reaction's sign (incl. negative)."""
+    days = _weekdays(60)
+    filing = days[10]
+    rets = [0.0] * 60
+    rets[11], rets[12], rets[13] = -0.05, -0.03, -0.02  # NEGATIVE 3-day reaction
+    rets[20] = 0.04  # later drift day
+    frame = _filing_frame({"A": rets}, {"A": lambda i, d: filing if d >= filing else None})
+    out = add_filing_event_features(frame).sort("date")
+    assert out["filing_reaction"][12] == 0.0  # window still open -> masked
+    expected = (1 - 0.05) * (1 - 0.03) * (1 - 0.02) - 1.0
+    i = 25  # days_since >= 7: visible
+    np.testing.assert_allclose(out["filing_reaction"][i], expected, rtol=1e-12)
+    # pead = ret_since * sign(reaction) -> NEGATIVE reaction flips the drift sign
+    np.testing.assert_allclose(
+        out["pead_drift"][i], -out["ret_since_filing"][i], rtol=1e-12
+    )
+    assert out["filing_reaction"][5] == 0.0 and out["pead_drift"][5] == 0.0  # pre-filing
 
 
 def test_attach_fundamentals_keep_as_of_flag():
