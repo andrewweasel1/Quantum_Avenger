@@ -82,7 +82,9 @@ def merge_vault(by_date_dir: Path, out_path: Path) -> int:
 
 def main() -> None:  # pragma: no cover - egress orchestration around tested helpers
     parser = argparse.ArgumentParser(description="Resumable FINRA short-volume vault ingest")
-    parser.add_argument("--universe", required=True)
+    parser.add_argument("--universe", default="",
+                        help="universe CSV to filter symbols; EMPTY = census mode "
+                             "(keep every traded symbol — survivorship-free enumeration)")
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--vault-dir", default="new_pipeline/data/short_volume")
@@ -90,7 +92,9 @@ def main() -> None:  # pragma: no cover - egress orchestration around tested hel
     parser.add_argument("--sleep", type=float, default=0.1)
     args = parser.parse_args()
 
-    universe = set(StaticUniverseProvider(Path(args.universe)).sectors())
+    universe = (
+        set(StaticUniverseProvider(Path(args.universe)).sectors()) if args.universe else None
+    )  # None -> parse_daily_file keeps every symbol (census mode)
     start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
     vault = Path(args.vault_dir)
     by_date = vault / "by_date"
