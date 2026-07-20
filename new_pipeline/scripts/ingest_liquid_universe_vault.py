@@ -97,7 +97,11 @@ def _get_json(url: str, retries: int = 5):  # pragma: no cover - egress
 
 
 def fetch_chunk_bars(symbols, start, end, sleep) -> list[dict]:  # pragma: no cover - egress
-    """All daily bars for one symbol chunk (paginated multi-symbol request)."""
+    """All daily bars for one symbol chunk (paginated multi-symbol request).
+
+    A 400 (one unknown/mal-formed symbol poisons the whole multi-symbol
+    request) bisects the batch recursively, so bad census symbols cost their
+    own sub-request instead of the run."""
     rows, token = [], None
     base = (
         f"{BARS_URL}?symbols={','.join(urllib.parse.quote(s) for s in symbols)}"
@@ -106,7 +110,16 @@ def fetch_chunk_bars(symbols, start, end, sleep) -> list[dict]:  # pragma: no co
     )
     while True:
         url = base + (f"&page_token={token}" if token else "")
-        payload = _get_json(url)
+        try:
+            payload = _get_json(url)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 400 and len(symbols) > 1:
+                mid = len(symbols) // 2
+                return (fetch_chunk_bars(symbols[:mid], start, end, sleep)
+                        + fetch_chunk_bars(symbols[mid:], start, end, sleep))
+            if exc.code == 400:
+                return rows  # single bad symbol: skip it
+            raise
         if payload is None:
             break
         for symbol, bars in (payload.get("bars") or {}).items():
