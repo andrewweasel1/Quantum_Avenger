@@ -92,6 +92,8 @@ def fetch_chunk(symbols, start, end, sleep) -> list[dict]:  # pragma: no cover -
 
 
 def main() -> None:  # pragma: no cover - egress orchestration around tested helpers
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     import polars as pl
 
     parser = argparse.ArgumentParser(description="SIP 30-min bar vault for the PIT universe")
@@ -101,6 +103,8 @@ def main() -> None:  # pragma: no cover - egress orchestration around tested hel
     parser.add_argument("--vault-dir", default="data/intraday_vault")
     parser.add_argument("--chunk-size", type=int, default=25)
     parser.add_argument("--sleep", type=float, default=0.35)
+    # 3 concurrent chunk workers ~= 90-100 req/min, well under Alpaca's 200/min.
+    parser.add_argument("--workers", type=int, default=3)
     args = parser.parse_args()
 
     vault = Path(args.vault_dir)
@@ -110,23 +114,27 @@ def main() -> None:  # pragma: no cover - egress orchestration around tested hel
     print(f"universe: {len(symbols)} symbols", flush=True)
 
     batches = chunk(symbols, args.chunk_size)
-    tally = {"fetched": 0, "cached": 0, "rows": 0}
-    for index, batch in enumerate(batches):
-        out = chunks_dir / f"{index:05d}.parquet"
-        if out.exists():
-            tally["cached"] += 1
-            continue
+    todo = [(i, b) for i, b in enumerate(batches)
+            if not (chunks_dir / f"{i:05d}.parquet").exists()]
+    print(f"chunks: {len(batches)} total, {len(batches) - len(todo)} cached, "
+          f"{len(todo)} to fetch", flush=True)
+
+    schema = {"ticker": pl.Utf8, "ts": pl.Utf8, "open": pl.Float64, "high": pl.Float64,
+              "low": pl.Float64, "close": pl.Float64, "volume": pl.Float64}
+
+    def work(item):
+        index, batch = item
         rows = fetch_chunk(batch, args.start, args.end, args.sleep)
-        pl.DataFrame(
-            rows,
-            schema={"ticker": pl.Utf8, "ts": pl.Utf8, "open": pl.Float64,
-                    "high": pl.Float64, "low": pl.Float64, "close": pl.Float64,
-                    "volume": pl.Float64},
-        ).write_parquet(out)
-        tally["fetched"] += 1
-        tally["rows"] += len(rows)
-        print(f"[{index + 1}/{len(batches)}] {tally}", flush=True)
-        time.sleep(args.sleep)
+        pl.DataFrame(rows, schema=schema).write_parquet(chunks_dir / f"{index:05d}.parquet")
+        return index, len(rows)
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = [pool.submit(work, item) for item in todo]
+        for future in as_completed(futures):
+            index, n_rows = future.result()
+            done += 1
+            print(f"[chunk {index:05d} done, {n_rows:,} rows] {done}/{len(todo)}", flush=True)
 
     merged = pl.concat([pl.read_parquet(p) for p in sorted(chunks_dir.glob("*.parquet"))])
     merged = merged.with_columns(
