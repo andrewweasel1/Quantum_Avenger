@@ -162,12 +162,22 @@ def main() -> None:  # pragma: no cover - I/O orchestration around tested helper
     parser.add_argument("--out", default="new_pipeline/data/universe/liquid1500_pit.csv")
     parser.add_argument("--top-n", type=int, default=1500)
     parser.add_argument("--min-price", type=float, default=5.0)
+    parser.add_argument("--exclusions",
+                        default="new_pipeline/data/universe/liquid_exclusions.csv",
+                        help="CSV of ticker,reason to drop BEFORE ranking (ETFs/"
+                             "funds the nameless census cannot filter; class-share "
+                             "duplicates). Empty string = no exclusions.")
     args = parser.parse_args()
 
     bars = pl.read_parquet(args.bars)
     census = pl.read_csv(args.census, schema_overrides={"short_volume": pl.Int64,
                                                         "total_volume": pl.Int64})
     census = census.with_columns(pl.col("date").str.to_date()).select("ticker", "date")
+    if args.exclusions and Path(args.exclusions).exists():
+        excluded = {r["ticker"] for r in csv.DictReader(open(args.exclusions))}
+        bars = bars.filter(~pl.col("ticker").is_in(list(excluded)))
+        census = census.filter(~pl.col("ticker").is_in(list(excluded)))
+        print(f"excluded {len(excluded)} tickers (ETFs/funds/dup classes) pre-ranking")
     members = monthly_membership(bars, census, top_n=args.top_n, min_price=args.min_price)
     intervals = apply_gap_guard(membership_intervals(members), bars)
 
