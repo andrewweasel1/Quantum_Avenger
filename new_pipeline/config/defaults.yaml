@@ -177,7 +177,10 @@ evaluation:
   gauntlet_block_size: 10
   alpha_eval_enabled: true
   alpha_eval_min_names: 5
-  reality_check_enabled: false
+  # White's Reality Check runs as OBSERVABILITY (p-value recorded on every
+  # champion row); the gate flag below stays off — DSR/N_eff already covers
+  # data-snooping at our trial counts, but the p-value is free evidence.
+  reality_check_enabled: true
   reality_check_bootstrap: 500
   reality_check_block: 10
   reality_check_gate_enabled: false
@@ -209,6 +212,10 @@ long_short:
   rebalance_band: 0.0
   vol_target_annual: 0.0
   vol_lookback_days: 20
+  # Floor the sleeve's evaluation window (ISO date) so the book under test is
+  # the strategy the universe defines (Liquid-1500 census floor: 2018-09-01).
+  # null = full window.
+  eval_start: null
   regime_gate_enabled: false
   regime_experts_enabled: false
   regime_exposures: [1.0, 1.0, 0.0]

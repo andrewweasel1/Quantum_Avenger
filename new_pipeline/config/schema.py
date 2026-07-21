@@ -214,6 +214,13 @@ class LongShortConfig(BaseModel):
     # min(1, target / trailing annualized vol of the UNIT book). 0 = off.
     vol_target_annual: float = 0.0
     vol_lookback_days: int = 20
+    # Evaluation-window floor (ISO date). The book only trades dates >=
+    # eval_start so the series under test IS the strategy the universe fixture
+    # defines — e.g. the Liquid-1500 census floor 2018-09-01; earlier dates
+    # evaluate its narrower pre-census ancestor instead (audited on run
+    # 083aa78a529f: ancestor SR -0.165 over 420d vs 0.981 census-era).
+    # None = full window.
+    eval_start: str | None = None
     # Regime-conditional options (independently flaggable; share one causal
     # expanding-percentile market-vol state decoder, 0 = calmest state):
     # gate scales exposure per state; experts pick the best-in-state combo.

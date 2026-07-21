@@ -28,6 +28,7 @@ import itertools
 import json
 import logging
 from dataclasses import dataclass
+from datetime import date as dt_date
 from pathlib import Path
 
 import numpy as np
@@ -276,6 +277,25 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         return None
     n_combos, phi = layout
     universe = pl.concat(panels)
+    eval_start = getattr(ls, "eval_start", None)
+    if eval_start:
+        # The book only trades dates where the universe fixture defines the
+        # strategy (Liquid-1500 census floor): earlier panel dates belong to
+        # the narrower pre-census ancestor and would dilute/distort every gate
+        # statistic downstream. The causal regime decoder below still sees the
+        # full panel history — more warmup for its expanding percentiles.
+        floor = dt_date.fromisoformat(str(eval_start))
+        pre_rows = universe.height
+        universe = universe.filter(pl.col("date") >= floor)
+        _logger.info(
+            "long-short: eval window floored at %s (%d of %d panel rows kept)",
+            floor, universe.height, pre_rows,
+        )
+        if universe.is_empty():
+            _logger.warning(
+                "long-short: eval_start %s empties the panel; sleeve skipped", floor
+            )
+            return None
 
     rebalance_days = getattr(ls, "rebalance_days", 1)
     smoothing = getattr(ls, "score_smoothing_days", 1)
@@ -389,6 +409,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         "synthetic_margin": margin,
         "null_sharpes": null_sharpes,
         "n_days": int(champion.net.size),
+        "eval_start": str(eval_start) if eval_start else None,
         "sectors": sorted(results),
     }
     candidate_path = output / f"{_SLUG}_candidate.json"

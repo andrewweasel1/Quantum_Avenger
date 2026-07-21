@@ -178,6 +178,20 @@ def build_training_frame(
         # labels keep their full-history warmup above, but cross-sectional
         # ranks/z-scores must only ever see actual index members per date.
         joined = apply_membership_mask(joined, membership)
+    # Exogenous market basis for the regime gate, pinned at the RAW layer:
+    # equal-weight mean next_ret over PIT-ACTIVE names, recorded as a per-date
+    # constant so every consumer (gate, diagnostics, offline forensics) reads
+    # ONE canonical definition that survives any downstream row filtering.
+    # The HMM partition is knife-edge-sensitive to basis composition (audit on
+    # run 083aa78a529f: two defensible constructions moved the calm state from
+    # 933 to 251 days), so the definition must be single and explicit.
+    # Realization data like next_ret — never a feature.
+    market = (
+        joined.drop_nulls(["next_ret"])
+        .group_by("date")
+        .agg(pl.col("next_ret").mean().alias("market_next_ret"))
+    )
+    joined = joined.join(market, on="date", how="left")
     if cfg.features.factor_set:
         if fundamentals_source is not None and any(
             factor in FUNDAMENTAL_FACTORS for factor in cfg.features.factor_set
@@ -594,8 +608,19 @@ def _write_alpha_eval(frame: pl.DataFrame, feature_cols, cfg, output_dir) -> dic
 def _market_return_by_date(frame: pl.DataFrame) -> dict:
     """{date: equal-weight mean next_ret} — the EXOGENOUS regime-decode basis.
 
+    Prefers the ``market_next_ret`` column pinned by ``build_training_frame``
+    at the raw PIT layer (per-date constant, immune to downstream row drops);
+    falls back to the mean over the frame's surviving rows for legacy frames.
     ``next_ret`` shares the champion series' timing convention (decision at t,
     realized t -> t+1), so market state and book return describe the same day."""
+    if "market_next_ret" in frame.columns:
+        daily = (
+            frame.select("date", "market_next_ret").drop_nulls()
+            .unique(subset=["date"]).sort("date")
+        )
+        return dict(
+            zip(daily["date"].to_list(), daily["market_next_ret"].to_list(), strict=True)
+        )
     if "next_ret" not in frame.columns:
         return {}
     daily = (
@@ -621,6 +646,7 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
         paths = _load_champion_paths(result["candidate_path"])
         dates = _load_sample_dates(result["candidate_path"])
         market_returns = None
+        days = None
         if dates is not None and len(dates) == pooled_matrix.shape[0]:
             # Calendar-time axis: every gate statistic below runs on equal-weight
             # per-date returns (one shared collapse keeps trial columns aligned),
@@ -697,8 +723,13 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
                 champion_returns, trials, eval_matrix, cfg, market_returns=market_returns
             )
         if cfg.evaluation.regime_breakdown_enabled and verdict is not None:
+            causal = (
+                _causal_breakdown(champion_returns, days, market_by_date)
+                if (market_by_date and days is not None)
+                else None
+            )
             decision = replace(
-                decision, regime_breakdown=_regime_breakdown(verdict, cfg)
+                decision, regime_breakdown=_regime_breakdown(verdict, cfg, causal=causal)
             )
         if cfg.evaluation.regime_gate_enabled and decision.promoted:
             if not verdict.promoted:
@@ -803,11 +834,37 @@ def _deflated_sharpe(champion_returns, trials, returns_matrix, cfg) -> float:
     return compute_deflated_sharpe_ratio(champion_returns, trials_pp)
 
 
-def _regime_breakdown(verdict, cfg) -> dict:
+def _causal_breakdown(champion_returns, days, market_by_date) -> dict:
+    """Leak-free cross-check of the HMM verdict: the champion's per-state
+    economics under the causal expanding-percentile vol decoder (deterministic,
+    no fit, no look-ahead). Pure observability — the HMM stays the judge; when
+    both decoders agree on WHERE the book is weak, the finding is
+    methodology-robust (the audit's calm-state result was exactly this)."""
+    from new_pipeline.tournament.regime_state import causal_states_from_series
+
+    all_days = sorted(market_by_date)
+    states = causal_states_from_series(
+        all_days, [market_by_date[d] for d in all_days]
+    )
+    seq = np.array([states.get(d, 0) for d in days])
+    returns = np.asarray(champion_returns, dtype=np.float64)
+    out = {}
+    for state in sorted(set(seq.tolist())):
+        seg = returns[seq == state]
+        out[int(state)] = {
+            "sr_annual": round(float(sharpe_ratio(seg)), 3) if seg.size > 1 else None,
+            "n_days": int(seg.size),
+            "share": round(float(seg.size / max(len(days), 1)), 3),
+        }
+    return out
+
+
+def _regime_breakdown(verdict, cfg, causal=None) -> dict:
     """What the per-regime gate saw: per-state DSR/Sharpe/day-count (pass/fail
     against the bar the gate ACTUALLY applied — T**K under the family-wise
     calibration), thin states skipped, and each state's share of days - so a
-    rejection names WHICH regime killed the model."""
+    rejection names WHICH regime killed the model. ``causal`` (optional) is the
+    :func:`_causal_breakdown` cross-check, recorded alongside."""
     threshold = (
         verdict.effective_threshold
         if verdict.effective_threshold is not None
@@ -839,6 +896,7 @@ def _regime_breakdown(verdict, cfg) -> dict:
         },
         "skipped_thin": [int(s) for s in verdict.skipped_regimes],
         "threshold": round(float(threshold), 6),
+        **({"causal_states": causal} if causal is not None else {}),
     }
 
 

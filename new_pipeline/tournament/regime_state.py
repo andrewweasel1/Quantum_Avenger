@@ -18,9 +18,22 @@ def causal_market_regimes(panel: pl.DataFrame, vol_lookback: int = 20,
         panel.drop_nulls(["next_ret"]).group_by("date")
         .agg(pl.col("next_ret").mean().alias("mkt")).sort("date")
     )
-    vol = daily["mkt"].shift(1).rolling_std(window_size=vol_lookback).to_numpy()
+    return causal_states_from_series(
+        daily["date"].to_list(), daily["mkt"], vol_lookback, n_states
+    )
+
+
+def causal_states_from_series(days: list, market_returns, vol_lookback: int = 20,
+                              n_states: int = 3) -> dict:
+    """{date: state} from an already-daily market return series (same decoder;
+    seam for callers that hold the equal-weight series rather than the panel,
+    e.g. the registry's causal cross-check of the HMM regime verdict)."""
+    vol = (
+        pl.Series(market_returns).shift(1).rolling_std(window_size=vol_lookback)
+        .to_numpy()
+    )
     states, history = {}, []
-    for day, v in zip(daily["date"].to_list(), vol, strict=True):
+    for day, v in zip(days, vol, strict=True):
         if v is None or np.isnan(v) or len(history) < vol_lookback:
             states[day] = 0
         else:

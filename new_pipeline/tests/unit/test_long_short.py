@@ -247,3 +247,49 @@ def test_vol_target_off_is_bit_stable():
                               vol_target_annual=0.0, vol_lookback=20)
     np.testing.assert_array_equal(a.net, b.net)
     np.testing.assert_array_equal(a.turnover, b.turnover)
+
+
+def test_eval_start_floors_the_book_window(tmp_path):
+    """With ``eval_start`` set, the sleeve trades ONLY dates >= the floor (the
+    strategy the universe fixture defines); every artifact/diagnostic follows.
+    Default None keeps the full window bit-identical."""
+    from types import SimpleNamespace
+
+    from new_pipeline.tournament.long_short import run_universe_long_short
+
+    rng = np.random.default_rng(0)
+    days = [date(2018, 8, 27), date(2018, 8, 28), date(2018, 8, 29),
+            date(2018, 9, 3), date(2018, 9, 4), date(2018, 9, 5)]
+    tickers = [f"T{i}" for i in range(6)]
+    rows = []
+    for d in days:
+        for t in tickers:
+            rows.append({
+                "date": d, "ticker": t, "next_ret": float(rng.normal(0, 0.01)),
+                "proba_c0_p0": float(rng.uniform()), "proba_c0_p1": float(rng.uniform()),
+            })
+    pl.DataFrame(rows).write_parquet(tmp_path / "tech_oos_proba.parquet")
+    (tmp_path / "tech_candidate.json").write_text("{}")
+    results = {"Tech": {"candidate_path": str(tmp_path / "tech_candidate.json")}}
+
+    def cfg(eval_start):
+        return SimpleNamespace(long_short=SimpleNamespace(
+            enabled=True, quantile=0.34, cost_bps=0.0, min_names_per_day=4,
+            sector_neutral=False, null_iterations=2, null_quantile=0.95,
+            rebalance_days=1, score_smoothing_days=1, vol_target_annual=0.0,
+            vol_lookback_days=20, rebalance_band=0.0, regime_gate_enabled=False,
+            regime_experts_enabled=False, eval_start=eval_start,
+        ))
+
+    out_full = tmp_path / "full"
+    out_floor = tmp_path / "floored"
+    out_full.mkdir(), out_floor.mkdir()
+    full = run_universe_long_short(results, out_full, cfg(None))
+    floored = run_universe_long_short(results, out_floor, cfg("2018-09-01"))
+    full_dates = pl.read_parquet(out_full / "universe_long_short_sample_dates.parquet")["date"]
+    floor_dates = pl.read_parquet(out_floor / "universe_long_short_sample_dates.parquet")["date"]
+    assert full["diagnostics"]["n_days"] == 6 and full_dates.min() == days[0]
+    assert floored["diagnostics"]["n_days"] == 3
+    assert floor_dates.min() == date(2018, 9, 3)
+    assert floored["diagnostics"]["eval_start"] == "2018-09-01"
+    assert full["diagnostics"]["eval_start"] is None
