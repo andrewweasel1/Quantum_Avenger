@@ -204,15 +204,15 @@ class LongShortConfig(BaseModel):
     # +1.54 gross Sharpe). Re-rank every N trading days, holding in between
     # (forced exits still charged), and/or smooth scores with a trailing
     # per-ticker mean before ranking. 1/1 = the original daily book.
-    rebalance_days: int = 1
-    score_smoothing_days: int = 1
+    rebalance_days: int = 5
+    score_smoothing_days: int = 5
     # No-trade band: hold a name until its rank leaves the widened exit band
     # (top/bottom quantile*(1+band)); new names enter only from the tight core.
     # Cuts turnover without the gross decay of a slower cadence. 0 = off.
-    rebalance_band: float = 0.0
+    rebalance_band: float = 0.5
     # Vol-targeted de-risking (never levers up): scale rebalance weights by
     # min(1, target / trailing annualized vol of the UNIT book). 0 = off.
-    vol_target_annual: float = 0.0
+    vol_target_annual: float = 0.05
     vol_lookback_days: int = 20
     # Evaluation-window floor (ISO date). The book only trades dates >=
     # eval_start so the series under test IS the strategy the universe fixture
@@ -220,7 +220,7 @@ class LongShortConfig(BaseModel):
     # evaluate its narrower pre-census ancestor instead (audited on run
     # 083aa78a529f: ancestor SR -0.165 over 420d vs 0.981 census-era).
     # None = full window.
-    eval_start: str | None = None
+    eval_start: str | None = "2018-09-01"
     # Structure-variant trial expansion (audit follow-up: the single-name
     # short leg runs SR -1.20 in the causal calm state, the long leg +1.53).
     # Each grid combo is built under FOUR constructions — baseline L/S,
@@ -231,7 +231,7 @@ class LongShortConfig(BaseModel):
     structure_variants: bool = False
     # Stock-loan fee (bps/yr) accrued daily on actual single-name short
     # exposure — the audit's unmodeled-cost item. 0 keeps legacy books exact.
-    short_borrow_bps: float = 0.0
+    short_borrow_bps: float = 50.0
     # Cost (bps) per unit |change in index-hedge notional| in hedged variants.
     hedge_cost_bps: float = 2.0
     # Calm-state COST policy factorial (audit Q1: turnover is state-invariant
@@ -239,7 +239,7 @@ class LongShortConfig(BaseModel):
     # >100% of calm-state gross). Builds each grid combo as control +
     # calm-band-only + calm-cadence-only + both, in ONE returns matrix so DSR
     # deflation prices the selection. States: leak-free causal vol decoder.
-    calm_cost_variants: bool = False
+    calm_cost_variants: bool = True
     # Exit-band width used ONLY in causal calm states (baseline band stays
     # rebalance_band elsewhere): k_exit = n*quantile*(1 + calm_rebalance_band).
     calm_rebalance_band: float = 1.5

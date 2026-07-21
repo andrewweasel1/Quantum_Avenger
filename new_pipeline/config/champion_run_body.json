@@ -1,0 +1,25 @@
+{
+ "params": {"start": "2016-01-01", "end": "2025-12-31", "max_symbols": null},
+ "overrides": {
+  "system": {"run_mode": "paper"},
+  "data": {"universe_path": "new_pipeline/data/universe/liquid1500_pit.csv"},
+  "alpaca": {"data_feed": "sip"},
+  "fusion": {"enabled": true, "sentiment_backend": "vader", "markov_features": false},
+  "news": {"providers": ["vault"], "vault_dir": "SET_ME/news_vault_full"},
+  "fundamentals": {"fixture_path": "new_pipeline/data/fundamentals/liquid_snapshots.csv"},
+  "features": {
+   "label_horizon": 21,
+   "factor_set": ["mom_12_1", "reversal_21", "low_vol", "seasonality", "book_to_market", "earnings_yield", "roe"],
+   "extended_features": ["fracdiff", "vol_estimators", "microstructure", "garch", "overnight", "residual", "flow"],
+   "event_features": true
+  },
+  "long_short": {
+   "enabled": true, "rebalance_days": 5, "score_smoothing_days": 5,
+   "vol_target_annual": 0.05, "vol_lookback_days": 20, "rebalance_band": 0.5,
+   "eval_start": "2018-09-01", "structure_variants": false,
+   "calm_cost_variants": true, "short_borrow_bps": 50.0, "causal_window_days": 252
+  },
+  "execution": {"backtest_slippage_enabled": true}
+ },
+ "seed": 0
+}

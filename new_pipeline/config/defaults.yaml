@@ -205,28 +205,31 @@ long_short:
   cost_bps: 10.0
   min_names_per_day: 20
   sector_neutral: true
-  rebalance_days: 1
-  score_smoothing_days: 1
+  # ---- Champion spec (run 36a3e7abc9cb, frozen 2026-07-21): the settings
+  # below are the promoted-candidate book construction; the full official-run
+  # body (universe, feeds, features, seed) is config/champion_run_body.json.
+  rebalance_days: 5
+  score_smoothing_days: 5
   # No-trade band (rank hysteresis): hold until rank leaves quantile*(1+band),
   # enter from the tight core. Cuts turnover without gross decay. 0 = off.
-  rebalance_band: 0.0
-  vol_target_annual: 0.0
+  rebalance_band: 0.5
+  vol_target_annual: 0.05
   vol_lookback_days: 20
   # Floor the sleeve's evaluation window (ISO date) so the book under test is
   # the strategy the universe defines (Liquid-1500 census floor: 2018-09-01).
   # null = full window.
-  eval_start: null
+  eval_start: "2018-09-01"
   # Structure variants: build every grid combo under 4 book constructions
   # (baseline L/S, calm-state short-gated L/S, hedged long-only, + dispersion
   # sizing) in ONE returns matrix — DSR deflation prices the selection.
   structure_variants: false
   # Stock-loan fee bps/yr on actual single-name short exposure (0 = legacy).
-  short_borrow_bps: 0.0
+  short_borrow_bps: 50.0
   # Cost bps per unit |change in index-hedge notional| for hedged variants.
   hedge_cost_bps: 2.0
   # Calm-state cost-policy factorial: control + calm-band + calm-cadence +
   # both, judged in one deflated returns matrix (causal vol states, 0=calm).
-  calm_cost_variants: false
+  calm_cost_variants: true
   calm_rebalance_band: 1.5
   calm_rebalance_days: 10
   # Causal vol-decoder percentile window (trading days; 0 = legacy expanding).
