@@ -395,3 +395,98 @@ def test_structure_variants_expand_the_trial_matrix(tmp_path):
     assert diag["short_borrow_bps"] == 50.0
     paths = pl.read_parquet(tmp_path / "universe_long_short_paths.parquet")
     assert paths.width == 2  # phi
+
+
+def test_calm_cost_policy_only_fires_in_calm_states():
+    """No-calm-dates map == bit-identical legacy book; calm-day cadence skip
+    holds the book (zero rebalance turnover) while forced exits still charge."""
+    rows = []
+    d0 = date(2021, 1, 4)
+    days = [date.fromordinal(d0.toordinal() + i) for i in range(12)]
+    rng = np.random.default_rng(2)
+    for d in days:
+        for j, t in enumerate("ABCDEFGH"):
+            # tightly spaced scores + noise -> ranks genuinely churn each day
+            rows.append([d, t, "Tech", 1.0 - 0.1 * j + float(rng.normal(0, 0.5)), 0.01])
+    panel = _panel(rows)
+    base = build_long_short_book(panel, 0.25, 10.0, 8, rebalance_days=2)
+    never_calm = build_long_short_book(
+        panel, 0.25, 10.0, 8, rebalance_days=2,
+        calm_states={d: False for d in days},
+        calm_rebalance_band=2.0, calm_rebalance_days=6,
+    )
+    np.testing.assert_array_equal(base.net, never_calm.net)  # policy inert
+    assert base.turnover[2:].sum() > 0.0  # churn actually happens post-inception
+    always_calm = build_long_short_book(
+        panel, 0.25, 10.0, 8, rebalance_days=2,
+        calm_states={d: True for d in days}, calm_rebalance_days=6,
+    )
+    # scheduled re-ranks at t=2,4 (and 8,10) are skipped inside each 6-day
+    # window after a rebalance -> strictly less total turnover
+    assert always_calm.turnover.sum() < base.turnover.sum()
+    assert always_calm.turnover[2] == 0.0 and always_calm.turnover[4] == 0.0
+    assert always_calm.turnover[6] > 0.0  # spacing elapsed -> re-rank happens
+
+
+def test_calm_band_widens_exit_band_only_when_calm():
+    """A name drifting to a rank inside the wide calm band is HELD on calm
+    rebalances but rotated out under the baseline band."""
+    d0 = date(2021, 1, 4)
+    days = [date.fromordinal(d0.toordinal() + i) for i in range(2)]
+    tick = [("A", 8.0), ("B", 7.0), ("C", 6.0), ("D", 5.0),
+            ("E", 4.0), ("F", 3.0), ("G", 2.0), ("H", 1.0)]
+    rows = [[days[0], t, "Tech", s, 0.0] for t, s in tick]
+    # day 2: A (held long) drifts to rank 3 of 8 — outside the tight exit band
+    # (k_exit=3 keeps ranks 0-2) but inside the wide calm band; H symmetric.
+    day2 = [("B", 8.0), ("C", 7.0), ("D", 6.0), ("A", 5.0),
+            ("H", 4.0), ("E", 3.0), ("F", 2.0), ("G", 1.0)]
+    rows += [[days[1], t, "Tech", s, 0.0] for t, s in day2]
+    panel = _panel(rows)
+    tight = build_long_short_book(panel, 0.25, 0.0, 8, rebalance_days=1,
+                                  rebalance_band=0.5)
+    calm_wide = build_long_short_book(panel, 0.25, 0.0, 8, rebalance_days=1,
+                                      rebalance_band=0.5,
+                                      calm_states={d: True for d in days},
+                                      calm_rebalance_band=3.0)
+    assert calm_wide.turnover[1] < tight.turnover[1]  # A/H held, not rotated
+
+
+def test_calm_cost_variants_expand_the_trial_matrix(tmp_path):
+    from types import SimpleNamespace
+
+    from new_pipeline.tournament.long_short import run_universe_long_short
+
+    rng = np.random.default_rng(4)
+    d0 = date(2021, 1, 4)
+    days = [date.fromordinal(d0.toordinal() + i) for i in range(90)]
+    rows = []
+    for d in days:
+        for t in [f"T{i}" for i in range(8)]:
+            rows.append({
+                "date": d, "ticker": t, "next_ret": float(rng.normal(0, 0.01)),
+                "proba_c0_p0": float(rng.uniform()), "proba_c0_p1": float(rng.uniform()),
+            })
+    pl.DataFrame(rows).write_parquet(tmp_path / "tech_oos_proba.parquet")
+    (tmp_path / "tech_candidate.json").write_text("{}")
+    cfg = SimpleNamespace(long_short=SimpleNamespace(
+        enabled=True, quantile=0.25, cost_bps=5.0, min_names_per_day=6,
+        sector_neutral=False, null_iterations=2, null_quantile=0.95,
+        rebalance_days=5, score_smoothing_days=1, vol_target_annual=0.0,
+        vol_lookback_days=20, rebalance_band=0.5, regime_gate_enabled=False,
+        regime_experts_enabled=False, eval_start=None, structure_variants=False,
+        calm_cost_variants=True, calm_rebalance_band=1.5, calm_rebalance_days=10,
+        short_borrow_bps=50.0, hedge_cost_bps=2.0,
+    ))
+    entry = run_universe_long_short(
+        {"Tech": {"candidate_path": str(tmp_path / "tech_candidate.json")}}, tmp_path, cfg
+    )
+    assert set(entry["diagnostics"]["structure_trials"]) == {
+        "ls|combo0", "ls_calmband|combo0", "ls_calmslow|combo0", "ls_calmboth|combo0"
+    }
+    assert entry["diagnostics"]["construction"] in (
+        "ls", "ls_calmband", "ls_calmslow", "ls_calmboth"
+    )
+    assert entry["best_params"]["construction"] == entry["diagnostics"]["construction"]
+    assert entry["diagnostics"]["calm_rebalance_days"] == 10
+    matrix = pl.read_parquet(tmp_path / "universe_long_short_returns_matrix.parquet")
+    assert matrix.width == 4

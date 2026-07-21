@@ -234,6 +234,18 @@ class LongShortConfig(BaseModel):
     short_borrow_bps: float = 0.0
     # Cost (bps) per unit |change in index-hedge notional| in hedged variants.
     hedge_cost_bps: float = 2.0
+    # Calm-state COST policy factorial (audit Q1: turnover is state-invariant
+    # while calm-state gross sits at the cost line, so the flat cost consumes
+    # >100% of calm-state gross). Builds each grid combo as control +
+    # calm-band-only + calm-cadence-only + both, in ONE returns matrix so DSR
+    # deflation prices the selection. States: leak-free causal vol decoder.
+    calm_cost_variants: bool = False
+    # Exit-band width used ONLY in causal calm states (baseline band stays
+    # rebalance_band elsewhere): k_exit = n*quantile*(1 + calm_rebalance_band).
+    calm_rebalance_band: float = 1.5
+    # Minimum days between re-ranks while calm (rounds up to the
+    # rebalance_days grid; forced exits still charged on skipped days).
+    calm_rebalance_days: int = 10
     # Regime-conditional options (independently flaggable; share one causal
     # expanding-percentile market-vol state decoder, 0 = calmest state):
     # gate scales exposure per state; experts pick the best-in-state combo.

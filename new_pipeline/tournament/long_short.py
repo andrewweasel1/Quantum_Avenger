@@ -118,6 +118,9 @@ def build_long_short_book(
     regime_scalars: dict | None = None,
     rebalance_band: float = 0.0,
     short_borrow_bps: float = 0.0,
+    calm_states: dict | None = None,
+    calm_rebalance_band: float | None = None,
+    calm_rebalance_days: int | None = None,
 ) -> LongShortBook:
     """Dollar-neutral rank book from a (date, ticker, sector, score, next_ret)
     panel, re-ranked every ``rebalance_days`` trading days.
@@ -136,16 +139,28 @@ def build_long_short_book(
     is the CAUSAL annualized std of the UNIT-gross book's last ``vol_lookback``
     returns (strictly prior days; the estimator never sees its own scaling).
     Returns in hostile regimes shrink toward zero instead of staying
-    large-and-wrong — the standard cure for regime-concentrated risk."""
+    large-and-wrong — the standard cure for regime-concentrated risk.
+
+    Calm-state cost policy (the audit's Q1 finding: turnover is state-invariant
+    while calm-state gross sits AT the cost line, so the flat cost consumes
+    >100% of calm-state gross): on dates where ``calm_states`` is truthy —
+    the leak-free causal vol decoder's calmest state — the exit band widens to
+    ``calm_rebalance_band`` and/or a scheduled re-rank is SKIPPED until
+    ``calm_rebalance_days`` days have passed since the last one (spacing
+    rounds up to the ``rebalance_days`` grid; forced exits are still charged
+    on skipped days). All three params ``None`` -> bit-identical legacy book."""
     clean = panel.drop_nulls(["score", "next_ret"]).sort(["date", "ticker"])
     if sector_neutral and "sector" in clean.columns:
         clean = sector_neutral_scores(clean)
+    calm = calm_states or {}
     dates, gross, turnover, leg_sizes, exposures = [], [], [], [], []
     short_expos: list[float] = []
     held: dict[str, float] = {}
     unit_held: dict[str, float] = {}  # unscaled shadow book: the vol estimator
     unit_grosses: list[float] = []
+    last_rebalance: int | None = None
     for index, day in enumerate(clean.partition_by("date", maintain_order=True)):
+        day_date = day["date"][0]
         tickers = day["ticker"].to_list()
         rets = dict(zip(tickers, day["next_ret"].to_list(), strict=True))
         day_turnover = 0.0
@@ -154,17 +169,30 @@ def build_long_short_book(
             day_turnover += 0.5 * abs(held.pop(name))
         for name in [t for t in unit_held if t not in rets]:
             unit_held.pop(name)
-        if index % rebalance_days == 0:
+        is_calm = bool(calm.get(day_date, False))
+        skip_rebalance = (
+            calm_rebalance_days is not None
+            and is_calm
+            and last_rebalance is not None
+            and (index - last_rebalance) < calm_rebalance_days
+        )
+        if index % rebalance_days == 0 and not skip_rebalance:
+            last_rebalance = index
             n = day.height
             base: dict[str, float] = {}
             if n >= min_names:
                 ranked = day.sort("score", descending=True)["ticker"].to_list()
                 k = max(1, int(n * quantile))
-                if rebalance_band > 0.0:
+                effective_band = (
+                    calm_rebalance_band
+                    if (is_calm and calm_rebalance_band is not None)
+                    else rebalance_band
+                )
+                if effective_band > 0.0:
                     # Hysteresis: hold a name until its rank leaves the widened
                     # exit band; a new name enters only from the tight core. Cuts
                     # turnover (cost) without the gross decay of a slower cadence.
-                    k_exit = max(k, int(n * quantile * (1.0 + rebalance_band)))
+                    k_exit = max(k, int(n * quantile * (1.0 + effective_band)))
                     rank = {t: i for i, t in enumerate(ranked)}
                     longs = _band_leg([t for t, w in held.items() if w > 0.0],
                                       ranked, rank, k, k_exit, n, short=False)
@@ -183,7 +211,7 @@ def build_long_short_book(
                 if trailing > 0.0:
                     scalar = min(1.0, vol_target_annual / trailing)
             if regime_scalars is not None:  # causal per-date regime exposure gate
-                scalar *= float(regime_scalars.get(day["date"][0], 1.0))
+                scalar *= float(regime_scalars.get(day_date, 1.0))
             target = {t: w * scalar for t, w in base.items()}
             day_turnover += 0.5 * sum(
                 abs(target.get(t, 0.0) - held.get(t, 0.0)) for t in target.keys() | held.keys()
@@ -192,7 +220,7 @@ def build_long_short_book(
             unit_held = base
         day_gross = float(sum(w * rets[t] for t, w in held.items()))
         unit_grosses.append(float(sum(w * rets[t] for t, w in unit_held.items())))
-        dates.append(day["date"][0])
+        dates.append(day_date)
         gross.append(day_gross)
         turnover.append(day_turnover)
         exposures.append(sum(abs(w) for w in held.values()))
@@ -492,10 +520,14 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     use_gate = getattr(ls, "regime_gate_enabled", False)
     use_experts = getattr(ls, "regime_experts_enabled", False)
     structure_variants = getattr(ls, "structure_variants", False)
+    calm_cost_variants = getattr(ls, "calm_cost_variants", False)
     short_borrow = getattr(ls, "short_borrow_bps", 0.0)
     hedge_cost = getattr(ls, "hedge_cost_bps", 2.0)
-    if structure_variants and (use_gate or use_experts):
-        _logger.warning("long-short: structure_variants supersedes regime gate/experts")
+    if calm_cost_variants and structure_variants:
+        _logger.warning("long-short: calm_cost_variants supersedes structure_variants")
+        structure_variants = False
+    if (structure_variants or calm_cost_variants) and (use_gate or use_experts):
+        _logger.warning("long-short: variant trials supersede regime gate/experts")
         use_gate = use_experts = False
     states = regime_scalars = None
     if use_gate or use_experts:
@@ -511,6 +543,32 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
 
     constructions = ["ls"]
     variant_kwargs: dict[str, dict] = {"ls": {}}
+    calm_kwargs: dict[str, dict] = {"ls": {}}
+    if calm_cost_variants:
+        from new_pipeline.tournament.regime_state import causal_market_regimes
+
+        # Pre-registered calm-state COST policy factorial (audit Q1: turnover
+        # is state-invariant while calm-state gross sits at the cost line).
+        # Control + band-only + cadence-only + both, all judged in ONE returns
+        # matrix so DSR deflation prices the selection. States come from the
+        # leak-free causal decoder on the FULL panel history (0 = calmest).
+        state_map = causal_market_regimes(
+            pl.concat(panels).select("date", "ticker", "next_ret")
+        )
+        calm_map = {d: s == 0 for d, s in state_map.items()}
+        calm_band = getattr(ls, "calm_rebalance_band", 1.5)
+        calm_days = getattr(ls, "calm_rebalance_days", 10)
+        constructions = ["ls", "ls_calmband", "ls_calmslow", "ls_calmboth"]
+        calm_kwargs = {
+            "ls": {},
+            "ls_calmband": {"calm_states": calm_map, "calm_rebalance_band": calm_band},
+            "ls_calmslow": {"calm_states": calm_map, "calm_rebalance_days": calm_days},
+            "ls_calmboth": {
+                "calm_states": calm_map,
+                "calm_rebalance_band": calm_band,
+                "calm_rebalance_days": calm_days,
+            },
+        }
     if structure_variants:
         from new_pipeline.tournament.regime_state import causal_market_regimes
 
@@ -544,16 +602,17 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         return smooth_scores(panel, smoothing)
 
     def book_from_panel(construction: str, panel: pl.DataFrame) -> LongShortBook:
-        if construction == "ls":
-            return build_long_short_book(
+        if construction != "ls" and construction in variant_kwargs:
+            return build_hedged_book(
                 panel, ls.quantile, ls.cost_bps, ls.min_names_per_day,
                 ls.sector_neutral, rebalance_days, vol_target, vol_lookback,
-                regime_scalars, rebalance_band, short_borrow,
+                rebalance_band, **variant_kwargs[construction],
             )
-        return build_hedged_book(
+        return build_long_short_book(
             panel, ls.quantile, ls.cost_bps, ls.min_names_per_day,
             ls.sector_neutral, rebalance_days, vol_target, vol_lookback,
-            rebalance_band, **variant_kwargs[construction],
+            regime_scalars, rebalance_band, short_borrow,
+            **calm_kwargs.get(construction, {}),
         )
 
     def book_for(score_expr: pl.Expr, construction: str = "ls") -> LongShortBook:
@@ -661,14 +720,17 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         "short_borrow_bps": short_borrow,
         "sectors": sorted(results),
     }
-    if structure_variants:
+    if len(constructions) > 1:
         diagnostics["construction"] = best_construction
         diagnostics["structure_trials"] = dict(
             zip(trial_labels, [round(s, 4) for s in trial_sharpes], strict=True)
         )
+    if calm_cost_variants:
+        diagnostics["calm_rebalance_band"] = getattr(ls, "calm_rebalance_band", 1.5)
+        diagnostics["calm_rebalance_days"] = getattr(ls, "calm_rebalance_days", 10)
     best_grid = (
         {"construction": best_construction, **combos[best_combo]}
-        if structure_variants
+        if len(constructions) > 1
         else (combos[best] if best < len(combos) else {"combo_index": best})
     )
     candidate_path = output / f"{_SLUG}_candidate.json"

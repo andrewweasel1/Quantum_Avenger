@@ -224,6 +224,11 @@ long_short:
   short_borrow_bps: 0.0
   # Cost bps per unit |change in index-hedge notional| for hedged variants.
   hedge_cost_bps: 2.0
+  # Calm-state cost-policy factorial: control + calm-band + calm-cadence +
+  # both, judged in one deflated returns matrix (causal vol states, 0=calm).
+  calm_cost_variants: false
+  calm_rebalance_band: 1.5
+  calm_rebalance_days: 10
   regime_gate_enabled: false
   regime_experts_enabled: false
   regime_exposures: [1.0, 1.0, 0.0]
