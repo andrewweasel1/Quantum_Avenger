@@ -293,3 +293,105 @@ def test_eval_start_floors_the_book_window(tmp_path):
     assert floor_dates.min() == date(2018, 9, 3)
     assert floored["diagnostics"]["eval_start"] == "2018-09-01"
     assert full["diagnostics"]["eval_start"] is None
+
+
+def test_short_borrow_charged_on_actual_short_exposure_only():
+    """Borrow accrues daily on |short notional|; a book with no shorts pays 0."""
+    rows = [[d, t, "Tech", s, 0.0] for d in (D1, D2)
+            for t, s in (("A", 3.0), ("B", 2.0), ("C", 1.0), ("D", 0.0))]
+    base = build_long_short_book(_panel(rows), 0.25, 0.0, 4)
+    borrowed = build_long_short_book(_panel(rows), 0.25, 0.0, 4, short_borrow_bps=252e4)
+    # unit-gross book: short exposure 0.5 -> drag = 252e4/1e4/252 * 0.5 = 0.5/day
+    np.testing.assert_allclose(base.net - 0.5, borrowed.net)
+    from new_pipeline.tournament.long_short import build_hedged_book
+
+    long_only = build_hedged_book(_panel(rows), 0.25, 0.0, 4, short_default=0.0,
+                                  short_borrow_bps=252e4)
+    zero_borrow = build_hedged_book(_panel(rows), 0.25, 0.0, 4, short_default=0.0)
+    np.testing.assert_allclose(long_only.net, zero_borrow.net)  # no shorts held
+
+
+def test_hedged_book_gates_single_name_shorts_by_state():
+    """short_state_scalars=0 dates hold NO single-name shorts (borrow-probe:
+    a huge borrow rate changes nothing on gated dates, bites on open dates)."""
+    from new_pipeline.tournament.long_short import build_hedged_book
+
+    rows = [[d, t, "Tech", s, 0.01] for d in (D1, D2, D3)
+            for t, s in (("A", 3.0), ("B", 2.0), ("C", 1.0), ("D", 0.0))]
+    gate = {D1: 0.0, D2: 1.0, D3: 1.0}
+    quiet = build_hedged_book(_panel(rows), 0.25, 0.0, 4, rebalance_days=1,
+                              short_state_scalars=gate)
+    pricey = build_hedged_book(_panel(rows), 0.25, 0.0, 4, rebalance_days=1,
+                               short_state_scalars=gate, short_borrow_bps=252e4)
+    assert quiet.net[0] == pricey.net[0]          # gated: no short, no borrow
+    assert pricey.net[1] < quiet.net[1]           # open: borrow bites
+
+
+def test_hedged_book_neutralizes_market_beta_causally():
+    """With every name = market + noise, the hedged long-only book's market
+    correlation collapses vs the unhedged one (rolling-beta hedge, no
+    look-ahead: warmup uses the dollar hedge)."""
+    from new_pipeline.tournament.long_short import build_hedged_book, panel_market_by_date
+
+    rng = np.random.default_rng(9)
+    d0 = date(2021, 1, 4)
+    days = [date.fromordinal(d0.toordinal() + i) for i in range(220)]
+    mkt_path = rng.normal(0.0006, 0.012, len(days))
+    rows = []
+    for i, d in enumerate(days):
+        for j in range(12):
+            rows.append([d, f"T{j}", "Tech", float(rng.uniform()),
+                         float(mkt_path[i] + rng.normal(0, 0.004))])
+    panel = _panel(rows)
+    mkt = panel_market_by_date(panel)
+    unhedged = build_hedged_book(panel, 0.25, 0.0, 6, short_default=0.0,
+                                 market_by_date=None, hedge_cost_bps=0.0)
+    hedged = build_hedged_book(panel, 0.25, 0.0, 6, short_default=0.0,
+                               market_by_date=mkt, hedge_cost_bps=0.0)
+    m = np.array([mkt[d] for d in hedged.dates])
+    c_un = abs(np.corrcoef(unhedged.net, m)[0, 1])
+    c_hg = abs(np.corrcoef(hedged.net, m)[0, 1])
+    assert c_un > 0.9 and c_hg < 0.35
+
+
+def test_structure_variants_expand_the_trial_matrix(tmp_path):
+    """structure_variants: 4 constructions x n_combos trial columns in ONE
+    matrix, champion labeled, paths built under the champion construction."""
+    from types import SimpleNamespace
+
+    from new_pipeline.tournament.long_short import run_universe_long_short
+
+    rng = np.random.default_rng(1)
+    days = [date.fromordinal(date(2021, 1, 4).toordinal() + i) for i in range(90)]
+    rows = []
+    for d in days:
+        for t in [f"T{i}" for i in range(8)]:
+            rows.append({
+                "date": d, "ticker": t, "next_ret": float(rng.normal(0, 0.01)),
+                "proba_c0_p0": float(rng.uniform()), "proba_c0_p1": float(rng.uniform()),
+            })
+    pl.DataFrame(rows).write_parquet(tmp_path / "tech_oos_proba.parquet")
+    (tmp_path / "tech_candidate.json").write_text("{}")
+    cfg = SimpleNamespace(long_short=SimpleNamespace(
+        enabled=True, quantile=0.25, cost_bps=5.0, min_names_per_day=6,
+        sector_neutral=False, null_iterations=2, null_quantile=0.95,
+        rebalance_days=5, score_smoothing_days=1, vol_target_annual=0.0,
+        vol_lookback_days=20, rebalance_band=0.0, regime_gate_enabled=False,
+        regime_experts_enabled=False, eval_start=None, structure_variants=True,
+        short_borrow_bps=50.0, hedge_cost_bps=2.0,
+    ))
+    entry = run_universe_long_short(
+        {"Tech": {"candidate_path": str(tmp_path / "tech_candidate.json")}}, tmp_path, cfg
+    )
+    matrix = pl.read_parquet(tmp_path / "universe_long_short_returns_matrix.parquet")
+    assert matrix.width == 4  # 4 constructions x 1 combo
+    assert len(entry["trial_sharpes"]) == 4
+    diag = entry["diagnostics"]
+    assert set(diag["structure_trials"]) == {
+        "ls|combo0", "ls_gated|combo0", "lo_hedged|combo0", "lo_hedged_disp|combo0"
+    }
+    assert diag["construction"] in ("ls", "ls_gated", "lo_hedged", "lo_hedged_disp")
+    assert entry["best_params"]["construction"] == diag["construction"]
+    assert diag["short_borrow_bps"] == 50.0
+    paths = pl.read_parquet(tmp_path / "universe_long_short_paths.parquet")
+    assert paths.width == 2  # phi

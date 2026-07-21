@@ -216,6 +216,14 @@ long_short:
   # the strategy the universe defines (Liquid-1500 census floor: 2018-09-01).
   # null = full window.
   eval_start: null
+  # Structure variants: build every grid combo under 4 book constructions
+  # (baseline L/S, calm-state short-gated L/S, hedged long-only, + dispersion
+  # sizing) in ONE returns matrix — DSR deflation prices the selection.
+  structure_variants: false
+  # Stock-loan fee bps/yr on actual single-name short exposure (0 = legacy).
+  short_borrow_bps: 0.0
+  # Cost bps per unit |change in index-hedge notional| for hedged variants.
+  hedge_cost_bps: 2.0
   regime_gate_enabled: false
   regime_experts_enabled: false
   regime_exposures: [1.0, 1.0, 0.0]

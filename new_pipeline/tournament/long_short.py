@@ -117,6 +117,7 @@ def build_long_short_book(
     vol_lookback: int = 20,
     regime_scalars: dict | None = None,
     rebalance_band: float = 0.0,
+    short_borrow_bps: float = 0.0,
 ) -> LongShortBook:
     """Dollar-neutral rank book from a (date, ticker, sector, score, next_ret)
     panel, re-ranked every ``rebalance_days`` trading days.
@@ -140,6 +141,7 @@ def build_long_short_book(
     if sector_neutral and "sector" in clean.columns:
         clean = sector_neutral_scores(clean)
     dates, gross, turnover, leg_sizes, exposures = [], [], [], [], []
+    short_expos: list[float] = []
     held: dict[str, float] = {}
     unit_held: dict[str, float] = {}  # unscaled shadow book: the vol estimator
     unit_grosses: list[float] = []
@@ -194,14 +196,194 @@ def build_long_short_book(
         gross.append(day_gross)
         turnover.append(day_turnover)
         exposures.append(sum(abs(w) for w in held.values()))
+        short_expos.append(float(sum(-w for w in held.values() if w < 0.0)))
     gross_arr = np.asarray(gross, dtype=np.float64)
     turn_arr = np.asarray(turnover, dtype=np.float64)
     net = gross_arr - (cost_bps / 1e4) * turn_arr
+    if short_borrow_bps > 0.0:
+        # Stock-loan fee accrues daily on the single-name short notional the
+        # book actually holds (an unmodeled drag until now — audit item).
+        net = net - (short_borrow_bps / 1e4 / 252.0) * np.asarray(short_expos)
     return LongShortBook(
         dates=dates,
         net=net,
         gross=gross_arr,
         turnover=turn_arr,
+        avg_names_per_leg=float(np.mean(leg_sizes)) if leg_sizes else 0.0,
+        avg_gross_exposure=float(np.mean(exposures)) if exposures else 0.0,
+    )
+
+
+def panel_market_by_date(panel: pl.DataFrame) -> dict:
+    """{date: equal-weight mean next_ret} over the panel — the hedge instrument
+    and causal-state basis for the structure variants (self-contained: the
+    panel IS the tradable universe)."""
+    daily = (
+        panel.drop_nulls(["next_ret"]).group_by("date")
+        .agg(pl.col("next_ret").mean().alias("mkt")).sort("date")
+    )
+    return dict(zip(daily["date"].to_list(), daily["mkt"].to_list(), strict=True))
+
+
+def dispersion_scalars(panel: pl.DataFrame, window: int = 5, floor: float = 0.25,
+                       warmup: int = 20) -> dict:
+    """{date: gross scalar in [floor, 1]} from the expanding percentile of
+    TRAILING realized cross-sectional dispersion (std of next_ret, shifted one
+    day — strictly causal). Compressed tape -> smaller book: sizes to the
+    opportunity variable itself, complementing the vol target (which keys on
+    book vol, not opportunity)."""
+    daily = (
+        panel.drop_nulls(["next_ret"]).group_by("date")
+        .agg(pl.col("next_ret").std().alias("d")).sort("date")
+    )
+    disp = daily["d"].rolling_mean(window_size=window).shift(1).to_numpy()
+    scalars, history = {}, []
+    for day, v in zip(daily["date"].to_list(), disp, strict=True):
+        if v is None or np.isnan(v) or len(history) < warmup:
+            scalars[day] = 1.0
+        else:
+            scalars[day] = floor + (1.0 - floor) * float(
+                np.mean(np.asarray(history) <= v)
+            )
+        if v is not None and not np.isnan(v):
+            history.append(float(v))
+    return scalars
+
+
+def build_hedged_book(
+    panel: pl.DataFrame,
+    quantile: float,
+    cost_bps: float,
+    min_names: int,
+    sector_neutral: bool = True,
+    rebalance_days: int = 1,
+    vol_target_annual: float = 0.0,
+    vol_lookback: int = 20,
+    rebalance_band: float = 0.0,
+    market_by_date: dict | None = None,
+    short_state_scalars: dict | None = None,
+    short_default: float = 1.0,
+    gross_scalars: dict | None = None,
+    short_borrow_bps: float = 0.0,
+    hedge_cost_bps: float = 2.0,
+    beta_window: int = 60,
+) -> LongShortBook:
+    """Structure-variant builder: the long leg is always on; the single-name
+    short leg is scaled per date by ``short_state_scalars`` (0 disables it —
+    the audit found it contributes SR -1.20 in the causal calm state while the
+    long leg runs +1.53); residual market exposure is hedged with the panel's
+    equal-weight market at a CAUSAL rolling beta (estimated on the unit book's
+    strictly-prior returns; dollar hedge of the net unit exposure until the
+    window fills). When the short leg is on the unit book is ~market-neutral,
+    beta ~ 0, and the hedge self-extinguishes — one builder covers the gated
+    L/S and the hedged long-only constructions.
+
+    Costs mirror ``build_long_short_book`` (cost_bps on single-name turnover)
+    plus ``hedge_cost_bps`` on |change in hedge notional| and
+    ``short_borrow_bps``/yr on actual single-name short exposure. The vol
+    target reads the trailing vol of the composed (hedged) UNIT series —
+    same causal discipline as the L/S book. ``gross_scalars`` (e.g.
+    :func:`dispersion_scalars`) multiplies the whole book at rebalance."""
+    clean = panel.drop_nulls(["score", "next_ret"]).sort(["date", "ticker"])
+    if sector_neutral and "sector" in clean.columns:
+        clean = sector_neutral_scores(clean)
+    mkt = market_by_date or {}
+    dates, gross, turnover, leg_sizes, exposures = [], [], [], [], []
+    net_out: list[float] = []
+    held: dict[str, float] = {}
+    unit_held: dict[str, float] = {}
+    unit_hedged: list[float] = []  # composed unit series: vol-target input
+    unit_gross_hist: list[float] = []  # unhedged unit series: beta input
+    mkt_hist: list[float] = []
+    scalar = 1.0
+    hedge_notional = 0.0
+    prev_longs: list[str] = []
+    prev_shorts: list[str] = []
+    for index, day in enumerate(clean.partition_by("date", maintain_order=True)):
+        day_date = day["date"][0]
+        tickers = day["ticker"].to_list()
+        rets = dict(zip(tickers, day["next_ret"].to_list(), strict=True))
+        day_turnover = 0.0
+        for name in [t for t in held if t not in rets]:
+            day_turnover += 0.5 * abs(held.pop(name))
+        for name in [t for t in unit_held if t not in rets]:
+            unit_held.pop(name)
+        if index % rebalance_days == 0:
+            n = day.height
+            base: dict[str, float] = {}
+            if n >= min_names:
+                ranked = day.sort("score", descending=True)["ticker"].to_list()
+                k = max(1, int(n * quantile))
+                s_scalar = (
+                    short_default if short_state_scalars is None
+                    else float(short_state_scalars.get(day_date, short_default))
+                )
+                if rebalance_band > 0.0:
+                    k_exit = max(k, int(n * quantile * (1.0 + rebalance_band)))
+                    rank = {t: i for i, t in enumerate(ranked)}
+                    longs = _band_leg(prev_longs, ranked, rank, k, k_exit, n, short=False)
+                    shorts = (
+                        _band_leg(prev_shorts, ranked, rank, k, k_exit, n, short=True)
+                        if s_scalar > 0.0 else []
+                    )
+                else:
+                    longs = ranked[:k]
+                    shorts = ranked[n - k:] if s_scalar > 0.0 else []
+                prev_longs, prev_shorts = longs, shorts
+                for t in longs:
+                    base[t] = 1.0 / (2 * k)
+                for t in shorts:
+                    base[t] = base.get(t, 0.0) - s_scalar / (2 * k)
+                leg_sizes.append(k)
+            scalar = 1.0
+            if vol_target_annual > 0.0 and len(unit_hedged) >= vol_lookback:
+                trailing = float(np.std(unit_hedged[-vol_lookback:], ddof=1)) * np.sqrt(252.0)
+                if trailing > 0.0:
+                    scalar = min(1.0, vol_target_annual / trailing)
+            if gross_scalars is not None:
+                scalar *= float(gross_scalars.get(day_date, 1.0))
+            target = {t: w * scalar for t, w in base.items()}
+            day_turnover += 0.5 * sum(
+                abs(target.get(t, 0.0) - held.get(t, 0.0)) for t in target.keys() | held.keys()
+            )
+            held = target
+            unit_held = base
+        # Causal beta of the UNIT book on the market (strictly prior returns);
+        # dollar hedge of the net unit exposure until the window fills.
+        if len(unit_gross_hist) >= beta_window:
+            gm = np.asarray(unit_gross_hist[-beta_window:])
+            mm = np.asarray(mkt_hist[-beta_window:])
+            var = float(np.var(mm))
+            unit_beta = float(np.cov(gm, mm)[0, 1] / var) if var > 0.0 else 0.0
+        else:
+            unit_beta = float(sum(unit_held.values()))
+        unit_beta = min(max(unit_beta, -0.5), 2.0)
+        mret = float(mkt.get(day_date, 0.0))
+        unit_hedge_notional = -unit_beta if mkt else 0.0
+        new_notional = scalar * unit_hedge_notional
+        hedge_turn = abs(new_notional - hedge_notional)
+        hedge_notional = new_notional
+        day_gross = float(sum(w * rets[t] for t, w in held.items()))
+        short_expo = float(sum(-w for w in held.values() if w < 0.0))
+        unit_gross = float(sum(w * rets[t] for t, w in unit_held.items()))
+        unit_gross_hist.append(unit_gross)
+        mkt_hist.append(mret)
+        unit_hedged.append(unit_gross + unit_hedge_notional * mret)
+        net_out.append(
+            day_gross + hedge_notional * mret
+            - (cost_bps / 1e4) * day_turnover
+            - (hedge_cost_bps / 1e4) * hedge_turn
+            - (short_borrow_bps / 1e4 / 252.0) * short_expo
+        )
+        dates.append(day_date)
+        gross.append(day_gross + hedge_notional * mret)
+        turnover.append(day_turnover)
+        exposures.append(sum(abs(w) for w in held.values()))
+    return LongShortBook(
+        dates=dates,
+        net=np.asarray(net_out, dtype=np.float64),
+        gross=np.asarray(gross, dtype=np.float64),
+        turnover=np.asarray(turnover, dtype=np.float64),
         avg_names_per_leg=float(np.mean(leg_sizes)) if leg_sizes else 0.0,
         avg_gross_exposure=float(np.mean(exposures)) if exposures else 0.0,
     )
@@ -221,6 +403,7 @@ def permutation_null_margin(
     vol_lookback: int = 20,
     regime_scalars: dict | None = None,
     rebalance_band: float = 0.0,
+    builder=None,
 ) -> tuple[float, list[float]]:
     """Champion Sharpe minus the ``null_quantile`` of its informationless null.
 
@@ -228,16 +411,20 @@ def permutation_null_margin(
     date (breadth and the return cross-section preserved exactly; the
     score-return link destroyed) and rebuilds the net-of-cost book under the
     SAME mechanics — including the rebalance cadence, so a slow book is judged
-    against slow-book nulls."""
+    against slow-book nulls. ``builder`` (panel -> LongShortBook) overrides the
+    default construction so a structure-variant champion is judged against
+    nulls built with ITS OWN mechanics (hedge, short gate, sizing included)."""
     rng = np.random.default_rng(active_seed())
     null_sharpes = []
     for _ in range(n_iter):
         permuted = panel.with_columns(
             pl.col("score").shuffle(seed=int(rng.integers(0, 2**31))).over("date")
         )
-        book = build_long_short_book(
-            permuted, quantile, cost_bps, min_names, sector_neutral, rebalance_days,
-            vol_target_annual, vol_lookback, regime_scalars, rebalance_band,
+        book = (
+            builder(permuted) if builder is not None else build_long_short_book(
+                permuted, quantile, cost_bps, min_names, sector_neutral, rebalance_days,
+                vol_target_annual, vol_lookback, regime_scalars, rebalance_band,
+            )
         )
         null_sharpes.append(sharpe_ratio(book.net))
     margin = champion_sharpe - float(np.quantile(null_sharpes, null_quantile))
@@ -304,6 +491,12 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     rebalance_band = getattr(ls, "rebalance_band", 0.0)
     use_gate = getattr(ls, "regime_gate_enabled", False)
     use_experts = getattr(ls, "regime_experts_enabled", False)
+    structure_variants = getattr(ls, "structure_variants", False)
+    short_borrow = getattr(ls, "short_borrow_bps", 0.0)
+    hedge_cost = getattr(ls, "hedge_cost_bps", 2.0)
+    if structure_variants and (use_gate or use_experts):
+        _logger.warning("long-short: structure_variants supersedes regime gate/experts")
+        use_gate = use_experts = False
     states = regime_scalars = None
     if use_gate or use_experts:
         from new_pipeline.tournament.regime_state import causal_market_regimes
@@ -316,35 +509,84 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         if use_gate:
             regime_scalars = {d: exposures[s] for d, s in states.items()}
 
+    constructions = ["ls"]
+    variant_kwargs: dict[str, dict] = {"ls": {}}
+    if structure_variants:
+        from new_pipeline.tournament.regime_state import causal_market_regimes
+
+        # Pre-registered structure variants (audit follow-up: the single-name
+        # short leg runs SR -1.20 in the causal calm state while the long leg
+        # runs +1.53). All four constructions enter ONE returns matrix so DSR
+        # deflation prices the selection instead of a human picking post hoc.
+        # Maps use the FULL panel history (warmup), like the causal decoder.
+        full_panel = pl.concat(panels)
+        market_map = panel_market_by_date(full_panel)
+        state_map = causal_market_regimes(full_panel.select("date", "ticker", "next_ret"))
+        short_gate = {d: (0.0 if s == 0 else 1.0) for d, s in state_map.items()}
+        disp_map = dispersion_scalars(full_panel)
+        common = {
+            "market_by_date": market_map,
+            "short_borrow_bps": short_borrow,
+            "hedge_cost_bps": hedge_cost,
+        }
+        constructions = ["ls", "ls_gated", "lo_hedged", "lo_hedged_disp"]
+        variant_kwargs = {
+            "ls": {},
+            "ls_gated": {**common, "short_state_scalars": short_gate},
+            "lo_hedged": {**common, "short_default": 0.0},
+            "lo_hedged_disp": {**common, "short_default": 0.0, "gross_scalars": disp_map},
+        }
+
     def panel_for(score_expr: pl.Expr) -> pl.DataFrame:
         panel = universe.select(
             "date", "ticker", "sector", score_expr.alias("score"), "next_ret"
         )
         return smooth_scores(panel, smoothing)
 
-    def book_for(score_expr: pl.Expr) -> LongShortBook:
-        return build_long_short_book(
-            panel_for(score_expr), ls.quantile, ls.cost_bps, ls.min_names_per_day,
-            ls.sector_neutral, rebalance_days, vol_target, vol_lookback, regime_scalars,
-            rebalance_band,
+    def book_from_panel(construction: str, panel: pl.DataFrame) -> LongShortBook:
+        if construction == "ls":
+            return build_long_short_book(
+                panel, ls.quantile, ls.cost_bps, ls.min_names_per_day,
+                ls.sector_neutral, rebalance_days, vol_target, vol_lookback,
+                regime_scalars, rebalance_band, short_borrow,
+            )
+        return build_hedged_book(
+            panel, ls.quantile, ls.cost_bps, ls.min_names_per_day,
+            ls.sector_neutral, rebalance_days, vol_target, vol_lookback,
+            rebalance_band, **variant_kwargs[construction],
         )
+
+    def book_for(score_expr: pl.Expr, construction: str = "ls") -> LongShortBook:
+        return book_from_panel(construction, panel_for(score_expr))
 
     combo_mean = [
         pl.mean_horizontal([pl.col(f"proba_c{j}_p{p}") for p in range(phi)])
         for j in range(n_combos)
     ]
-    books = [book_for(expr) for expr in combo_mean]
+    books = [
+        book_for(expr, construction)
+        for construction in constructions
+        for expr in combo_mean
+    ]
+    trial_labels = [
+        f"{construction}|combo{j}"
+        for construction in constructions
+        for j in range(n_combos)
+    ]
     if all(b.avg_names_per_leg == 0.0 for b in books):
         _logger.warning("long-short: breadth never reached min_names_per_day; sleeve skipped")
         return None
     trial_sharpes = [sharpe_ratio(b.net) for b in books]
     best = int(np.argmax(trial_sharpes))
     champion = books[best]
+    best_construction = constructions[best // n_combos]
+    best_combo = best % n_combos
 
     path_books = [
-        book_for(pl.col(f"proba_c{best}_p{p}")) for p in range(phi)
+        book_for(pl.col(f"proba_c{best_combo}_p{p}"), best_construction)
+        for p in range(phi)
     ]
-    champion_expr = combo_mean[best]
+    champion_expr = combo_mean[best_combo]
     if use_experts:
         # Mixture of experts over the grid combos: each date uses the combo whose
         # book performed best IN TODAY'S decoded state over an EXPANDING window of
@@ -372,11 +614,17 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         best = len(books) - 1
         champion = conditional
     champion_panel = panel_for(champion_expr)  # smoothed: the null permutes the book input
+    # A structure-variant champion is judged against nulls built with ITS OWN
+    # mechanics (hedge, short gate, sizing) — same-mechanics null discipline.
+    def _null_builder(permuted: pl.DataFrame) -> LongShortBook:
+        return book_from_panel(best_construction, permuted)
+
     margin, null_sharpes = permutation_null_margin(
         champion_panel, ls.quantile, ls.cost_bps, ls.min_names_per_day, ls.sector_neutral,
         ls.null_iterations, ls.null_quantile, trial_sharpes[best],
         rebalance_days=rebalance_days, vol_target_annual=vol_target, vol_lookback=vol_lookback,
         rebalance_band=rebalance_band,
+        builder=_null_builder if best_construction != "ls" else None,
     )
 
     output = Path(output_dir)
@@ -410,15 +658,26 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         "null_sharpes": null_sharpes,
         "n_days": int(champion.net.size),
         "eval_start": str(eval_start) if eval_start else None,
+        "short_borrow_bps": short_borrow,
         "sectors": sorted(results),
     }
+    if structure_variants:
+        diagnostics["construction"] = best_construction
+        diagnostics["structure_trials"] = dict(
+            zip(trial_labels, [round(s, 4) for s in trial_sharpes], strict=True)
+        )
+    best_grid = (
+        {"construction": best_construction, **combos[best_combo]}
+        if structure_variants
+        else (combos[best] if best < len(combos) else {"combo_index": best})
+    )
     candidate_path = output / f"{_SLUG}_candidate.json"
     candidate_path.write_text(
         json.dumps(
             {
                 "kind": "long_short",
                 "best_params": {
-                    **(combos[best] if best < len(combos) else {"combo_index": best}),
+                    **best_grid,
                     "quantile": ls.quantile,
                     "cost_bps": ls.cost_bps,
                     "min_names_per_day": ls.min_names_per_day,
@@ -439,7 +698,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     return {
         "kind": "long_short",
         "selected_features": [],
-        "best_params": combos[best] if best < len(combos) else {"combo_index": best},
+        "best_params": best_grid,
         "best_sharpe": trial_sharpes[best],
         "trial_sharpes": trial_sharpes,
         "candidate_path": str(candidate_path),

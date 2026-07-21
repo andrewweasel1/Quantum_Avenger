@@ -221,6 +221,19 @@ class LongShortConfig(BaseModel):
     # 083aa78a529f: ancestor SR -0.165 over 420d vs 0.981 census-era).
     # None = full window.
     eval_start: str | None = None
+    # Structure-variant trial expansion (audit follow-up: the single-name
+    # short leg runs SR -1.20 in the causal calm state, the long leg +1.53).
+    # Each grid combo is built under FOUR constructions — baseline L/S,
+    # short-leg-gated L/S (single-name shorts off in the causal calm state,
+    # residual beta hedged with the panel's equal-weight market), hedged
+    # long-only, and hedged long-only with dispersion sizing — all in one
+    # returns matrix so DSR deflation prices the selection.
+    structure_variants: bool = False
+    # Stock-loan fee (bps/yr) accrued daily on actual single-name short
+    # exposure — the audit's unmodeled-cost item. 0 keeps legacy books exact.
+    short_borrow_bps: float = 0.0
+    # Cost (bps) per unit |change in index-hedge notional| in hedged variants.
+    hedge_cost_bps: float = 2.0
     # Regime-conditional options (independently flaggable; share one causal
     # expanding-percentile market-vol state decoder, 0 = calmest state):
     # gate scales exposure per state; experts pick the best-in-state combo.
