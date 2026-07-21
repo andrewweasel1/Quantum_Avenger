@@ -805,9 +805,14 @@ def _deflated_sharpe(champion_returns, trials, returns_matrix, cfg) -> float:
 
 def _regime_breakdown(verdict, cfg) -> dict:
     """What the per-regime gate saw: per-state DSR/Sharpe/day-count (pass/fail
-    against the promotion threshold), thin states skipped, and each state's
-    share of days - so a rejection names WHICH regime killed the model."""
-    threshold = cfg.evaluation.dsr_promotion_threshold
+    against the bar the gate ACTUALLY applied — T**K under the family-wise
+    calibration), thin states skipped, and each state's share of days - so a
+    rejection names WHICH regime killed the model."""
+    threshold = (
+        verdict.effective_threshold
+        if verdict.effective_threshold is not None
+        else cfg.evaluation.dsr_promotion_threshold
+    )
     states = verdict.states
     shares, runs = {}, {}
     if states is not None:
@@ -833,7 +838,7 @@ def _regime_breakdown(verdict, cfg) -> dict:
             for s, r in verdict.per_regime.items()
         },
         "skipped_thin": [int(s) for s in verdict.skipped_regimes],
-        "threshold": threshold,
+        "threshold": round(float(threshold), 6),
     }
 
 
@@ -869,6 +874,7 @@ def _regime_verdict(
         n_components=cfg.evaluation.hmm_states,
         min_regime_obs=cfg.evaluation.min_regime_obs,
         thin_policy=ThinRegimePolicy(cfg.evaluation.thin_regime_policy),
+        family_wise=cfg.evaluation.regime_family_wise,
     )
     n_trials = (
         effective_number_of_trials(returns_matrix.T)

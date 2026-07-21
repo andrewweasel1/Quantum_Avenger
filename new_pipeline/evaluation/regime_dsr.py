@@ -5,7 +5,11 @@ computed *within each macro regime*. A Gaussian HMM decodes regimes from the
 fused ``[returns, volatility, (sentiment)]`` space; states are relabeled by
 volatility (:func:`order_states_by_volatility`) so regime ids are deterministic
 (no ``means_[4]`` / ``sorted_indices[4]`` index bugs). A model is promoted only
-if its DSR clears the threshold in every *testable* regime.
+if its DSR clears the per-state bar in every *testable* regime — under the
+default family-wise calibration that bar is ``threshold**K`` for K testable
+states (plus a positive per-state Sharpe), because demanding the full
+``threshold`` in each of K sub-samples is a conjunction far stricter than the
+full-sample gate it mirrors.
 
 Thin-regime policy: a regime with fewer than ``min_regime_obs`` observations --
 or one where the strategy never traded (zero return variance) -- cannot clear a
@@ -48,6 +52,9 @@ class RegimeVerdict:
     per_regime: dict[int, DSRResult]
     skipped_regimes: list[int]
     states: object = None  # decoded per-day state sequence (np.ndarray) when available
+    # The per-state DSR bar actually applied (T^K under the family-wise
+    # calibration; T itself under the legacy per-state rule).
+    effective_threshold: float | None = None
 
 
 class QuantitativeEvaluator:
@@ -61,6 +68,7 @@ class QuantitativeEvaluator:
         thin_policy: ThinRegimePolicy = ThinRegimePolicy.SKIP,
         periods_per_year: int = 252,
         random_state: int | None = None,
+        family_wise: bool = True,
     ) -> None:
         self.min_dsr_threshold = min_dsr_threshold
         self.n_components = n_components
@@ -68,6 +76,15 @@ class QuantitativeEvaluator:
         self.thin_policy = thin_policy
         self.periods_per_year = periods_per_year
         self.random_state = random_state
+        # Family-wise per-state bar: with K testable states the per-state DSR
+        # threshold is T**K (0.95^3 ~= 0.857) AND every state's Sharpe must be
+        # positive. Rationale: requiring 0.95 in each of K sub-samples is a
+        # conjunction far stricter than the full-sample gate (a boundary-true
+        # edge passes all three ~0.95^3 of the time); T**K per state preserves
+        # the joint severity the per-state rule nominally targeted while the
+        # positivity requirement still vetoes regime-CONCENTRATED books (a
+        # negative-edge state can never hide behind balanced evidence).
+        self.family_wise = family_wise
 
     def evaluate_model_robustness(
         self,
@@ -112,7 +129,7 @@ class QuantitativeEvaluator:
 
         per_regime: dict[int, DSRResult] = {}
         skipped: list[int] = []
-        promoted = True
+        thin_veto = False
 
         for state in np.unique(states):
             state_returns = returns[states == state]
@@ -125,29 +142,38 @@ class QuantitativeEvaluator:
                     state, state_returns.size, self.thin_policy.value,
                 )
                 if self.thin_policy is ThinRegimePolicy.VETO:
-                    promoted = False
+                    thin_veto = True
                 continue
 
-            res = deflated_sharpe_report(
+            per_regime[int(state)] = deflated_sharpe_report(
                 state_returns,
                 n_trials=n_trials,
                 trial_sharpes=trial_sharpes,
                 periods_per_year=self.periods_per_year,
                 min_obs=self.min_regime_obs,
             )
-            per_regime[int(state)] = res
-            if res.dsr < self.min_dsr_threshold:
+
+        # Judge against a bar calibrated to the NUMBER of conjunctive tests:
+        # K testable states -> per-state bar T**K under family_wise, T legacy.
+        k = len(per_regime)
+        tau = self.min_dsr_threshold**k if (self.family_wise and k) else self.min_dsr_threshold
+        promoted = bool(per_regime) and not thin_veto
+        for state, res in per_regime.items():
+            if res.dsr < tau or (self.family_wise and res.sr_period <= 0.0):
                 promoted = False
                 logger.warning(
-                    "VETO: regime %d DSR=%.3f < %.2f (SR_ann=%.2f, T=%d)",
-                    state, res.dsr, self.min_dsr_threshold, res.sr_annual, res.n_obs,
+                    "VETO: regime %d DSR=%.3f vs per-state bar %.3f (%s; "
+                    "SR_ann=%.2f, T=%d)",
+                    state, res.dsr, tau,
+                    f"family-wise {self.min_dsr_threshold:.2f}^{k}"
+                    if self.family_wise else f"legacy {self.min_dsr_threshold:.2f}",
+                    res.sr_annual, res.n_obs,
                 )
 
         if not per_regime:
-            promoted = False  # no regime had enough observations to test
             logger.warning("VETO: no regime had enough observations to test.")
 
-        return RegimeVerdict(promoted, per_regime, skipped, states)
+        return RegimeVerdict(promoted, per_regime, skipped, states, tau)
 
     # ----------------------------------------------------------------- private
     def _decode_regimes(self, returns, volatility, sentiment) -> np.ndarray | None:

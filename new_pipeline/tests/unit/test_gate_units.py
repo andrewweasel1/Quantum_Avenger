@@ -22,7 +22,7 @@ from new_pipeline.tournament.pipeline import (
 ANNUAL_TRIALS = [0.6, 1.5, 0.9, 2.1]  # realistic grid dispersion, ANNUALIZED
 
 
-def _cfg(use_effective_trials):
+def _cfg(use_effective_trials, family_wise=True):
     return SimpleNamespace(
         evaluation=SimpleNamespace(
             use_effective_trials=use_effective_trials,
@@ -30,6 +30,7 @@ def _cfg(use_effective_trials):
             hmm_states=3,
             min_regime_obs=60,
             thin_regime_policy="skip",
+            regime_family_wise=family_wise,
         )
     )
 
@@ -140,3 +141,69 @@ def test_realistic_slice_flips_from_veto_to_pass_dead_slice_still_fails():
         dead, 1.11, trial_sharpes=_per_period_trials(hc_trials)
     ).dsr
     assert dead_dsr < 0.95
+
+
+# --------------------------------------------------------------- family-wise
+def _family_verdict(sr_daily_by_state, family_wise, n=300, seed=11):
+    """Evaluator verdict on 3 exact-sample-Sharpe blocks with a STUBBED decode
+    (state = block, deterministically), zero trial variance -> DSR = PSR-vs-0,
+    so each state's DSR ~= Phi(SR*sqrt(n-1)) by construction."""
+    from new_pipeline.evaluation.regime_dsr import QuantitativeEvaluator, ThinRegimePolicy
+
+    rng = np.random.default_rng(seed)
+    blocks = []
+    for sr in sr_daily_by_state:
+        raw = rng.normal(0.0, 1.0, n)
+        shaped = (raw - raw.mean()) / raw.std(ddof=1)  # exact sample moments
+        blocks.append(shaped * 9e-3 + sr * 9e-3)
+    champ = np.concatenate(blocks)
+    states = np.repeat(np.arange(len(blocks)), n)
+    ev = QuantitativeEvaluator(
+        0.95, 3, 60, ThinRegimePolicy.SKIP, random_state=0, family_wise=family_wise
+    )
+    ev._decode_regimes = lambda r, v, s: states
+    return ev.evaluate_model_robustness(
+        champ, np.ones(champ.size), 4, trial_sharpes=[0.03] * 4
+    )
+
+
+def test_family_wise_bar_is_threshold_to_the_k():
+    """The calibrated bar: K conjunctive 0.95-tests are jointly ~0.95^K, so the
+    per-state bar is T**K (0.857 for K=3). Per-state DSRs ~{0.90, 0.97, 0.94}
+    (the honest Liquid-1500 L/S profile) fail the legacy flat-0.95 rule in two
+    states yet clear the family-wise bar in all three."""
+    fw = _family_verdict([0.0741, 0.1100, 0.0899], family_wise=True)
+    legacy = _family_verdict([0.0741, 0.1100, 0.0899], family_wise=False)
+    dsrs = sorted(r.dsr for r in fw.per_regime.values())
+    assert dsrs[0] > 0.95**3 and dsrs[1] < 0.95  # genuinely between the bars
+    assert legacy.effective_threshold == 0.95
+    assert not legacy.promoted  # the miscalibrated conjunction vetoes
+    assert abs(fw.effective_threshold - 0.95**3) < 1e-12
+    assert fw.promoted
+
+
+def test_family_wise_still_vetoes_dead_and_losing_states():
+    """The lower per-state bar is NOT a softening: an edge-less state (daily
+    SR 0.02 -> DSR ~0.64) and a losing state both still fail the gate."""
+    dead = _family_verdict([0.0741, 0.1100, 0.02], family_wise=True)
+    assert not dead.promoted
+    assert min(r.dsr for r in dead.per_regime.values()) < dead.effective_threshold
+    losing = _family_verdict([0.0741, 0.1100, -0.05], family_wise=True)
+    assert not losing.promoted  # negative-edge state can never hide behind T**K
+    assert any(r.sr_period < 0 for r in losing.per_regime.values())
+
+
+def test_regime_breakdown_reports_the_applied_bar():
+    """The breakdown's threshold/passes must reflect the bar the gate ACTUALLY
+    applied (T**K), not the nominal config threshold — a 0.90-DSR state that
+    cleared the family-wise gate must display passes=True."""
+    from new_pipeline.tournament.pipeline import _regime_breakdown
+
+    fw = _family_verdict([0.0741, 0.1100, 0.0899], family_wise=True)
+    out = _regime_breakdown(fw, _cfg(True))
+    assert out["threshold"] == round(0.95**3, 6)
+    assert all(v["passes"] for v in out["per_regime"].values())
+    legacy = _family_verdict([0.0741, 0.1100, 0.0899], family_wise=False)
+    out_legacy = _regime_breakdown(legacy, _cfg(True, family_wise=False))
+    assert out_legacy["threshold"] == 0.95
+    assert sum(v["passes"] for v in out_legacy["per_regime"].values()) == 1

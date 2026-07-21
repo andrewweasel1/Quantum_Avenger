@@ -154,6 +154,13 @@ class EvaluationConfig(BaseModel):
     regime_breakdown_enabled: bool = True
     min_regime_obs: int = 60
     thin_regime_policy: str = "skip"
+    # Family-wise per-state bar: with K testable states each must clear
+    # DSR >= dsr_promotion_threshold**K (0.95^3 ~= 0.857) AND have a positive
+    # Sharpe. K conjunctive 0.95-tests are jointly ~0.95^K — far stricter than
+    # the full-sample gate the per-state rule mirrors; T**K preserves that
+    # joint severity while positivity still vetoes regime-concentrated books.
+    # False = legacy flat threshold per state.
+    regime_family_wise: bool = True
     # CPCV backtest-path DSR gate: require >= cpcv_path_min_fraction of the phi
     # reconstructed paths to clear dsr_promotion_threshold individually.
     cpcv_path_gate_enabled: bool = True

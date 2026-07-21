@@ -59,6 +59,7 @@ def test_regime_breakdown_names_the_failing_state():
         },
         skipped_regimes=[1],
         states=np.array([0] * 900 + [1] * 40 + [2] * 300),
+        effective_threshold=None,  # legacy verdicts fall back to cfg threshold
     )
     out = _regime_breakdown(verdict, base.get_config())
     assert out["per_regime"][0]["passes"] is True
