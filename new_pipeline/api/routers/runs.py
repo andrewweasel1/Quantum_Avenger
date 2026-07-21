@@ -49,6 +49,35 @@ def create_run(req: RunRequest, manager: RunManager = Depends(get_run_manager)) 
     return manager.status(run_id) or {"run_id": run_id, "status": "queued"}
 
 
+class PromoteRequest(BaseModel):
+    keys: list[str] | None = None
+    all_sectors: bool = False
+    registry: str = "./models/prod/promotion_registry.json"
+
+
+@router.post("/{run_id}/promote")
+def promote_run_candidates(
+    run_id: str, req: PromoteRequest, manager: RunManager = Depends(get_run_manager)
+) -> dict:
+    """MANUAL promotion of a run's candidates into the paper-trading registry.
+
+    The run's own registry (the honest gate record) is never modified; entries
+    land in the target registry with an explicit MANUAL OVERRIDE reason. Pass
+    keys=["Universe Long Short"] for the book, all_sectors=true for the 13
+    sector champions."""
+    from new_pipeline.scripts.promote_candidates import manual_promote
+
+    output = manager.run_dir(run_id) / "output"
+    if not (output / "promotion_registry.json").exists():
+        raise HTTPException(status_code=404, detail=f"no completed run registry for {run_id}")
+    try:
+        entries = manual_promote(output, keys=req.keys, all_sectors=req.all_sectors,
+                                 registry_path=req.registry)
+    except (KeyError, ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"promoted": [e["sector"] for e in entries], "registry": req.registry}
+
+
 @router.get("")
 def list_runs(manager: RunManager = Depends(get_run_manager)) -> list[dict]:
     """All runs (newest first), each with its live status + request params."""
