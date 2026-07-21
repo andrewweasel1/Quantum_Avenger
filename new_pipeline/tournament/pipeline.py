@@ -591,9 +591,24 @@ def _write_alpha_eval(frame: pl.DataFrame, feature_cols, cfg, output_dir) -> dic
     return report
 
 
+def _market_return_by_date(frame: pl.DataFrame) -> dict:
+    """{date: equal-weight mean next_ret} — the EXOGENOUS regime-decode basis.
+
+    ``next_ret`` shares the champion series' timing convention (decision at t,
+    realized t -> t+1), so market state and book return describe the same day."""
+    if "next_ret" not in frame.columns:
+        return {}
+    daily = (
+        frame.drop_nulls("next_ret").group_by("date")
+        .agg(pl.col("next_ret").mean().alias("mkt")).sort("date")
+    )
+    return dict(zip(daily["date"].to_list(), daily["mkt"].to_list(), strict=True))
+
+
 def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -> dict:
     registry = PromotionRegistry(Path(output_dir) / "promotion_registry.json")
     decisions: dict[str, bool] = {}
+    market_by_date = _market_return_by_date(frame)
     for sector, result in results.items():
         trials = result["trial_sharpes"]
         if not trials:
@@ -605,13 +620,18 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
         pooled_champion = pooled_matrix[:, best]
         paths = _load_champion_paths(result["candidate_path"])
         dates = _load_sample_dates(result["candidate_path"])
+        market_returns = None
         if dates is not None and len(dates) == pooled_matrix.shape[0]:
             # Calendar-time axis: every gate statistic below runs on equal-weight
             # per-date returns (one shared collapse keeps trial columns aligned),
             # so n_obs / sqrt(252) / "years" mean what the formulas assume.
-            _, eval_matrix = collapse_to_daily(dates, pooled_matrix)
+            days, eval_matrix = collapse_to_daily(dates, pooled_matrix)
             if paths is not None and paths.shape[1] == len(dates):
                 paths = collapse_to_daily(dates, paths.T)[1].T
+            if market_by_date:
+                market_returns = np.array(
+                    [market_by_date.get(d, 0.0) for d in days], dtype=np.float64
+                )
         else:  # legacy artifacts without sample dates: pooled behavior unchanged
             _logger.warning("%s: no sample dates; evaluating on pooled samples", sector)
             eval_matrix = pooled_matrix
@@ -673,7 +693,9 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
         if cfg.evaluation.regime_breakdown_enabled or (
             cfg.evaluation.regime_gate_enabled and decision.promoted
         ):
-            verdict = _regime_verdict(champion_returns, trials, eval_matrix, cfg)
+            verdict = _regime_verdict(
+                champion_returns, trials, eval_matrix, cfg, market_returns=market_returns
+            )
         if cfg.evaluation.regime_breakdown_enabled and verdict is not None:
             decision = replace(
                 decision, regime_breakdown=_regime_breakdown(verdict, cfg)
@@ -787,13 +809,17 @@ def _regime_breakdown(verdict, cfg) -> dict:
     share of days - so a rejection names WHICH regime killed the model."""
     threshold = cfg.evaluation.dsr_promotion_threshold
     states = verdict.states
-    shares = {}
+    shares, runs = {}, {}
     if states is not None:
-        import numpy as _np
-
-        seq = _np.asarray(states)
-        for s in _np.unique(seq):
-            shares[int(s)] = round(float((seq == s).mean()), 3)
+        seq = np.asarray(states)
+        for s in np.unique(seq):
+            mask = (seq == s).astype(int)
+            shares[int(s)] = round(float(mask.mean()), 3)
+            edges = np.flatnonzero(np.diff(np.concatenate([[0], mask, [0]])))
+            lengths = edges.reshape(-1, 2)[:, 1] - edges.reshape(-1, 2)[:, 0]
+            # decode-quality forensic: genuine regimes persist for weeks; a
+            # sign-partition degeneracy shows 1-2 day mean runs.
+            runs[int(s)] = round(float(lengths.mean()), 1) if lengths.size else 0.0
     return {
         "per_regime": {
             int(s): {
@@ -801,6 +827,7 @@ def _regime_breakdown(verdict, cfg) -> dict:
                 "sr_annual": round(float(r.sr_annual), 3),
                 "n_days": int(r.n_obs),
                 "share": shares.get(int(s)),
+                "mean_run_days": runs.get(int(s)),
                 "passes": bool(r.dsr >= threshold),
             }
             for s, r in verdict.per_regime.items()
@@ -810,17 +837,33 @@ def _regime_breakdown(verdict, cfg) -> dict:
     }
 
 
-def _regime_verdict(champion_returns, trials, returns_matrix, cfg) -> RegimeVerdict:
-    """Per-regime DSR gate over the champion's OOS returns: volatility is the
-    champion's own rolling std, regimes are decoded by a Gaussian HMM, and DSR
-    must clear the threshold in every testable regime (thin regimes per policy).
+def _regime_verdict(
+    champion_returns, trials, returns_matrix, cfg, market_returns=None
+) -> RegimeVerdict:
+    """Per-regime DSR gate: the HMM decodes EXOGENOUS market states (equal-
+    weight universe return + its rolling vol) and the champion's OOS returns
+    must clear the DSR threshold within every testable state.
+
+    The decode basis matters: regimes are states of the WORLD, not partitions
+    of the strategy's P&L. Decoding the champion's own returns (the legacy
+    behavior, kept as fallback when no market series is available) degenerates
+    on smooth diversified books into a sign partition — 1-2 day "regimes" of
+    up-days vs down-days that veto any profitable series by construction
+    (recorded instance: Liquid-1500 run 2b71aeff8089, mean state runs 1.8/2.4
+    days, sign fractions 0.99/0.11).
 
     Deflation inputs mirror the full-sample gate exactly: the SAME effective
     trial count (N_eff under ``use_effective_trials``, raw count otherwise) and
     the SAME per-period trial-Sharpe variance. The pre-correction gate passed
     the raw count with ANNUALIZED trial Sharpes, an inconsistent and
     unclearable benchmark (see ``_per_period_trials``)."""
-    volatility = pd.Series(champion_returns).rolling(10).std().bfill().fillna(0.0).to_numpy()
+    basis = champion_returns if market_returns is None else market_returns
+    if market_returns is None:
+        _logger.warning(
+            "regime gate: no market series available; decoding on the champion's "
+            "own returns (legacy fallback — degenerate on smooth books)"
+        )
+    volatility = pd.Series(basis).rolling(10).std().bfill().fillna(0.0).to_numpy()
     evaluator = QuantitativeEvaluator(
         min_dsr_threshold=cfg.evaluation.dsr_promotion_threshold,
         n_components=cfg.evaluation.hmm_states,
@@ -833,5 +876,6 @@ def _regime_verdict(champion_returns, trials, returns_matrix, cfg) -> RegimeVerd
         else len(trials)
     )
     return evaluator.evaluate_model_robustness(
-        champion_returns, volatility, n_trials, trial_sharpes=_per_period_trials(trials)
+        champion_returns, volatility, n_trials,
+        trial_sharpes=_per_period_trials(trials), decode_returns=basis,
     )

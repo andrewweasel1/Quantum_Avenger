@@ -76,6 +76,7 @@ class QuantitativeEvaluator:
         n_trials,
         trial_sharpes=None,
         sentiment=None,
+        decode_returns=None,
     ) -> RegimeVerdict:
         """Decode regimes and require DSR > threshold in every testable regime.
 
@@ -84,12 +85,28 @@ class QuantitativeEvaluator:
         Sharpes inflate the deflation benchmark by sqrt(periods_per_year));
         ``n_trials`` may be a fractional effective count. Pass ``sentiment`` to
         decode regimes in the fused 3-D space.
+
+        ``decode_returns`` is the EXOGENOUS series the HMM decodes (e.g. the
+        equal-weight market return): regimes should be states of the WORLD the
+        strategy is then tested within. Decoding a smooth diversified book's own
+        returns degenerates into a sign partition (1-2 day "regimes" of up-days
+        vs down-days) that vetoes any profitable series by construction — the
+        Liquid-1500 forensics (mean run 1.8-2.4 days, sign fractions 0.99/0.11)
+        are the recorded instance. Default ``None`` keeps the legacy self-decode
+        for backward compatibility.
         """
         returns = np.asarray(strategy_returns, dtype=np.float64)
         volatility = np.asarray(market_volatility, dtype=np.float64)
         sent = None if sentiment is None else np.asarray(sentiment, dtype=np.float64)
+        basis = returns if decode_returns is None else np.asarray(
+            decode_returns, dtype=np.float64
+        )
+        if basis.shape != returns.shape:
+            raise ValueError(
+                f"decode_returns length {basis.shape} != strategy length {returns.shape}"
+            )
 
-        states = self._decode_regimes(returns, volatility, sent)
+        states = self._decode_regimes(basis, volatility, sent)
         if states is None:
             return RegimeVerdict(False, {}, [], None)
 

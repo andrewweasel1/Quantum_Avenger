@@ -262,7 +262,7 @@ def test_regime_gate_defaults_on_with_daily_series_and_reasons(tmp_path, monkeyp
 
     captured = []
 
-    def fake_verdict(champion_returns, trials, eval_matrix, cfg):
+    def fake_verdict(champion_returns, trials, eval_matrix, cfg, market_returns=None):
         captured.append(np.asarray(champion_returns))
         # First sector: a regime failed its DSR; later sectors: nothing testable.
         from types import SimpleNamespace

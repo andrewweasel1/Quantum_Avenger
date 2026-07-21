@@ -74,6 +74,46 @@ def test_regime_gate_mirrors_full_gate_deflation_inputs():
         assert res.dsr == probabilistic_sharpe_ratio(seg, 0.0)
 
 
+def test_exogenous_decode_states_track_market_not_strategy():
+    """Regimes are states of the WORLD: with decode_returns = the market series,
+    (a) two different strategies get IDENTICAL state sequences, and (b) the
+    states follow the market's persistent vol blocks — not the strategy's own
+    up/down days (the sign-partition degeneracy recorded on Liquid-1500)."""
+    import pandas as pd
+    from new_pipeline.evaluation.regime_dsr import QuantitativeEvaluator, ThinRegimePolicy
+
+    rng = np.random.default_rng(5)
+    market = np.concatenate([rng.normal(0.0004, v, 300) for v in (4e-3, 9e-3, 2.2e-2)])
+    # mirror the pipeline: the decode's vol input is a SMOOTH rolling std
+    vol = pd.Series(market).rolling(10).std().bfill().fillna(0.0).to_numpy()
+    strat_a = rng.normal(0.0004, 0.002, market.size)  # smooth book A
+    strat_b = rng.normal(-0.0002, 0.004, market.size)  # different book B
+    ev = QuantitativeEvaluator(0.95, 3, 60, ThinRegimePolicy.SKIP, random_state=0)
+    pp = np.array([0.5] * 4) / np.sqrt(252)
+    va = ev.evaluate_model_robustness(strat_a, vol, 4, trial_sharpes=pp, decode_returns=market)
+    vb = ev.evaluate_model_robustness(strat_b, vol, 4, trial_sharpes=pp, decode_returns=market)
+    np.testing.assert_array_equal(np.asarray(va.states), np.asarray(vb.states))
+    # persistence: market-block decode yields long runs, not 1-2 day sign flips
+    st = np.asarray(va.states)
+    st_runs = []
+    for s in np.unique(st):
+        m = (st == s).astype(int)
+        e = np.flatnonzero(np.diff(np.concatenate([[0], m, [0]])))
+        st_runs.append(float(np.mean(e.reshape(-1, 2)[:, 1] - e.reshape(-1, 2)[:, 0])))
+    assert max(st_runs) > 20  # at least one genuinely persistent state
+
+
+def test_decode_returns_length_mismatch_raises():
+    from new_pipeline.evaluation.regime_dsr import QuantitativeEvaluator, ThinRegimePolicy
+
+    ev = QuantitativeEvaluator(0.95, 3, 60, ThinRegimePolicy.SKIP, random_state=0)
+    with np.testing.assert_raises(ValueError):
+        ev.evaluate_model_robustness(
+            np.zeros(100), np.ones(100), 4,
+            trial_sharpes=[0.01] * 4, decode_returns=np.zeros(99),
+        )
+
+
 def test_realistic_slice_flips_from_veto_to_pass_dead_slice_still_fails():
     """The bug's signature, pinned with run 57e4507c774f's Health Care numbers:
     a 418-day regime slice at daily SR ~0.169 (annualized ~2.7) was vetoed at
