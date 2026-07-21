@@ -234,6 +234,9 @@ long_short:
   calm_rebalance_days: 10
   # Causal vol-decoder percentile window (trading days; 0 = legacy expanding).
   causal_window_days: 252
+  # Learned state->construction mixture as an extra trial column (needs
+  # calm_cost_variants). Off in the frozen champion spec.
+  moe_variants: false
   regime_gate_enabled: false
   regime_experts_enabled: false
   regime_exposures: [1.0, 1.0, 0.0]

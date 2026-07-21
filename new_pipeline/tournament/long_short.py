@@ -121,6 +121,7 @@ def build_long_short_book(
     calm_states: dict | None = None,
     calm_rebalance_band: float | None = None,
     calm_rebalance_days: int | None = None,
+    param_schedule: dict | None = None,
 ) -> LongShortBook:
     """Dollar-neutral rank book from a (date, ticker, sector, score, next_ret)
     panel, re-ranked every ``rebalance_days`` trading days.
@@ -170,11 +171,19 @@ def build_long_short_book(
         for name in [t for t in unit_held if t not in rets]:
             unit_held.pop(name)
         is_calm = bool(calm.get(day_date, False))
+        if param_schedule is not None:
+            # Per-date policy schedule (the MoE column's learned mapping):
+            # (band_override, spacing_override) supersedes the fixed calm rule.
+            band_override, spacing_override = param_schedule.get(day_date, (None, None))
+        elif is_calm:
+            band_override = calm_rebalance_band
+            spacing_override = calm_rebalance_days
+        else:
+            band_override = spacing_override = None
         skip_rebalance = (
-            calm_rebalance_days is not None
-            and is_calm
+            spacing_override is not None
             and last_rebalance is not None
-            and (index - last_rebalance) < calm_rebalance_days
+            and (index - last_rebalance) < spacing_override
         )
         if index % rebalance_days == 0 and not skip_rebalance:
             last_rebalance = index
@@ -184,9 +193,7 @@ def build_long_short_book(
                 ranked = day.sort("score", descending=True)["ticker"].to_list()
                 k = max(1, int(n * quantile))
                 effective_band = (
-                    calm_rebalance_band
-                    if (is_calm and calm_rebalance_band is not None)
-                    else rebalance_band
+                    band_override if band_override is not None else rebalance_band
                 )
                 if effective_band > 0.0:
                     # Hysteresis: hold a name until its rank leaves the widened
@@ -276,6 +283,49 @@ def dispersion_scalars(panel: pl.DataFrame, window: int = 5, floor: float = 0.25
         if v is not None and not np.isnan(v):
             history.append(float(v))
     return scalars
+
+
+MOE_CONSTRUCTIONS = ("ls", "ls_calmband", "ls_calmslow", "ls_calmboth")
+
+
+def moe_params(construction: str, calm_band: float, calm_days: int) -> tuple:
+    """(band_override, spacing_override) a construction applies on a calm day."""
+    return {
+        "ls": (None, None),
+        "ls_calmband": (calm_band, None),
+        "ls_calmslow": (None, calm_days),
+        "ls_calmboth": (calm_band, calm_days),
+    }[construction]
+
+
+def learn_construction_schedule(
+    dates: list, state_map: dict, nets: dict, calm_band: float, calm_days: int,
+    min_obs: int = 60,
+) -> tuple[dict, dict]:
+    """Mixture-of-experts over the calm-policy CONSTRUCTIONS: for each date,
+    the params of the construction with the best in-state Sharpe over an
+    EXPANDING window of strictly-prior days (>=min_obs observations in today's
+    state; else the untreated control "ls" — a conservative, pre-registered
+    fallback). Off calm days every construction's params are inert, so the
+    learner effectively asks one question: which calm policy has been working?
+
+    Returns ({date: (band_override, spacing_override)}, {date: construction}).
+    """
+    names = [c for c in MOE_CONSTRUCTIONS if c in nets]
+    mat = np.stack([np.asarray(nets[c], dtype=np.float64) for c in names])
+    seq = np.asarray([state_map.get(d, 0) for d in dates])
+    schedule, choices = {}, {}
+    for i, day in enumerate(dates):
+        mask = seq[:i] == seq[i]
+        if int(mask.sum()) >= min_obs:
+            sub = mat[:, :i][:, mask]
+            stds = np.where(sub.std(axis=1) == 0, np.inf, sub.std(axis=1))
+            choice = names[int(np.argmax(sub.mean(axis=1) / stds))]
+        else:
+            choice = "ls"
+        choices[day] = choice
+        schedule[day] = moe_params(choice, calm_band, calm_days)
+    return schedule, choices
 
 
 def build_hedged_book(
@@ -526,6 +576,10 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     # Rolling-window causal decoder span (0/None = legacy expanding); see
     # causal_states_from_series for the prevalence-mismatch rationale.
     causal_span = getattr(ls, "causal_window_days", 252) or None
+    moe_variants = getattr(ls, "moe_variants", False)
+    if moe_variants and not getattr(ls, "calm_cost_variants", False):
+        _logger.warning("long-short: moe_variants requires calm_cost_variants; MoE skipped")
+        moe_variants = False
     if calm_cost_variants and structure_variants:
         _logger.warning("long-short: calm_cost_variants supersedes structure_variants")
         structure_variants = False
@@ -563,6 +617,12 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         calm_band = getattr(ls, "calm_rebalance_band", 1.5)
         calm_days = getattr(ls, "calm_rebalance_days", 10)
         constructions = ["ls", "ls_calmband", "ls_calmslow", "ls_calmboth"]
+        if moe_variants:
+            # Learned state->construction mixture rides as ONE extra column per
+            # combo; built via book_from_panel so trials, CPCV paths, and the
+            # permutation null all share the same mechanics (statics rebuilt +
+            # schedule relearned from whatever panel they are given).
+            constructions = constructions + ["moe"]
         calm_kwargs = {
             "ls": {},
             "ls_calmband": {"calm_states": calm_map, "calm_rebalance_band": calm_band},
@@ -607,7 +667,24 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         )
         return smooth_scores(panel, smoothing)
 
+    moe_choices: dict = {}
+
     def book_from_panel(construction: str, panel: pl.DataFrame) -> LongShortBook:
+        if construction == "moe":
+            statics = {c: book_from_panel(c, panel) for c in MOE_CONSTRUCTIONS}
+            base = statics["ls"]
+            schedule, choices = learn_construction_schedule(
+                base.dates, state_map, {c: b.net for c, b in statics.items()},
+                calm_band, calm_days,
+            )
+            if not moe_choices:  # first (trials) build only — nulls/paths
+                moe_choices.update(choices)  # rebuild and would overwrite
+            return build_long_short_book(
+                panel, ls.quantile, ls.cost_bps, ls.min_names_per_day,
+                ls.sector_neutral, rebalance_days, vol_target, vol_lookback,
+                regime_scalars, rebalance_band, short_borrow,
+                param_schedule=schedule,
+            )
         if construction != "ls" and construction in variant_kwargs:
             return build_hedged_book(
                 panel, ls.quantile, ls.cost_bps, ls.min_names_per_day,
@@ -735,6 +812,13 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         diagnostics["calm_rebalance_band"] = getattr(ls, "calm_rebalance_band", 1.5)
         diagnostics["calm_rebalance_days"] = getattr(ls, "calm_rebalance_days", 10)
         diagnostics["causal_window_days"] = causal_span or 0
+    if moe_variants and moe_choices:
+        calm_days_set = [d for d, c in moe_choices.items() if state_map.get(d, 0) == 0]
+        from collections import Counter
+
+        diagnostics["moe_calm_choices"] = dict(
+            Counter(moe_choices[d] for d in calm_days_set)
+        )
     best_grid = (
         {"construction": best_construction, **combos[best_combo]}
         if len(constructions) > 1

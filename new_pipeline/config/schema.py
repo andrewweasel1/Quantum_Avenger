@@ -253,6 +253,11 @@ class LongShortConfig(BaseModel):
     # neutered the calm-cost policy in run 711bdbd6845a). Evidence-informed,
     # pre-registered; not a scan surface.
     causal_window_days: int = 252
+    # Mixture-of-experts column: per date, apply the calm-policy construction
+    # with the best in-state Sharpe over an EXPANDING strictly-prior window
+    # (fallback: untreated control). One extra trial column per combo; requires
+    # calm_cost_variants (it learns over those four constructions).
+    moe_variants: bool = False
     # Regime-conditional options (independently flaggable; share one causal
     # expanding-percentile market-vol state decoder, 0 = calmest state):
     # gate scales exposure per state; experts pick the best-in-state combo.

@@ -490,3 +490,83 @@ def test_calm_cost_variants_expand_the_trial_matrix(tmp_path):
     assert entry["diagnostics"]["calm_rebalance_days"] == 10
     matrix = pl.read_parquet(tmp_path / "universe_long_short_returns_matrix.parquet")
     assert matrix.width == 4
+
+
+def test_param_schedule_reproduces_calm_policy_exactly():
+    """A schedule carrying (calm params on calm days, None elsewhere) must be
+    BIT-IDENTICAL to the fixed calm-policy path — the MoE column differs only
+    in WHICH params each date gets, never in mechanics."""
+    rng = np.random.default_rng(6)
+    d0 = date(2021, 1, 4)
+    days = [date.fromordinal(d0.toordinal() + i) for i in range(30)]
+    rows = [[d, t, "Tech", 1.0 - 0.1 * j + float(rng.normal(0, 0.5)), 0.01]
+            for d in days for j, t in enumerate("ABCDEFGH")]
+    panel = _panel(rows)
+    calm = {d: (i % 10) < 5 for i, d in enumerate(days)}
+    fixed = build_long_short_book(panel, 0.25, 10.0, 8, rebalance_days=2,
+                                  calm_states=calm, calm_rebalance_band=2.0,
+                                  calm_rebalance_days=6)
+    schedule = {d: ((2.0, 6) if calm[d] else (None, None)) for d in days}
+    scheduled = build_long_short_book(panel, 0.25, 10.0, 8, rebalance_days=2,
+                                      param_schedule=schedule)
+    np.testing.assert_array_equal(fixed.net, scheduled.net)
+    np.testing.assert_array_equal(fixed.turnover, scheduled.turnover)
+
+
+def test_learn_construction_schedule_picks_dominant_with_control_fallback():
+    from new_pipeline.tournament.long_short import learn_construction_schedule, moe_params
+
+    d0 = date(2020, 1, 1)
+    days = [date.fromordinal(d0.toordinal() + i) for i in range(200)]
+    states = {d: (0 if i % 2 == 0 else 1) for i, d in enumerate(days)}
+    rng = np.random.default_rng(1)
+    base = rng.normal(0.0, 0.01, 200)
+    nets = {
+        "ls": base,
+        "ls_calmband": base + 0.002,   # dominant everywhere it differs
+        "ls_calmslow": base - 0.001,
+        "ls_calmboth": base,
+    }
+    schedule, choices = learn_construction_schedule(days, states, nets, 1.5, 10, min_obs=60)
+    warmup = [c for d, c in list(choices.items())[:119]]
+    assert set(warmup) == {"ls"}  # <60 in-state obs -> untreated control
+    late = [choices[d] for d in days[130:]]
+    assert all(c == "ls_calmband" for c in late)  # learner finds the dominant policy
+    assert schedule[days[150]] == moe_params("ls_calmband", 1.5, 10)
+
+
+def test_moe_variant_adds_learned_column(tmp_path):
+    from types import SimpleNamespace
+
+    from new_pipeline.tournament.long_short import run_universe_long_short
+
+    rng = np.random.default_rng(8)
+    d0 = date(2021, 1, 4)
+    days = [date.fromordinal(d0.toordinal() + i) for i in range(90)]
+    rows = []
+    for d in days:
+        for t in [f"T{i}" for i in range(8)]:
+            rows.append({
+                "date": d, "ticker": t, "next_ret": float(rng.normal(0, 0.01)),
+                "proba_c0_p0": float(rng.uniform()), "proba_c0_p1": float(rng.uniform()),
+            })
+    pl.DataFrame(rows).write_parquet(tmp_path / "tech_oos_proba.parquet")
+    (tmp_path / "tech_candidate.json").write_text("{}")
+    cfg = SimpleNamespace(long_short=SimpleNamespace(
+        enabled=True, quantile=0.25, cost_bps=5.0, min_names_per_day=6,
+        sector_neutral=False, null_iterations=2, null_quantile=0.95,
+        rebalance_days=5, score_smoothing_days=1, vol_target_annual=0.0,
+        vol_lookback_days=20, rebalance_band=0.5, regime_gate_enabled=False,
+        regime_experts_enabled=False, eval_start=None, structure_variants=False,
+        calm_cost_variants=True, calm_rebalance_band=1.5, calm_rebalance_days=10,
+        causal_window_days=252, moe_variants=True, short_borrow_bps=0.0,
+        hedge_cost_bps=2.0,
+    ))
+    entry = run_universe_long_short(
+        {"Tech": {"candidate_path": str(tmp_path / "tech_candidate.json")}}, tmp_path, cfg
+    )
+    trials = entry["diagnostics"]["structure_trials"]
+    assert "moe|combo0" in trials and len(trials) == 5
+    matrix = pl.read_parquet(tmp_path / "universe_long_short_returns_matrix.parquet")
+    assert matrix.width == 5
+    assert "moe_calm_choices" in entry["diagnostics"]
