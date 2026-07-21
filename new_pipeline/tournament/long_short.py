@@ -523,6 +523,9 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     calm_cost_variants = getattr(ls, "calm_cost_variants", False)
     short_borrow = getattr(ls, "short_borrow_bps", 0.0)
     hedge_cost = getattr(ls, "hedge_cost_bps", 2.0)
+    # Rolling-window causal decoder span (0/None = legacy expanding); see
+    # causal_states_from_series for the prevalence-mismatch rationale.
+    causal_span = getattr(ls, "causal_window_days", 252) or None
     if calm_cost_variants and structure_variants:
         _logger.warning("long-short: calm_cost_variants supersedes structure_variants")
         structure_variants = False
@@ -536,7 +539,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         exposures = list(getattr(ls, "regime_exposures", [1.0, 1.0, 0.0]))
         states = causal_market_regimes(
             pl.concat(panels).select("date", "ticker", "next_ret"),
-            n_states=len(exposures),
+            n_states=len(exposures), span=causal_span,
         )
         if use_gate:
             regime_scalars = {d: exposures[s] for d, s in states.items()}
@@ -551,9 +554,10 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         # is state-invariant while calm-state gross sits at the cost line).
         # Control + band-only + cadence-only + both, all judged in ONE returns
         # matrix so DSR deflation prices the selection. States come from the
-        # leak-free causal decoder on the FULL panel history (0 = calmest).
+        # leak-free causal decoder on the FULL panel history (0 = calmest),
+        # rolling over causal_span days so calm prevalence tracks the era.
         state_map = causal_market_regimes(
-            pl.concat(panels).select("date", "ticker", "next_ret")
+            pl.concat(panels).select("date", "ticker", "next_ret"), span=causal_span
         )
         calm_map = {d: s == 0 for d, s in state_map.items()}
         calm_band = getattr(ls, "calm_rebalance_band", 1.5)
@@ -579,7 +583,9 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
         # Maps use the FULL panel history (warmup), like the causal decoder.
         full_panel = pl.concat(panels)
         market_map = panel_market_by_date(full_panel)
-        state_map = causal_market_regimes(full_panel.select("date", "ticker", "next_ret"))
+        state_map = causal_market_regimes(
+            full_panel.select("date", "ticker", "next_ret"), span=causal_span
+        )
         short_gate = {d: (0.0 if s == 0 else 1.0) for d, s in state_map.items()}
         disp_map = dispersion_scalars(full_panel)
         common = {
@@ -728,6 +734,7 @@ def run_universe_long_short(results: dict, output_dir, cfg) -> dict | None:
     if calm_cost_variants:
         diagnostics["calm_rebalance_band"] = getattr(ls, "calm_rebalance_band", 1.5)
         diagnostics["calm_rebalance_days"] = getattr(ls, "calm_rebalance_days", 10)
+        diagnostics["causal_window_days"] = causal_span or 0
     best_grid = (
         {"construction": best_construction, **combos[best_combo]}
         if len(constructions) > 1

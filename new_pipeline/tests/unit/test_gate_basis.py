@@ -100,3 +100,27 @@ def test_regime_breakdown_carries_causal_cross_check():
     out = _regime_breakdown(verdict, base.get_config(), causal=causal)
     assert out["causal_states"] == causal
     assert "causal_states" not in _regime_breakdown(verdict, base.get_config())
+
+
+def test_rolling_span_reanchors_calm_prevalence_across_vol_eras():
+    """The adoption rationale, pinned: after a secular vol re-rating, the
+    EXPANDING decoder almost never labels the new era calm (the old ultra-calm
+    era owns the low percentiles), while a rolling window re-anchors and keeps
+    ~1/3 of each era in the calm tercile. span=None stays bit-identical to the
+    legacy decoder."""
+    rng = np.random.default_rng(7)
+    days = [date.fromordinal(date(2017, 1, 2).toordinal() + i) for i in range(1000)]
+    # era 1: ultra-calm (vol 3e-3); era 2: re-rated 3x higher, internally varied
+    market = np.concatenate([
+        rng.normal(0, 3e-3, 400),
+        rng.normal(0, 9e-3, 200), rng.normal(0, 1.5e-2, 200), rng.normal(0, 9e-3, 200),
+    ])
+    expanding = causal_states_from_series(days, market, span=None)
+    legacy = causal_states_from_series(days, market)  # default span arg is None
+    assert expanding == legacy
+    rolling = causal_states_from_series(days, market, span=252)
+    era2 = days[500:]
+    calm_exp = np.mean([expanding[d] == 0 for d in era2])
+    calm_roll = np.mean([rolling[d] == 0 for d in era2])
+    assert calm_exp < 0.10  # old anchor starves the new era of calm labels
+    assert 0.15 < calm_roll < 0.55  # rolling window restores era-relative terciles

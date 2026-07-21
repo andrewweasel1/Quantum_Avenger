@@ -724,7 +724,12 @@ def _evaluate_and_promote(frame: pl.DataFrame, results: dict, output_dir, cfg) -
             )
         if cfg.evaluation.regime_breakdown_enabled and verdict is not None:
             causal = (
-                _causal_breakdown(champion_returns, days, market_by_date)
+                # mirror the TRADABLE decoder's spec (long_short.causal_window_days)
+                # so the cross-check describes the instrument a policy would use
+                _causal_breakdown(
+                    champion_returns, days, market_by_date,
+                    span=getattr(cfg.long_short, "causal_window_days", 252) or None,
+                )
                 if (market_by_date and days is not None)
                 else None
             )
@@ -834,7 +839,7 @@ def _deflated_sharpe(champion_returns, trials, returns_matrix, cfg) -> float:
     return compute_deflated_sharpe_ratio(champion_returns, trials_pp)
 
 
-def _causal_breakdown(champion_returns, days, market_by_date) -> dict:
+def _causal_breakdown(champion_returns, days, market_by_date, span=None) -> dict:
     """Leak-free cross-check of the HMM verdict: the champion's per-state
     economics under the causal expanding-percentile vol decoder (deterministic,
     no fit, no look-ahead). Pure observability — the HMM stays the judge; when
@@ -844,7 +849,7 @@ def _causal_breakdown(champion_returns, days, market_by_date) -> dict:
 
     all_days = sorted(market_by_date)
     states = causal_states_from_series(
-        all_days, [market_by_date[d] for d in all_days]
+        all_days, [market_by_date[d] for d in all_days], span=span
     )
     seq = np.array([states.get(d, 0) for d in days])
     returns = np.asarray(champion_returns, dtype=np.float64)

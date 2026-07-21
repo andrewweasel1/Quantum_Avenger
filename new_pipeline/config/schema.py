@@ -246,6 +246,13 @@ class LongShortConfig(BaseModel):
     # Minimum days between re-ranks while calm (rounds up to the
     # rebalance_days grid; forced exits still charged on skipped days).
     calm_rebalance_days: int = 10
+    # Causal vol-decoder percentile window in trading days (0 = legacy
+    # expanding). Rolling 252 keeps calm-state prevalence stationary across
+    # vol eras — the expanding window's 2016-17 anchor shrank "calm" to ~9%
+    # of census-window days vs the evaluation HMM's ~46% (the mismatch that
+    # neutered the calm-cost policy in run 711bdbd6845a). Evidence-informed,
+    # pre-registered; not a scan surface.
+    causal_window_days: int = 252
     # Regime-conditional options (independently flaggable; share one causal
     # expanding-percentile market-vol state decoder, 0 = calmest state):
     # gate scales exposure per state; experts pick the best-in-state combo.

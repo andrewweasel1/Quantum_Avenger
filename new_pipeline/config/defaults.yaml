@@ -229,6 +229,8 @@ long_short:
   calm_cost_variants: false
   calm_rebalance_band: 1.5
   calm_rebalance_days: 10
+  # Causal vol-decoder percentile window (trading days; 0 = legacy expanding).
+  causal_window_days: 252
   regime_gate_enabled: false
   regime_experts_enabled: false
   regime_exposures: [1.0, 1.0, 0.0]
