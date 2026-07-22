@@ -29,7 +29,6 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-from new_pipeline.config import get_config
 from new_pipeline.evaluation.promotion import PromotionRegistry
 from new_pipeline.tournament.long_short import (
     LONG_SHORT_KEY,
@@ -157,7 +156,19 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    cfg = get_config()
+    # Score under the FROZEN CHAMPION's config (feature families, factors,
+    # events, fundamentals fixture, universe) — library defaults would build a
+    # frame missing the columns the deployed boosters select. News/sentiment
+    # features are not in any deployed manifest (causal screen dropped them),
+    # so fusion stays off here: the neutral sentiment_score column suffices.
+    from new_pipeline.api.overrides import build_overridden_config
+
+    body = json.loads(Path("new_pipeline/config/champion_run_body.json").read_text())
+    overrides = body["overrides"]
+    overrides.pop("news", None)
+    overrides.setdefault("fusion", {})["enabled"] = False
+    overrides.setdefault("system", {})["run_mode"] = "paper"
+    cfg = build_overridden_config(overrides)
     _assert_paper(cfg)
     registry = PromotionRegistry(args.registry)
     champions = registry.active_champions()
@@ -174,7 +185,8 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
             continue
         selected = Path(path).with_name(Path(path).name.replace(
             "_candidate.json", "_candidate_features.json"))
-        boosters[key] = (load_booster(path), json.loads(selected.read_text()))
+        manifest_features = json.loads(selected.read_text())
+        boosters[key] = (load_booster(path), manifest_features["features"])
     if not boosters:
         raise SystemExit("no sector boosters promoted; the book needs per-name "
                          "scores (promote with --all-sectors)")
@@ -183,7 +195,9 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     from new_pipeline.adapters.broker_alpaca import AlpacaBroker
     from new_pipeline.tournament.pipeline import build_training_frame
 
-    universe = StaticUniverseProvider(Path(cfg.data.universe_path) or None)
+    universe = StaticUniverseProvider(
+        Path(cfg.data.universe_path) if cfg.data.universe_path else None
+    )
     sectors = universe.sectors()
     start = date.today() - timedelta(days=args.lookback_days)
     frame = build_training_frame(
