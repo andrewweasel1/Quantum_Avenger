@@ -251,10 +251,21 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     if not args.execute:
         print("DRY RUN — pass --execute to submit to the paper account")
         return
+    submitted, skipped = 0, []
     for order in orders:
-        receipt = broker.submit_order(order)
-        _logger.info("submitted %s %s x%s -> %s", order['side'], order['symbol'],
-                     order['qty'], receipt['status'])
+        try:
+            receipt = broker.submit_order(order)
+            submitted += 1
+            _logger.info("submitted %s %s x%s -> %s", order['side'], order['symbol'],
+                         order['qty'], receipt['status'])
+        except Exception as exc:  # not-shortable / halted / rejected: skip, keep going
+            skipped.append((order["symbol"], order["side"], str(exc)[:90]))
+            _logger.warning("SKIPPED %s %s: %s", order['side'], order['symbol'], exc)
+    print(f"submitted {submitted}/{len(orders)} orders; skipped {len(skipped)}")
+    if skipped:
+        from collections import Counter
+        reasons = Counter(m.split('"message":')[-1][:40] for _, _, m in skipped)
+        print("  top skip reasons:", dict(reasons.most_common(3)))
     Path(args.state_file).parent.mkdir(parents=True, exist_ok=True)
     Path(args.state_file).write_text(json.dumps(new_state, indent=1))
     print(f"state saved -> {args.state_file}")
