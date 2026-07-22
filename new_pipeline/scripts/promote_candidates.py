@@ -113,7 +113,7 @@ def retire_keys(registry_path, keys=None, all_sectors=False) -> list[dict]:
 
 def main() -> None:  # pragma: no cover - argparse shell around tested core
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--run-dir", required=True,
+    parser.add_argument("--run-dir", default=None,
                         help="a run's output/ directory (registry + artifacts)")
     parser.add_argument("--key", action="append", default=None,
                         help="registry key to promote (repeatable), e.g. "
@@ -132,6 +132,8 @@ def main() -> None:  # pragma: no cover - argparse shell around tested core
                                  all_sectors=args.retire_all_sectors):
             print(f"retired {entry['sector']!r}")
         return
+    if not args.run_dir:
+        parser.error("--run-dir is required unless retiring")
     entries = manual_promote(args.run_dir, keys=args.key, all_sectors=args.all_sectors,
                              registry_path=args.registry, dest_root=args.dest)
     for entry in entries:

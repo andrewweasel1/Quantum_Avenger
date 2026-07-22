@@ -895,22 +895,100 @@
       "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
       "timestamp": "2026-07-22T14:24:54.788002+00:00",
       "model_path": "models/prod/manual/2b80e4593cfc/universe_long_short_candidate.json"
+    },
+    {
+      "sector": "Health Care",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.832324+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Mid Cap Extended",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.833870+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Small Cap Extended",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.835191+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Industrials",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.837969+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.839196+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Information Technology",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.840495+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Financials",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.841716+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Consumer Staples",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.842954+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Utilities",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.844266+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Real Estate",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.845568+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Materials",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.846794+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Energy",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.848075+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Communication Services",
+      "promoted": false,
+      "reason": "MANUAL RETIREMENT",
+      "timestamp": "2026-07-22T16:31:59.849318+00:00",
+      "model_path": null
     }
   ],
   "active_champions": {
-    "Health Care": "models/prod/manual/2b80e4593cfc/health_care_candidate.json",
-    "Mid Cap Extended": "models/prod/manual/2b80e4593cfc/mid_cap_extended_candidate.json",
-    "Small Cap Extended": "models/prod/manual/2b80e4593cfc/small_cap_extended_candidate.json",
-    "Industrials": "models/prod/manual/2b80e4593cfc/industrials_candidate.json",
-    "Consumer Discretionary": "models/prod/manual/2b80e4593cfc/consumer_discretionary_candidate.json",
-    "Information Technology": "models/prod/manual/2b80e4593cfc/information_technology_candidate.json",
-    "Financials": "models/prod/manual/2b80e4593cfc/financials_candidate.json",
-    "Consumer Staples": "models/prod/manual/2b80e4593cfc/consumer_staples_candidate.json",
-    "Utilities": "models/prod/manual/2b80e4593cfc/utilities_candidate.json",
-    "Real Estate": "models/prod/manual/2b80e4593cfc/real_estate_candidate.json",
-    "Materials": "models/prod/manual/2b80e4593cfc/materials_candidate.json",
-    "Energy": "models/prod/manual/2b80e4593cfc/energy_candidate.json",
-    "Communication Services": "models/prod/manual/2b80e4593cfc/communication_services_candidate.json",
     "Universe Long Short": "models/prod/manual/2b80e4593cfc/universe_long_short_candidate.json"
   }
 }
