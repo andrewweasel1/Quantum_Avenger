@@ -192,6 +192,10 @@ def build_training_frame(
         .agg(pl.col("next_ret").mean().alias("market_next_ret"))
     )
     joined = joined.join(market, on="date", how="left")
+    if cfg.features.market_state_features:
+        from new_pipeline.features.market_state import add_market_state_features
+
+        joined = add_market_state_features(joined)
     if cfg.features.factor_set:
         if fundamentals_source is not None and any(
             factor in FUNDAMENTAL_FACTORS for factor in cfg.features.factor_set
@@ -379,6 +383,10 @@ def run_offline_pipeline(
     if cfg.features.extended_features:
         feature_cols += extended_feature_names(cfg.features.extended_features)
     feature_cols += _event_feature_names(cfg)  # [] unless features.event_features
+    if cfg.features.market_state_features:
+        from new_pipeline.features.market_state import MARKET_STATE_COLS
+
+        feature_cols += list(MARKET_STATE_COLS)
     if cfg.features.short_flow_features and short_volume_source is not None:
         feature_cols += SHORT_FLOW_COLS
     results = run_sector_tournament(frame, feature_cols, output_dir)

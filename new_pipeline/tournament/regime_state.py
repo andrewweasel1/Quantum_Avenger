@@ -54,3 +54,22 @@ def causal_states_from_series(days: list, market_returns, vol_lookback: int = 20
         if v is not None and not np.isnan(v):
             history.append(float(v))
     return states
+
+
+def causal_percentiles(days: list, values, span: int | None = 252,
+                       min_history: int = 20, fill: float = 0.5) -> dict:
+    """{date: percentile in [0, 1]} of each value against STRICTLY PRIOR values
+    over a trailing ``span`` window — the continuous form of the tercile
+    decoder, sharing its discipline (today's value never ranks against itself).
+    Warmup and NaN days carry the neutral ``fill``."""
+    arr = np.asarray([np.nan if v is None else float(v) for v in values])
+    out, history = {}, []
+    for day, v in zip(days, arr, strict=True):
+        if np.isnan(v) or len(history) < min_history:
+            out[day] = fill
+        else:
+            window = np.asarray(history[-span:] if span else history)
+            out[day] = float(np.mean(window <= v))
+        if not np.isnan(v):
+            history.append(float(v))
+    return out

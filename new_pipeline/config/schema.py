@@ -42,6 +42,10 @@ class FeatureConfig(BaseModel):
     # materializes when its source is active: filing features need fundamental
     # factors in factor_set; the news burst needs fusion.enabled.
     event_features: bool = False
+    # Per-date causal market-state features (trend/vol percentile ranks,
+    # rolling-252) broadcast to every name: interaction context for the trees,
+    # judged by the causal screen like any feature. Default off (bit-stable).
+    market_state_features: bool = False
     # Short-flow family (FINRA daily short-volume): short_ratio + trailing
     # z-score + change. Needs short_volume.vault_path set. Default off.
     short_flow_features: bool = False

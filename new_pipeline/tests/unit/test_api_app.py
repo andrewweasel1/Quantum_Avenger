@@ -40,6 +40,13 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "new_pipeline.api.jobs.subprocess.Popen", lambda *a, **k: _FakePopen(*a, **k)
     )
+    # Isolate from the repo's DEPLOYED registry (models/prod/ is committed now:
+    # the paper-trading champion lives there) — "empty" endpoints need an
+    # empty registry path, not the production one.
+    monkeypatch.setenv("QA_EVALUATION__REGISTRY_PATH", str(tmp_path / "empty_registry.json"))
+    from new_pipeline.config import reload_config
+
+    reload_config()
     return TestClient(create_app(runs_dir=tmp_path / "runs"))
 
 

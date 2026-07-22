@@ -38,6 +38,9 @@ features:
   # Event-time family: days_since_filing/ret_since_filing (needs fundamental
   # factors in factor_set) + news_burst_21 (needs fusion.enabled). Default off.
   event_features: false
+  # Per-date causal market trend/vol percentile features (regime context for
+  # the trees; per-date constants, so their value shows via MDA not IC).
+  market_state_features: false
   fracdiff_d: 0.4
   fracdiff_threshold: 0.001
   vol_window: 20
