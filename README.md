@@ -23,7 +23,7 @@ spec is frozen and re-run unchanged as forward data accrues. The registry
 ```
 FINRA census ─┐                                  ┌─ 13 sector models (CPCV grid)
 Alpaca SIP ───┼─ point-in-time Liquid-1500 ──────┤
-EDGAR vault ──┤   features/factors/events        └─ Universe L/S book (16-20
+EDGAR vault ──┤   features/factors/events        └─ Universe L/S book (16-20+
 GDELT vault ──┘                                      deflated trial columns)
                                                         │
               DSR·N_eff │ PBO │ PSR │ CPCV paths │ permutation null │
@@ -58,30 +58,175 @@ curl -X POST localhost:8000/api/runs -H 'Content-Type: application/json' \
 Credentials live ONLY in environment variables — `QA_ALPACA__API_KEY` /
 `QA_ALPACA__SECRET_KEY` (paper keys start with `PK`). Never commit keys.
 
-## Deploying to a live system (with GPU)
+## Deploying WITHOUT containers (bare metal / VM)
 
-Container topology lives in `new_pipeline/hardening/`:
+Everything is plain Python; Docker/K8s are optional packaging. A single box
+(4+ cores, 16GB RAM, ~20GB disk for vaults/runs) runs the whole system:
 
 ```bash
-# CPU stack: API+dashboard, app, MCP, Prometheus
-docker compose -f new_pipeline/hardening/docker/docker-compose.yml up -d --build
+git clone <repo> && cd Quantum_Avenger
+python3.11 -m venv .venv && . .venv/bin/activate
+pip install -r new_pipeline/requirements.txt
 
-# GPU trainer image (host needs the NVIDIA container toolkit):
-docker build -f new_pipeline/hardening/docker/Dockerfile.gpu -t quantum-avenger-gpu .
-docker run --gpus all \
-  -e QA_TOURNAMENT__DEVICE=cuda -e QA_GPU__CUDA_ENABLED=true \
-  -e QA_ALPACA__API_KEY -e QA_ALPACA__SECRET_KEY \
-  quantum-avenger-gpu pipeline
+# secrets + service config in an env file OUTSIDE the repo, e.g. /etc/quantum-avenger.env:
+#   QA_ALPACA__API_KEY=PK...          QA_ALPACA__SECRET_KEY=...
+#   QA_API_RUNS_DIR=/var/lib/quantum-avenger/runs
+#   QA_EXECUTION__LEDGER_DIR=/var/lib/quantum-avenger/ledger
+
+set -a; . /etc/quantum-avenger.env; set +a
+python -m new_pipeline.api.app          # API + dashboard on 127.0.0.1:8000
 ```
 
-XGBoost picks up the GPU via `tournament.device=cuda`; CPU/GPU kernel parity
-is asserted by the GPU-marked tests (`.github/workflows/nightly-gpu.yml`).
+As systemd units (survives reboots; run daily jobs with timers):
 
-Kubernetes: apply `new_pipeline/hardening/k8s/` (`deployment.yaml`,
-`api.yaml`, `configmap.yaml`, `hpa.yaml`, `networkpolicy.yaml`; put the
-Alpaca pair in `secrets.yaml` via your secret manager — the committed file is
-a template). The dashboard/API serves on the `api` service; runs execute as
-isolated subprocesses inside the api pod, so size its requests accordingly.
+```ini
+# /etc/systemd/system/qa-api.service
+[Service]
+WorkingDirectory=/opt/Quantum_Avenger
+EnvironmentFile=/etc/quantum-avenger.env
+ExecStart=/opt/Quantum_Avenger/.venv/bin/python -m new_pipeline.api.app
+Restart=on-failure
+
+# /etc/systemd/system/qa-paper.service (+ a .timer for Mon-Fri 15:30 ET)
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/Quantum_Avenger
+EnvironmentFile=/etc/quantum-avenger.env
+ExecStart=/opt/Quantum_Avenger/.venv/bin/python -m new_pipeline.scripts.paper_trade_book --execute
+```
+
+Put the API behind any TLS reverse proxy (nginx/caddy) if exposed; it also
+runs fine bound to localhost with SSH tunneling. GPU on bare metal: install
+CUDA 12 + a GPU xgboost wheel and set `QA_TOURNAMENT__DEVICE=cuda`
+`QA_GPU__CUDA_ENABLED=true` — no container required.
+
+## Deploying with Docker / Kubernetes (optional)
+
+```bash
+docker compose -f new_pipeline/hardening/docker/docker-compose.yml up -d --build
+docker build -f new_pipeline/hardening/docker/Dockerfile.gpu -t quantum-avenger-gpu .
+docker run --gpus all -e QA_TOURNAMENT__DEVICE=cuda -e QA_GPU__CUDA_ENABLED=true \
+  -e QA_ALPACA__API_KEY -e QA_ALPACA__SECRET_KEY quantum-avenger-gpu pipeline
+```
+
+Kubernetes manifests: `new_pipeline/hardening/k8s/` (`deployment.yaml`,
+`api.yaml`, `configmap.yaml`, `hpa.yaml`, `networkpolicy.yaml`;
+`secrets.yaml` is a template — fill via your secret manager).
+
+## Configuration & flags
+
+One config system everywhere: `new_pipeline/config/defaults.yaml` (documented
+defaults = the frozen champion's book construction) validated by
+`config/schema.py` (the exhaustive typed reference). Every key is overridable
+two ways, deepest-wins:
+
+1. **Environment**: `QA_<SECTION>__<KEY>` — e.g. `QA_LONG_SHORT__EVAL_START=2018-09-01`,
+   `QA_TOURNAMENT__NUM_BOOST_ROUND=50`, `QA_FUSION__ENABLED=true`.
+2. **Run body**: the `overrides` object POSTed to `/api/runs` (see
+   `config/champion_run_body.json`) — this is how official runs pin their spec.
+
+Load-bearing knobs by section (see `schema.py` for every field):
+
+| Section | Knob | Meaning (champion value) |
+|---|---|---|
+| `data` | `universe_path` | PIT membership CSV (`liquid1500_pit.csv`) |
+| `alpaca` | `data_feed` | `sip` (full history incl. delisted) |
+| `features` | `label_horizon`, `factor_set`, `extended_features`, `event_features`, `factor_null_policy` | 21d triple-barrier; 4 price + 3 fundamental factors; 7 families; on; `neutral` |
+| `fusion` | `enabled`, `sentiment_backend`, `markov_features` | on / `vader` / off |
+| `fundamentals` | `fixture_path` | committed EDGAR vault (`liquid_snapshots.csv`) |
+| `news` | `providers`, `vault_dir` | `["vault"]` + local GDELT vault |
+| `tournament` | `num_boost_round`, `feature_selection_method`, `sample_weighting`, `enable_meta_labeling` | 100 / `causal` / `uniqueness` / off (tested: no effect) |
+| `execution` | `backtest_slippage_enabled`, `account_capital`, `confidence_threshold` | on / notional for impact + paper sizing / 0.55 |
+| `long_short` | `enabled`, `quantile`, `cost_bps`, `rebalance_days`, `score_smoothing_days`, `rebalance_band`, `vol_target_annual`, `eval_start`, `short_borrow_bps`, `causal_window_days` | the champion book: on/0.2/10/5/5/0.5/0.05/2018-09-01/50/252 |
+| `long_short` (variant trials) | `calm_cost_variants`, `calm_rebalance_band`, `calm_rebalance_days`, `moe_variants`, `structure_variants` | factorial columns priced by deflation: on/1.5/10/off/off |
+| `evaluation` | `dsr_promotion_threshold`, `regime_family_wise`, `cpcv_path_gate_enabled`, `pbo_threshold`, `reality_check_enabled` | THE GATES — 0.95 / on (bar `T^K`) / on (≥0.5) / 0.5 / observability. Do not soften. |
+| `system` | `run_mode` | `backtest` (offline fakes) / `paper` / `live` — selects adapters |
+
+Inspect the merged config any time: `python -m new_pipeline.main show-config`.
+
+## Running the full stack and individual parts
+
+Every stage runs independently; vault builders are resumable (re-run to
+continue after an interruption).
+
+```bash
+# ---- full stack -------------------------------------------------------------
+QA_API_RUNS_DIR=./runs python -m new_pipeline.api.app     # API + dashboard + run launcher
+python -m new_pipeline.main pipeline                      # one offline pipeline run, no API
+python -m new_pipeline.main health                        # adapter/config health check
+python -m new_pipeline.main show-config | less            # effective config
+python -m new_pipeline.scripts.serve_mcp                  # MCP server (agent tooling)
+
+# ---- data ingest (independent, resumable) -----------------------------------
+# survivorship-free traded-symbol census + short-flow (FINRA Reg SHO, 2018-08+)
+python -m new_pipeline.scripts.ingest_short_volume_vault \
+    --start 2018-08-01 --end 2025-12-31 --vault-dir ./vaults/census
+# census-seeded daily bars for the Liquid-1500 build (Alpaca SIP, adjustment=all)
+python -m new_pipeline.scripts.ingest_liquid_universe_vault \
+    --start 2016-01-01 --end 2025-12-31 --vault-dir ./vaults/liquid
+# generate the point-in-time Liquid-1500 membership fixture from those two
+python -m new_pipeline.scripts.build_liquid_universe \
+    --bars ./vaults/liquid/bars.parquet --census ./vaults/census/census_short_volume.csv \
+    --out new_pipeline/data/universe/liquid1500_pit.csv
+# EDGAR companyfacts fundamentals (PIT as_of=filing date; resolves delisted CIKs)
+python -m new_pipeline.scripts.ingest_fundamentals_vault \
+    --universe new_pipeline/data/universe/liquid1500_pit.csv \
+    --start 2016-01-01 --end 2025-12-31 --identity "You <you@example.com>" \
+    --vault-dir ./vaults/fundamentals --out new_pipeline/data/fundamentals/liquid_snapshots.csv
+# GDELT news vault (feeds VADER sentiment + news-burst features)
+python -m new_pipeline.scripts.ingest_news_vault \
+    --source gdelt --universe new_pipeline/data/universe/sp500_pit.csv \
+    --start 2016-01-01 --end 2025-12-31 --vault-dir ./vaults/news
+# 30-minute intraday bars (research only; see the intraday memo)
+python -m new_pipeline.scripts.ingest_intraday_vault \
+    --universe new_pipeline/data/universe/sp500_pit.csv \
+    --start 2024-01-01 --end 2025-12-31 --vault-dir ./vaults/intraday --workers 4
+# S&P 500 PIT fixture (external membership history)
+python -m new_pipeline.scripts.build_pit_universe --history-file <membership.csv>
+
+# ---- backtests / gauntlet ---------------------------------------------------
+curl -X POST localhost:8000/api/runs -H 'Content-Type: application/json' \
+     --data @new_pipeline/config/champion_run_body.json      # official frozen run
+# ad-hoc experiment: same body with ONE overrides field changed = one variable
+
+# ---- promotion & paper trading ---------------------------------------------
+python -m new_pipeline.scripts.promote_candidates --run-dir <runs>/<id>/output \
+    --key "Universe Long Short" --all-sectors                # or POST /api/runs/{id}/promote
+python -m new_pipeline.scripts.paper_trade_book              # dry-run (prints orders)
+python -m new_pipeline.scripts.paper_trade_book --execute    # submit to paper account
+python -m new_pipeline.main trade                            # sector-model trade-graph replay
+python -m new_pipeline.scripts.live_preflight                # broker/data connectivity check
+python -m new_pipeline.scripts.live_smoke --symbol AAPL --qty 1   # 1-share paper round-trip
+
+# ---- tests ------------------------------------------------------------------
+NUMBA_DISABLE_JIT=1 python -m pytest new_pipeline/tests --cov=new_pipeline
+```
+
+## Updating the frozen champion (when a better model appears)
+
+The freeze exists so forward data is confirmatory, not curated. The protocol:
+
+1. **A challenger earns it in-registry.** Run the candidate spec as a variant
+   column inside the standing factorial (deflation prices the selection), or
+   as its own one-variable run. It must beat the incumbent on the gates —
+   ideally `promoted: true` outright; at minimum a strictly better verdict
+   under identical windows and costs. A better-looking net Sharpe alone is
+   not evidence (run-to-run bar refetches wobble column Sharpes ±0.02-0.1;
+   the gate verdicts are the stable object).
+2. **Re-freeze in one commit** touching three places so they can never drift:
+   `config/champion_run_body.json` (the new spec), `config/CHAMPION.md`
+   (run id, numbers, what changed and why), and the `long_short` block in
+   `config/defaults.yaml`/`schema.py` if book-construction values moved.
+3. **Restart the forward clock.** The new spec's forward test starts at its
+   freeze date; prior forward evidence belongs to the old spec. Note the
+   supersession in CHAMPION.md rather than deleting history.
+4. **Re-deploy paper trading** against the new run's artifacts:
+   `promote_candidates --run-dir <new_run>/output --key "Universe Long Short"
+   --all-sectors`, then delete `models/prod/book_state.json` so band/vol
+   state re-seeds cleanly on the next executor run.
+
+Never edit the frozen body between runs "just to try something" — that is a
+new experiment and belongs in an ad-hoc run body, not the champion file.
 
 ## Live paper testing the champion
 
@@ -90,17 +235,10 @@ gate rows are never rewritten; manual promotions append explicitly-marked
 `MANUAL OVERRIDE` rows to the production registry.
 
 ```bash
-# 1) promote the book + all 13 sector scorers out of a finished run
 python -m new_pipeline.scripts.promote_candidates \
     --run-dir <runs>/<run_id>/output --key "Universe Long Short" --all-sectors
-# (same thing over HTTP: POST /api/runs/{run_id}/promote
-#  {"keys": ["Universe Long Short"], "all_sectors": true})
-
-# 2) dry-run the daily book rebalance (prints the orders, submits nothing)
-python -m new_pipeline.scripts.paper_trade_book
-
-# 3) arm it for real, daily ~30 min before the close (cron/systemd timer)
-python -m new_pipeline.scripts.paper_trade_book --execute
+python -m new_pipeline.scripts.paper_trade_book              # dry-run first
+python -m new_pipeline.scripts.paper_trade_book --execute    # daily, ~30 min before close
 ```
 
 The executor scores every universe name with its sector's deployed booster
