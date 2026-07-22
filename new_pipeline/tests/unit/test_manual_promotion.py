@@ -133,3 +133,19 @@ def test_all_sectors_unions_with_explicit_keys(tmp_path):
                              registry_path=tmp_path / "r.json", dest_root=tmp_path / "m")
     sectors = [e["sector"] for e in entries]
     assert "Universe Long Short" in sectors and "Information Technology" in sectors
+
+
+def test_retire_removes_active_champion_but_keeps_audit_and_artifacts(tmp_path):
+    from new_pipeline.scripts.promote_candidates import retire_keys
+
+    out = _run_dir(tmp_path)
+    registry_path = tmp_path / "r.json"
+    manual_promote(out, keys=["Universe Long Short"], all_sectors=True,
+                   registry_path=registry_path, dest_root=tmp_path / "m")
+    entries = retire_keys(registry_path, all_sectors=True)
+    assert [e["sector"] for e in entries] == ["Information Technology"]
+    reg = PromotionRegistry(registry_path)
+    assert list(reg.active_champions()) == ["Universe Long Short"]  # book survives
+    assert entries[0]["reason"] == "MANUAL RETIREMENT"
+    # artifacts untouched (still loadable as book scorers)
+    assert (tmp_path / "m" / "run123" / "information_technology_candidate.json").exists()

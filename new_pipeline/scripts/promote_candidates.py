@@ -97,6 +97,20 @@ def manual_promote(run_dir, keys=None, all_sectors=False,
     return entries
 
 
+def retire_keys(registry_path, keys=None, all_sectors=False) -> list[dict]:
+    """Retire champions from active trading (audit rows appended; artifacts
+    kept — the L/S book still loads sector boosters as SCORERS from its own
+    deployed directory, independent of champion status)."""
+    registry = PromotionRegistry(registry_path)
+    if all_sectors:
+        keys = list(dict.fromkeys((keys or []) + [
+            k for k in registry.active_champions() if k != LONG_SHORT_KEY
+        ]))
+    if not keys:
+        raise ValueError("nothing to retire: pass keys or all_sectors=True")
+    return [registry.retire(k) for k in keys]
+
+
 def main() -> None:  # pragma: no cover - argparse shell around tested core
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run-dir", required=True,
@@ -108,7 +122,16 @@ def main() -> None:  # pragma: no cover - argparse shell around tested core
                         help="promote every sector champion (excludes the book)")
     parser.add_argument("--registry", default="./models/prod/promotion_registry.json")
     parser.add_argument("--dest", default="./models/prod/manual")
+    parser.add_argument("--retire", action="append", default=None,
+                        help="retire this active champion (repeatable)")
+    parser.add_argument("--retire-all-sectors", action="store_true",
+                        help="retire every active champion except the book")
     args = parser.parse_args()
+    if args.retire or args.retire_all_sectors:
+        for entry in retire_keys(args.registry, keys=args.retire,
+                                 all_sectors=args.retire_all_sectors):
+            print(f"retired {entry['sector']!r}")
+        return
     entries = manual_promote(args.run_dir, keys=args.key, all_sectors=args.all_sectors,
                              registry_path=args.registry, dest_root=args.dest)
     for entry in entries:

@@ -178,15 +178,19 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     manifest = json.loads(Path(champions[LONG_SHORT_KEY]).read_text())
     params = manifest["best_params"]
 
-    # Sector boosters: every OTHER active champion is a per-name scorer.
+    # Sector boosters are the book's SCORERS, loaded from the book's own
+    # deployed directory — independent of champion status, so retiring the
+    # sector champions from standalone trading does not blind the book.
+    book_dir = Path(champions[LONG_SHORT_KEY]).parent
     boosters = {}
-    for key, path in champions.items():
-        if key == LONG_SHORT_KEY:
+    for candidate in sorted(book_dir.glob("*_candidate.json")):
+        if candidate.name.startswith("universe_long_short"):
             continue
-        selected = Path(path).with_name(Path(path).name.replace(
+        selected = candidate.with_name(candidate.name.replace(
             "_candidate.json", "_candidate_features.json"))
         manifest_features = json.loads(selected.read_text())
-        boosters[key] = (load_booster(path), manifest_features["features"])
+        key = manifest_features.get("metadata", {}).get("sector", candidate.stem)
+        boosters[key] = (load_booster(candidate), manifest_features["features"])
     if not boosters:
         raise SystemExit("no sector boosters promoted; the book needs per-name "
                          "scores (promote with --all-sectors)")

@@ -145,6 +145,22 @@ class PromotionRegistry:
         self._save()
         return entry
 
+    def retire(self, sector: str, reason: str = "MANUAL RETIREMENT") -> dict:
+        """Remove a champion from active trading, keeping the audit trail:
+        appends a non-promoted row recording the retirement and drops the
+        active_champions entry. The model artifacts are untouched."""
+        entry = {
+            "sector": sector,
+            "promoted": False,
+            "reason": reason,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "model_path": None,
+        }
+        self._data["promotions"].append(entry)
+        self._data["active_champions"].pop(sector, None)
+        self._save()
+        return entry
+
     def is_champion(self, sector) -> bool:
         return sector in self._data["active_champions"]
 
