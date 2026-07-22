@@ -125,3 +125,11 @@ def test_targets_scale_down_under_vol_target():
     targets, _ = compute_targets(panel, params, hot, mkt, causal_span=252)
     gross = sum(abs(w) for w in targets.values())
     assert 0.0 < gross < 0.5  # ~32% annual unit vol -> heavy de-risk, never levered
+
+
+def test_all_sectors_unions_with_explicit_keys(tmp_path):
+    out = _run_dir(tmp_path)
+    entries = manual_promote(out, keys=["Universe Long Short"], all_sectors=True,
+                             registry_path=tmp_path / "r.json", dest_root=tmp_path / "m")
+    sectors = [e["sector"] for e in entries]
+    assert "Universe Long Short" in sectors and "Information Technology" in sectors

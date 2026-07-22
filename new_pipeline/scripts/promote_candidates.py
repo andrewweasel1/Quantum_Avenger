@@ -71,7 +71,10 @@ def manual_promote(run_dir, keys=None, all_sectors=False,
     run_dir = Path(run_dir)
     rows = _latest_rows(run_dir / "promotion_registry.json")
     if all_sectors:
-        keys = [k for k in rows if k != LONG_SHORT_KEY]
+        # UNION with any explicit keys (e.g. the book) instead of replacing
+        # them — "--key 'Universe Long Short' --all-sectors" means both.
+        sector_keys = [k for k in rows if k != LONG_SHORT_KEY]
+        keys = list(dict.fromkeys((keys or []) + sector_keys))
     if not keys:
         raise ValueError("nothing to promote: pass keys or all_sectors=True")
     missing = [k for k in keys if k not in rows]

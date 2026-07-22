@@ -1,0 +1,916 @@
+{
+  "promotions": [
+    {
+      "sector": "Health Care",
+      "dsr": 0.9929032537194997,
+      "synthetic_sharpe": 0.5275594364203761,
+      "pbo": 0.6785714285714286,
+      "psr": 0.9929032537194997,
+      "haircut_sharpe": 0.5361986614724681,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9930075544126256,
+      "reality_check_pvalue": 0.005988023952095809,
+      "n_trades": 132612,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9992,
+            "sr_annual": 1.66,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.788,
+            "sr_annual": 0.397,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.6505,
+            "sr_annual": 0.375,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.2,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.223,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.187,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (overfit (high PBO))",
+      "timestamp": "2026-07-22T14:24:27.318546+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/health_care_candidate.json"
+    },
+    {
+      "sector": "Mid Cap Extended",
+      "dsr": 0.89740799592957,
+      "synthetic_sharpe": 0.22410553590657425,
+      "pbo": 0.1984126984126984,
+      "psr": 0.89740799592957,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.0,
+      "cpcv_path_dsr_median": 0.89740799592957,
+      "reality_check_pvalue": 0.09580838323353294,
+      "n_trades": 490529,
+      "n_obs": 1569,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 1.0,
+            "sr_annual": 19.558,
+            "n_days": 638,
+            "share": 0.407,
+            "mean_run_days": 1.6,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.0,
+            "sr_annual": -13.413,
+            "n_days": 649,
+            "share": 0.414,
+            "mean_run_days": 1.7,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.0943,
+            "sr_annual": -1.229,
+            "n_days": 282,
+            "share": 0.18,
+            "mean_run_days": 35.2,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.001,
+            "n_days": 609,
+            "share": 0.388
+          },
+          "1": {
+            "sr_annual": 2.222,
+            "n_days": 488,
+            "share": 0.311
+          },
+          "2": {
+            "sr_annual": -0.409,
+            "n_days": 472,
+            "share": 0.301
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (low DSR)",
+      "timestamp": "2026-07-22T14:24:27.349708+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/mid_cap_extended_candidate.json"
+    },
+    {
+      "sector": "Small Cap Extended",
+      "dsr": 0.010907403346513658,
+      "synthetic_sharpe": -0.1468416824392676,
+      "pbo": 0.42063492063492064,
+      "psr": 0.10862117047774078,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.0,
+      "cpcv_path_dsr_median": 0.010340545978133118,
+      "reality_check_pvalue": 0.9820359281437125,
+      "n_trades": 235995,
+      "n_obs": 1569,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 1.0,
+            "sr_annual": 13.984,
+            "n_days": 638,
+            "share": 0.407,
+            "mean_run_days": 1.6,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.0,
+            "sr_annual": -12.807,
+            "n_days": 649,
+            "share": 0.414,
+            "mean_run_days": 1.7,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.0063,
+            "sr_annual": -1.949,
+            "n_days": 282,
+            "share": 0.18,
+            "mean_run_days": 35.2,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -1.273,
+            "n_days": 609,
+            "share": 0.388
+          },
+          "1": {
+            "sr_annual": 1.299,
+            "n_days": 488,
+            "share": 0.311
+          },
+          "2": {
+            "sr_annual": -1.065,
+            "n_days": 472,
+            "share": 0.301
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (low DSR)",
+      "timestamp": "2026-07-22T14:24:27.370170+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/small_cap_extended_candidate.json"
+    },
+    {
+      "sector": "Industrials",
+      "dsr": 0.9949035958506428,
+      "synthetic_sharpe": 0.5669864052676159,
+      "pbo": 0.0,
+      "psr": 0.9949035958506428,
+      "haircut_sharpe": 0.5879217586568963,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9948241114077677,
+      "reality_check_pvalue": 0.005988023952095809,
+      "n_trades": 156435,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9939,
+            "sr_annual": 1.312,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.9456,
+            "sr_annual": 0.8,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.5795,
+            "sr_annual": 0.194,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.429,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.2,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.073,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
+      "timestamp": "2026-07-22T14:24:27.380039+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/industrials_candidate.json"
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "dsr": 0.9789038766203321,
+      "synthetic_sharpe": 0.44193399982687903,
+      "pbo": 0.0,
+      "psr": 0.9789038766203321,
+      "haircut_sharpe": 0.3206110053762585,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.979004845695474,
+      "reality_check_pvalue": 0.007984031936127744,
+      "n_trades": 118591,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9906,
+            "sr_annual": 1.231,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.9259,
+            "sr_annual": 0.718,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.3532,
+            "sr_annual": -0.362,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.199,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.2,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": -0.153,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
+      "timestamp": "2026-07-22T14:24:27.387863+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/consumer_discretionary_candidate.json"
+    },
+    {
+      "sector": "Information Technology",
+      "dsr": 0.9997806699927331,
+      "synthetic_sharpe": 0.7028633888702494,
+      "pbo": 0.38492063492063494,
+      "psr": 0.9997806699927331,
+      "haircut_sharpe": 0.9964990126203109,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9997898343699404,
+      "reality_check_pvalue": 0.003992015968063872,
+      "n_trades": 113435,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 1.0,
+            "sr_annual": 2.278,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.8557,
+            "sr_annual": 0.528,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.7746,
+            "sr_annual": 0.729,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 1.071,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 1.951,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.599,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
+      "timestamp": "2026-07-22T14:24:27.396069+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/information_technology_candidate.json"
+    },
+    {
+      "sector": "Financials",
+      "dsr": 0.9848266396982861,
+      "synthetic_sharpe": 0.5067793803533586,
+      "pbo": 0.09126984126984126,
+      "psr": 0.9848266396982861,
+      "haircut_sharpe": 0.3919683854661597,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9849227274750867,
+      "reality_check_pvalue": 0.011976047904191617,
+      "n_trades": 154136,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9926,
+            "sr_annual": 1.28,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.8681,
+            "sr_annual": 0.555,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.5434,
+            "sr_annual": 0.105,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.238,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.138,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": -0.058,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
+      "timestamp": "2026-07-22T14:24:27.406533+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/financials_candidate.json"
+    },
+    {
+      "sector": "Consumer Staples",
+      "dsr": 0.9819196132842464,
+      "synthetic_sharpe": 0.43058417660205806,
+      "pbo": 0.0,
+      "psr": 0.9819196132842464,
+      "haircut_sharpe": 0.35357738490581037,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9817630307333188,
+      "reality_check_pvalue": 0.00998003992015968,
+      "n_trades": 79952,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9787,
+            "sr_annual": 1.049,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.8395,
+            "sr_annual": 0.493,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.7246,
+            "sr_annual": 0.579,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.614,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.616,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.322,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
+      "timestamp": "2026-07-22T14:24:27.412230+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/consumer_staples_candidate.json"
+    },
+    {
+      "sector": "Utilities",
+      "dsr": 0.980398700785948,
+      "synthetic_sharpe": 0.6145972161228609,
+      "pbo": 0.30952380952380953,
+      "psr": 0.980398700785948,
+      "haircut_sharpe": 0.3381169602982086,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9806051399876548,
+      "reality_check_pvalue": 0.00998003992015968,
+      "n_trades": 63421,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9736,
+            "sr_annual": 1.023,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.9252,
+            "sr_annual": 0.715,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.432,
+            "sr_annual": -0.165,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.479,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.434,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.345,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
+      "timestamp": "2026-07-22T14:24:27.417458+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/utilities_candidate.json"
+    },
+    {
+      "sector": "Real Estate",
+      "dsr": 0.7588685382118396,
+      "synthetic_sharpe": 0.24339698245179991,
+      "pbo": 0.0,
+      "psr": 0.7588685382118396,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.0,
+      "cpcv_path_dsr_median": 0.7600254419124259,
+      "reality_check_pvalue": 0.2275449101796407,
+      "n_trades": 64703,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.4933,
+            "sr_annual": -0.009,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": false
+          },
+          "1": {
+            "dsr": 0.9474,
+            "sr_annual": 0.806,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.1493,
+            "sr_annual": -1.001,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.93,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 1.74,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.066,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (low DSR)",
+      "timestamp": "2026-07-22T14:24:27.422889+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/real_estate_candidate.json"
+    },
+    {
+      "sector": "Materials",
+      "dsr": 0.9392199814573975,
+      "synthetic_sharpe": 0.27112372035603577,
+      "pbo": 0.7698412698412699,
+      "psr": 0.9392199814573975,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.4,
+      "cpcv_path_dsr_median": 0.9431688646740518,
+      "reality_check_pvalue": 0.08782435129740519,
+      "n_trades": 25750,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.8887,
+            "sr_annual": 0.631,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.5185,
+            "sr_annual": 0.023,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.9311,
+            "sr_annual": 1.401,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": true
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.277,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 1.341,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.501,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (low DSR)",
+      "timestamp": "2026-07-22T14:24:27.426685+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/materials_candidate.json"
+    },
+    {
+      "sector": "Energy",
+      "dsr": 0.872701740512613,
+      "synthetic_sharpe": 0.13220320623420795,
+      "pbo": 0.30158730158730157,
+      "psr": 0.872701740512613,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.0,
+      "cpcv_path_dsr_median": 0.8480997824268488,
+      "reality_check_pvalue": 0.35129740518962077,
+      "n_trades": 13200,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.2155,
+            "sr_annual": -0.418,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": false
+          },
+          "1": {
+            "dsr": 0.6763,
+            "sr_annual": 0.225,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.9548,
+            "sr_annual": 1.605,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": true
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.058,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 0.556,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.556,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (low DSR)",
+      "timestamp": "2026-07-22T14:24:27.430326+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/energy_candidate.json"
+    },
+    {
+      "sector": "Communication Services",
+      "dsr": 0.9776091529053438,
+      "synthetic_sharpe": 0.38239404878480304,
+      "pbo": 0.0,
+      "psr": 0.9776091529053438,
+      "haircut_sharpe": 0.3069727570590555,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9773026664508849,
+      "reality_check_pvalue": 0.013972055888223553,
+      "n_trades": 46884,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9906,
+            "sr_annual": 1.225,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.8769,
+            "sr_annual": 0.575,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.4665,
+            "sr_annual": -0.081,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.471,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.014,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": -0.3,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
+      "timestamp": "2026-07-22T14:24:27.434751+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/communication_services_candidate.json"
+    },
+    {
+      "sector": "Universe Long Short",
+      "dsr": 0.9974818012284488,
+      "synthetic_sharpe": 1.926675305171904,
+      "pbo": 0.3253968253968254,
+      "psr": 0.9974818012284488,
+      "haircut_sharpe": 0.3376042748942973,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9976068209568586,
+      "reality_check_pvalue": 0.007984031936127744,
+      "n_trades": 1821,
+      "n_obs": 1821,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.8216,
+            "sr_annual": 0.502,
+            "n_days": 840,
+            "share": 0.461,
+            "mean_run_days": 27.1,
+            "passes": false
+          },
+          "1": {
+            "dsr": 0.9797,
+            "sr_annual": 1.181,
+            "n_days": 734,
+            "share": 0.403,
+            "mean_run_days": 17.1,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.9705,
+            "sr_annual": 1.761,
+            "n_days": 247,
+            "share": 0.136,
+            "mean_run_days": 20.6,
+            "passes": true
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.475,
+            "n_days": 636,
+            "share": 0.349
+          },
+          "1": {
+            "sr_annual": 1.456,
+            "n_days": 604,
+            "share": 0.332
+          },
+          "2": {
+            "sr_annual": 1.077,
+            "n_days": 581,
+            "share": 0.319
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "MANUAL OVERRIDE (failed per-regime DSR)",
+      "timestamp": "2026-07-22T14:24:54.788002+00:00",
+      "model_path": "models/prod/manual/2b80e4593cfc/universe_long_short_candidate.json"
+    }
+  ],
+  "active_champions": {
+    "Health Care": "models/prod/manual/2b80e4593cfc/health_care_candidate.json",
+    "Mid Cap Extended": "models/prod/manual/2b80e4593cfc/mid_cap_extended_candidate.json",
+    "Small Cap Extended": "models/prod/manual/2b80e4593cfc/small_cap_extended_candidate.json",
+    "Industrials": "models/prod/manual/2b80e4593cfc/industrials_candidate.json",
+    "Consumer Discretionary": "models/prod/manual/2b80e4593cfc/consumer_discretionary_candidate.json",
+    "Information Technology": "models/prod/manual/2b80e4593cfc/information_technology_candidate.json",
+    "Financials": "models/prod/manual/2b80e4593cfc/financials_candidate.json",
+    "Consumer Staples": "models/prod/manual/2b80e4593cfc/consumer_staples_candidate.json",
+    "Utilities": "models/prod/manual/2b80e4593cfc/utilities_candidate.json",
+    "Real Estate": "models/prod/manual/2b80e4593cfc/real_estate_candidate.json",
+    "Materials": "models/prod/manual/2b80e4593cfc/materials_candidate.json",
+    "Energy": "models/prod/manual/2b80e4593cfc/energy_candidate.json",
+    "Communication Services": "models/prod/manual/2b80e4593cfc/communication_services_candidate.json",
+    "Universe Long Short": "models/prod/manual/2b80e4593cfc/universe_long_short_candidate.json"
+  }
+}
