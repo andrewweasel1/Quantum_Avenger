@@ -149,3 +149,18 @@ def test_retire_removes_active_champion_but_keeps_audit_and_artifacts(tmp_path):
     assert entries[0]["reason"] == "MANUAL RETIREMENT"
     # artifacts untouched (still loadable as book scorers)
     assert (tmp_path / "m" / "run123" / "information_technology_candidate.json").exists()
+
+
+def test_diff_orders_fractional_longs_integer_shorts():
+    """Fractional sizing on long-side fractionable names kills the rounding
+    tilt; short-side targets stay integer (no fractional short opens)."""
+    targets = {"EXP": 0.00185, "CHEAP": -0.00185}   # ~$185 target per name
+    prices = {"EXP": 300.0, "CHEAP": 30.0}
+    orders = diff_orders(targets, {}, prices, capital=100_000,
+                         fractionable={"EXP", "CHEAP"})
+    by = {o["symbol"]: o for o in orders}
+    assert by["EXP"]["qty"] == 0.617          # fractional long: 185/300
+    assert by["CHEAP"]["qty"] == 6            # short stays integer: round(185/30)
+    # without fractionable info the old integer behavior is preserved
+    legacy = {o["symbol"]: o for o in diff_orders(targets, {}, prices, 100_000)}
+    assert legacy["EXP"]["qty"] == 1

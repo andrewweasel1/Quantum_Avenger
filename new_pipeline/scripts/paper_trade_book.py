@@ -117,17 +117,29 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
 
 
 def diff_orders(targets: dict, positions: dict, prices: dict, capital: float,
-                min_order_notional: float = 25.0) -> list[dict]:
-    """Market orders that move current share positions to target dollar
-    weights; sub-``min_order_notional`` diffs are skipped (churn guard)."""
+                min_order_notional: float = 25.0,
+                fractionable: set | None = None) -> list[dict]:
+    """Market orders that move current positions to target dollar weights.
+
+    Integer share rounding at ~$185/name mis-sized the first live fill: the
+    long leg's names average ~$300 (winners are expensive), so 1-share
+    rounding overshot it to $83k vs the $50k target (+$34k net-long tilt).
+    Long-side targets on ``fractionable`` names therefore trade in fractional
+    quantities (3 decimals); Alpaca forbids fractional SHORT opens, so
+    short-side targets stay integer (cheap losers round finely anyway).
+    Sub-``min_order_notional`` diffs are skipped (churn guard)."""
+    fractionable = fractionable or set()
     orders = []
     for symbol in sorted(set(targets) | set(positions)):
         price = prices.get(symbol)
         if not price or price <= 0:
             continue
-        target_shares = int(round(targets.get(symbol, 0.0) * capital / price))
-        delta = target_shares - int(positions.get(symbol, 0))
-        if delta == 0 or abs(delta) * price < min_order_notional:
+        target_w = targets.get(symbol, 0.0)
+        raw_shares = target_w * capital / price
+        can_fraction = symbol in fractionable and target_w >= 0.0
+        target_shares = round(raw_shares, 3) if can_fraction else int(round(raw_shares))
+        delta = round(target_shares - positions.get(symbol, 0.0), 3)
+        if abs(delta) * price < min_order_notional:
             continue
         orders.append({"symbol": symbol, "qty": abs(delta),
                        "side": "buy" if delta > 0 else "sell", "tif": "day"})
@@ -238,7 +250,16 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     broker = AlpacaBroker(os.environ["QA_ALPACA__API_KEY"],
                          os.environ["QA_ALPACA__SECRET_KEY"], paper=True)
     positions = broker.get_positions()
-    orders = diff_orders(targets, positions, prices, capital)
+    try:
+        from alpaca.trading.enums import AssetClass, AssetStatus
+        from alpaca.trading.requests import GetAssetsRequest
+        assets = broker._client.get_all_assets(
+            GetAssetsRequest(status=AssetStatus.ACTIVE, asset_class=AssetClass.US_EQUITY))
+        fractionable = {a.symbol for a in assets if getattr(a, "fractionable", False)}
+    except Exception as exc:
+        _logger.warning("fractionable lookup failed (%s); integer sizing", exc)
+        fractionable = set()
+    orders = diff_orders(targets, positions, prices, capital, fractionable=fractionable)
 
     print(f"book: {len([w for w in targets.values() if w > 0])} longs / "
           f"{len([w for w in targets.values() if w < 0])} shorts, "
