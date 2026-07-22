@@ -198,10 +198,14 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     universe = StaticUniverseProvider(
         Path(cfg.data.universe_path) if cfg.data.universe_path else None
     )
+    from new_pipeline.adapters.factory import build_fundamentals_source
+
+    fundamentals_source = build_fundamentals_source(cfg, universe)
     sectors = universe.sectors()
     start = date.today() - timedelta(days=args.lookback_days)
     frame = build_training_frame(
         list(sectors), sectors, start, date.today(), cfg=cfg,
+        fundamentals_source=fundamentals_source,
         membership=universe.members(),
     )
     market_by_date = dict(
