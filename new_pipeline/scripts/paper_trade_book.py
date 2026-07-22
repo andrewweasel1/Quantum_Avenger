@@ -173,7 +173,7 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
         if key == LONG_SHORT_KEY:
             continue
         selected = Path(path).with_name(Path(path).name.replace(
-            "_candidate.json", "_selected_features.json"))
+            "_candidate.json", "_candidate_features.json"))
         boosters[key] = (load_booster(path), json.loads(selected.read_text()))
     if not boosters:
         raise SystemExit("no sector boosters promoted; the book needs per-name "

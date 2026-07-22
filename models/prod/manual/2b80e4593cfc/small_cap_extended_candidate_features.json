@@ -1,0 +1,18 @@
+{
+  "features": [
+    "returns",
+    "corwin_schultz",
+    "fracdiff",
+    "overnight_ret",
+    "overnight_bias_21",
+    "intraday_bias_21"
+  ],
+  "metadata": {
+    "sector": "Small Cap Extended",
+    "params": {
+      "max_depth": 1,
+      "learning_rate": 0.01
+    },
+    "meta_labeling": null
+  }
+}

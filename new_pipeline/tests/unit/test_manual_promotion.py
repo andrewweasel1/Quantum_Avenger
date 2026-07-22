@@ -21,7 +21,7 @@ def _run_dir(tmp_path):
     ], "active_champions": {}}
     (out / "promotion_registry.json").write_text(json.dumps(rows))
     (out / "information_technology_candidate.json").write_text("{}")
-    (out / "information_technology_selected_features.json").write_text("[]")
+    (out / "information_technology_candidate_features.json").write_text("[]")
     (out / "universe_long_short_candidate.json").write_text(
         json.dumps({"kind": "long_short", "best_params": {"quantile": 0.2}}))
     return out
@@ -57,7 +57,7 @@ def test_manual_promote_all_sectors_excludes_the_book(tmp_path):
     assert [e["sector"] for e in entries] == ["Information Technology"]
     # sidecars ride along with the candidate copy
     dest = tmp_path / "m" / "run123"
-    assert (dest / "information_technology_selected_features.json").exists()
+    assert (dest / "information_technology_candidate_features.json").exists()
 
 
 def test_manual_promote_unknown_key_raises(tmp_path):
