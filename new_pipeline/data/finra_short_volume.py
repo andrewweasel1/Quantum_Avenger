@@ -45,18 +45,28 @@ def parse_daily_file(text: str, universe: set[str] | None = None) -> list[dict]:
         if len(parts) < 5:
             continue
         raw_date, symbol, short_v, total_v = parts[0], parts[1], parts[2], parts[4]
-        if not (raw_date.isdigit() and len(raw_date) == 8 and total_v.isdigit()):
+        # FINRA switched the daily files to FRACTIONAL volumes in 2026-02
+        # (e.g. "669512.327688"); a strict isdigit() gate silently dropped
+        # ~92% of rows as "malformed" and gutted the census. Accept any
+        # non-negative decimal; trailer/summary lines still fail the parse.
+        if not (raw_date.isdigit() and len(raw_date) == 8):
             continue  # trailer / summary lines
+        try:
+            short_f, total_f = float(short_v), float(total_v)
+        except ValueError:
+            continue
+        if short_f < 0 or total_f < 0:
+            continue
         ticker = symbol.strip().upper().replace("-", ".")  # match universe fixtures (BRK.B)
         if universe is not None and ticker not in universe:
             continue
-        total = int(total_v)
-        if total <= 0 or not short_v.isdigit():
+        total = int(round(total_f))
+        if total <= 0:
             continue
         records.append({
             "date": f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}",
             "ticker": ticker,
-            "short_volume": int(short_v),
+            "short_volume": int(round(short_f)),
             "total_volume": total,
         })
     return records

@@ -65,3 +65,22 @@ def test_history_invariant_catches_mutation():
     bad[1]["start_date"] = "2019-04-01"  # pre-floor mutation
     with pytest.raises(AssertionError):
         assert_history_unchanged(old, bad, date(2026, 2, 1))
+
+
+def test_finra_parser_accepts_2026_fractional_volume_format():
+    """FINRA's 2026-02 format change: fractional volumes + a trailing Market
+    column. The old integer gate dropped ~92% of rows silently."""
+    from new_pipeline.data.finra_short_volume import parse_daily_file
+
+    text = (
+        "Date|Symbol|ShortVolume|ShortExemptVolume|TotalVolume|Market\n"
+        "20260721|A|669512.327688|54|968523.083796|B,Q,N\n"
+        "20260721|AAPL|1041997.070310|321|2641520.805343|B,Q,N\n"
+        "20260721|OLDSTYLE|403|0|406|B\n"
+        "garbage line\n"
+    )
+    rows = parse_daily_file(text)
+    by = {r["ticker"]: r for r in rows}
+    assert by["A"]["total_volume"] == 968523 and by["A"]["short_volume"] == 669512
+    assert "AAPL" in by and by["OLDSTYLE"]["total_volume"] == 406
+    assert len(rows) == 3
