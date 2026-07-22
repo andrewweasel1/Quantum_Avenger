@@ -52,7 +52,8 @@ def test_broker_market_order_and_positions():
     )
     client.get_all_positions.return_value = [
         SimpleNamespace(symbol="AAPL", qty="3", side=SimpleNamespace(value="long")),
-        SimpleNamespace(symbol="TSLA", qty="2", side=SimpleNamespace(value="short")),
+        # real API contract (verified live 2026-07-22): qty is SIGNED for shorts
+        SimpleNamespace(symbol="TSLA", qty="-2", side=SimpleNamespace(value="short")),
     ]
     broker = AlpacaBroker("k", "s", client=client)
     receipt = broker.submit_order({"symbol": "AAPL", "qty": 3, "side": "buy", "tif": "day"})

@@ -56,8 +56,10 @@ class AlpacaBroker(BrokerAdapter):
     def get_positions(self) -> dict[str, float]:
         positions: dict[str, float] = {}
         for pos in self._client.get_all_positions():
-            qty = float(pos.qty)
-            positions[pos.symbol] = qty if _value(pos.side).lower() == "long" else -qty
+            # Alpaca already signs qty (shorts are negative); negating again on
+            # side=="short" double-negated and reported shorts as longs — which
+            # would poison the next rebalance's order diff.
+            positions[pos.symbol] = float(pos.qty)
         return positions
 
     def account(self) -> dict:
