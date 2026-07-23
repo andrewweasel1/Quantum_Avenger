@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Live API run working dirs (bulky parquets/models; curated evidence JSONs
+# are committed separately under models/prod/evidence/<run_id>/)
+data/api_runs/
