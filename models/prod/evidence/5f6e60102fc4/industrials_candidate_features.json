@@ -1,0 +1,21 @@
+{
+  "features": [
+    "returns",
+    "roll_spread",
+    "spread_pct",
+    "fracdiff",
+    "corwin_schultz",
+    "overnight_ret",
+    "overnight_bias_21",
+    "intraday_bias_21",
+    "resid_rev_5"
+  ],
+  "metadata": {
+    "sector": "Industrials",
+    "params": {
+      "max_depth": 2,
+      "learning_rate": 0.01
+    },
+    "meta_labeling": null
+  }
+}

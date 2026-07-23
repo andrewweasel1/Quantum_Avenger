@@ -1,0 +1,903 @@
+{
+  "promotions": [
+    {
+      "sector": "Health Care",
+      "dsr": 0.9929241377633411,
+      "synthetic_sharpe": 0.526388671919772,
+      "pbo": 0.5992063492063492,
+      "psr": 0.9929241377633411,
+      "haircut_sharpe": 0.5367240189945117,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9930428457888589,
+      "reality_check_pvalue": 0.005988023952095809,
+      "n_trades": 132612,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9992,
+            "sr_annual": 1.66,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.7909,
+            "sr_annual": 0.402,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.6467,
+            "sr_annual": 0.365,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.203,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.226,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.183,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "overfit (high PBO)",
+      "timestamp": "2026-07-23T20:33:16.817300+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Mid Cap Extended",
+      "dsr": 0.4460323173311552,
+      "synthetic_sharpe": 0.20118753095014802,
+      "pbo": 0.1388888888888889,
+      "psr": 0.8681556512553094,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.0,
+      "cpcv_path_dsr_median": 0.4420074242041459,
+      "reality_check_pvalue": 0.1277445109780439,
+      "n_trades": 486875,
+      "n_obs": 1569,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 1.0,
+            "sr_annual": 18.941,
+            "n_days": 638,
+            "share": 0.407,
+            "mean_run_days": 1.6,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.0,
+            "sr_annual": -13.305,
+            "n_days": 649,
+            "share": 0.414,
+            "mean_run_days": 1.7,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.0271,
+            "sr_annual": -1.294,
+            "n_days": 282,
+            "share": 0.18,
+            "mean_run_days": 35.2,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.081,
+            "n_days": 609,
+            "share": 0.388
+          },
+          "1": {
+            "sr_annual": 2.149,
+            "n_days": 488,
+            "share": 0.311
+          },
+          "2": {
+            "sr_annual": -0.448,
+            "n_days": 472,
+            "share": 0.301
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "low DSR",
+      "timestamp": "2026-07-23T20:34:22.328050+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Small Cap Extended",
+      "dsr": 0.4718390137385194,
+      "synthetic_sharpe": 0.02881260805636827,
+      "pbo": 0.46825396825396826,
+      "psr": 0.5699767884037922,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.0,
+      "cpcv_path_dsr_median": 0.4905819297607046,
+      "reality_check_pvalue": 0.6067864271457086,
+      "n_trades": 79120,
+      "n_obs": 1569,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 1.0,
+            "sr_annual": 5.072,
+            "n_days": 638,
+            "share": 0.407,
+            "mean_run_days": 1.6,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.0,
+            "sr_annual": -5.5,
+            "n_days": 649,
+            "share": 0.414,
+            "mean_run_days": 1.7,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.3463,
+            "sr_annual": -0.278,
+            "n_days": 282,
+            "share": 0.18,
+            "mean_run_days": 35.2,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.198,
+            "n_days": 609,
+            "share": 0.388
+          },
+          "1": {
+            "sr_annual": 0.701,
+            "n_days": 488,
+            "share": 0.311
+          },
+          "2": {
+            "sr_annual": -0.737,
+            "n_days": 472,
+            "share": 0.301
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "low DSR",
+      "timestamp": "2026-07-23T20:35:28.653961+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Industrials",
+      "dsr": 0.9949547874219267,
+      "synthetic_sharpe": 0.5965328581316466,
+      "pbo": 0.0,
+      "psr": 0.9949547874219267,
+      "haircut_sharpe": 0.5895057613879896,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9947085416271955,
+      "reality_check_pvalue": 0.005988023952095809,
+      "n_trades": 156423,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9939,
+            "sr_annual": 1.311,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.9459,
+            "sr_annual": 0.801,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.5813,
+            "sr_annual": 0.198,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.427,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.2,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.078,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "failed per-regime DSR",
+      "timestamp": "2026-07-23T20:35:48.020580+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "dsr": 0.9789038766203321,
+      "synthetic_sharpe": 0.44193399982687903,
+      "pbo": 0.0,
+      "psr": 0.9789038766203321,
+      "haircut_sharpe": 0.3206110053762585,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.979004845695474,
+      "reality_check_pvalue": 0.007984031936127744,
+      "n_trades": 118591,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9906,
+            "sr_annual": 1.231,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.9259,
+            "sr_annual": 0.718,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.3532,
+            "sr_annual": -0.362,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.199,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.2,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": -0.153,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "failed per-regime DSR",
+      "timestamp": "2026-07-23T20:36:04.890365+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Information Technology",
+      "dsr": 0.9997806699927331,
+      "synthetic_sharpe": 0.7028633888702494,
+      "pbo": 0.38492063492063494,
+      "psr": 0.9997806699927331,
+      "haircut_sharpe": 0.9964990126203109,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9997898343699404,
+      "reality_check_pvalue": 0.003992015968063872,
+      "n_trades": 113435,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 1.0,
+            "sr_annual": 2.278,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.8557,
+            "sr_annual": 0.528,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.7746,
+            "sr_annual": 0.729,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 1.071,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 1.951,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.599,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "failed per-regime DSR",
+      "timestamp": "2026-07-23T20:36:20.772471+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Financials",
+      "dsr": 0.9848266396982861,
+      "synthetic_sharpe": 0.5067793803533586,
+      "pbo": 0.09126984126984126,
+      "psr": 0.9848266396982861,
+      "haircut_sharpe": 0.3919683854661597,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9849227274750867,
+      "reality_check_pvalue": 0.011976047904191617,
+      "n_trades": 154136,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9926,
+            "sr_annual": 1.28,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.8681,
+            "sr_annual": 0.555,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.5434,
+            "sr_annual": 0.105,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.238,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.138,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": -0.058,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "failed per-regime DSR",
+      "timestamp": "2026-07-23T20:36:40.781727+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Consumer Staples",
+      "dsr": 0.9818866514187666,
+      "synthetic_sharpe": 0.4264925626591187,
+      "pbo": 0.0,
+      "psr": 0.9818866514187666,
+      "haircut_sharpe": 0.35316458346463164,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9816744955250627,
+      "reality_check_pvalue": 0.00998003992015968,
+      "n_trades": 79958,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9786,
+            "sr_annual": 1.049,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.8386,
+            "sr_annual": 0.491,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.726,
+            "sr_annual": 0.584,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.614,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.616,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.322,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "failed per-regime DSR",
+      "timestamp": "2026-07-23T20:36:52.885796+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Utilities",
+      "dsr": 0.9801067676923428,
+      "synthetic_sharpe": 0.6066987553667037,
+      "pbo": 0.3055555555555556,
+      "psr": 0.9801067676923428,
+      "haircut_sharpe": 0.3348137574589658,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9803334525213666,
+      "reality_check_pvalue": 0.00998003992015968,
+      "n_trades": 63413,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9735,
+            "sr_annual": 1.022,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.925,
+            "sr_annual": 0.714,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.4284,
+            "sr_annual": -0.174,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.478,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.433,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.339,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "failed per-regime DSR",
+      "timestamp": "2026-07-23T20:37:01.974261+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Real Estate",
+      "dsr": 0.7659731446690949,
+      "synthetic_sharpe": 0.21234506786097054,
+      "pbo": 0.0,
+      "psr": 0.7659731446690949,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.0,
+      "cpcv_path_dsr_median": 0.7655262961037526,
+      "reality_check_pvalue": 0.21157684630738524,
+      "n_trades": 64727,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.4991,
+            "sr_annual": -0.001,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": false
+          },
+          "1": {
+            "dsr": 0.9493,
+            "sr_annual": 0.815,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.1503,
+            "sr_annual": -0.997,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.918,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 1.75,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.068,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "low DSR",
+      "timestamp": "2026-07-23T20:37:12.856303+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Materials",
+      "dsr": 0.9368406138157418,
+      "synthetic_sharpe": 0.24676716516602487,
+      "pbo": 0.7777777777777778,
+      "psr": 0.9368406138157418,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.4,
+      "cpcv_path_dsr_median": 0.9412584438184464,
+      "reality_check_pvalue": 0.08782435129740519,
+      "n_trades": 25699,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.8905,
+            "sr_annual": 0.636,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.5299,
+            "sr_annual": 0.037,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.9224,
+            "sr_annual": 1.342,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": true
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.297,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 1.323,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.512,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "low DSR",
+      "timestamp": "2026-07-23T20:37:22.414942+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Energy",
+      "dsr": 0.872701740512613,
+      "synthetic_sharpe": 0.13220320623420795,
+      "pbo": 0.30158730158730157,
+      "psr": 0.872701740512613,
+      "haircut_sharpe": 0.0,
+      "cpcv_path_pass_fraction": 0.0,
+      "cpcv_path_dsr_median": 0.8480997824268488,
+      "reality_check_pvalue": 0.35129740518962077,
+      "n_trades": 13200,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.2155,
+            "sr_annual": -0.418,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": false
+          },
+          "1": {
+            "dsr": 0.6763,
+            "sr_annual": 0.225,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": false
+          },
+          "2": {
+            "dsr": 0.9548,
+            "sr_annual": 1.605,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": true
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": -0.058,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 0.556,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": 0.556,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "low DSR",
+      "timestamp": "2026-07-23T20:37:30.625841+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Communication Services",
+      "dsr": 0.9776091529053438,
+      "synthetic_sharpe": 0.38239404878480304,
+      "pbo": 0.0,
+      "psr": 0.9776091529053438,
+      "haircut_sharpe": 0.3069727570590555,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9773026664508849,
+      "reality_check_pvalue": 0.013972055888223553,
+      "n_trades": 46884,
+      "n_obs": 2241,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9906,
+            "sr_annual": 1.225,
+            "n_days": 933,
+            "share": 0.416,
+            "mean_run_days": 32.2,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.8769,
+            "sr_annual": 0.575,
+            "n_days": 1036,
+            "share": 0.462,
+            "mean_run_days": 25.9,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.4665,
+            "sr_annual": -0.081,
+            "n_days": 272,
+            "share": 0.121,
+            "mean_run_days": 24.7,
+            "passes": false
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.471,
+            "n_days": 820,
+            "share": 0.366
+          },
+          "1": {
+            "sr_annual": 2.014,
+            "n_days": 738,
+            "share": 0.329
+          },
+          "2": {
+            "sr_annual": -0.3,
+            "n_days": 683,
+            "share": 0.305
+          }
+        }
+      },
+      "promoted": false,
+      "reason": "failed per-regime DSR",
+      "timestamp": "2026-07-23T20:37:38.661389+00:00",
+      "model_path": null
+    },
+    {
+      "sector": "Universe Long Short",
+      "dsr": 0.997795752108501,
+      "synthetic_sharpe": 1.9695783732028818,
+      "pbo": 0.003968253968253968,
+      "psr": 0.997795752108501,
+      "haircut_sharpe": 0.34146275112596086,
+      "cpcv_path_pass_fraction": 1.0,
+      "cpcv_path_dsr_median": 0.9920720376240975,
+      "reality_check_pvalue": 0.003992015968063872,
+      "n_trades": 1821,
+      "n_obs": 1821,
+      "regime_breakdown": {
+        "per_regime": {
+          "0": {
+            "dsr": 0.9039,
+            "sr_annual": 0.708,
+            "n_days": 840,
+            "share": 0.461,
+            "mean_run_days": 27.1,
+            "passes": true
+          },
+          "1": {
+            "dsr": 0.9535,
+            "sr_annual": 0.971,
+            "n_days": 734,
+            "share": 0.403,
+            "mean_run_days": 17.1,
+            "passes": true
+          },
+          "2": {
+            "dsr": 0.9722,
+            "sr_annual": 1.744,
+            "n_days": 247,
+            "share": 0.136,
+            "mean_run_days": 20.6,
+            "passes": true
+          }
+        },
+        "skipped_thin": [],
+        "threshold": 0.857375,
+        "causal_states": {
+          "0": {
+            "sr_annual": 0.329,
+            "n_days": 636,
+            "share": 0.349
+          },
+          "1": {
+            "sr_annual": 1.696,
+            "n_days": 604,
+            "share": 0.332
+          },
+          "2": {
+            "sr_annual": 1.018,
+            "n_days": 581,
+            "share": 0.319
+          }
+        }
+      },
+      "promoted": true,
+      "reason": "true alpha",
+      "timestamp": "2026-07-23T20:37:40.021260+00:00",
+      "model_path": "data/api_runs/5f6e60102fc4/output/universe_long_short_candidate.json"
+    }
+  ],
+  "active_champions": {
+    "Universe Long Short": "data/api_runs/5f6e60102fc4/output/universe_long_short_candidate.json"
+  }
+}
