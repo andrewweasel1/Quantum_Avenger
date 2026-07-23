@@ -1,0 +1,15 @@
+{
+  "features": [
+    "intraday_bias_21",
+    "resid_rev_5",
+    "ret_since_filing"
+  ],
+  "metadata": {
+    "sector": "Consumer Staples",
+    "params": {
+      "max_depth": 1,
+      "learning_rate": 0.01
+    },
+    "meta_labeling": null
+  }
+}
