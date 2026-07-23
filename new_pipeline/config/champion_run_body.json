@@ -9,6 +9,7 @@
   "fundamentals": {"fixture_path": "new_pipeline/data/fundamentals/liquid_snapshots.csv"},
   "features": {
    "label_horizon": 21,
+   "market_state_features": true,
    "factor_set": ["mom_12_1", "reversal_21", "low_vol", "seasonality", "book_to_market", "earnings_yield", "roe"],
    "extended_features": ["fracdiff", "vol_estimators", "microstructure", "garch", "overnight", "residual", "flow"],
    "event_features": true

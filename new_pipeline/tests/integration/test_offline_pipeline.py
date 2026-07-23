@@ -11,6 +11,7 @@ import pytest
 
 from new_pipeline.config import base, reload_config
 from new_pipeline.core.seeding import seed_everything
+from new_pipeline.features.market_state import MARKET_STATE_COLS
 from new_pipeline.tournament.pipeline import (
     FEATURE_COLS,
     build_training_frame,
@@ -128,7 +129,8 @@ def test_offline_pipeline_consumes_cross_sectional_factors(tmp_path, monkeypatch
     assert summary["sectors"]
     manifests = list(tmp_path.glob("*_candidate_features.json"))
     assert manifests
-    selectable = set(FEATURE_COLS) | {"xf_reversal_21", "xf_low_vol"}
+    # market-state features are champion defaults (runs a4889768320e/fc80f05205b3)
+    selectable = set(FEATURE_COLS) | {"xf_reversal_21", "xf_low_vol"} | set(MARKET_STATE_COLS)
     for manifest in manifests:
         selected = set(json.loads(manifest.read_text())["features"])
         assert selected <= selectable

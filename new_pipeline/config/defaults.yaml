@@ -40,7 +40,9 @@ features:
   event_features: false
   # Per-date causal market trend/vol percentile features (regime context for
   # the trees; per-date constants, so their value shows via MDA not IC).
-  market_state_features: false
+  # Champion default since runs a4889768320e + fc80f05205b3: the flag carried
+  # the calm-state regime gate over the family-wise bar in both promotions.
+  market_state_features: true
   fracdiff_d: 0.4
   fracdiff_threshold: 0.001
   vol_window: 20
