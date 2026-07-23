@@ -1,0 +1,26 @@
+{
+  "features": [
+    "returns",
+    "fracdiff",
+    "garch_vol",
+    "ncskew",
+    "xf_reversal_21",
+    "xf_seasonality",
+    "overnight_ret",
+    "intraday_bias_21",
+    "resid_rev_5",
+    "turnover_z_21",
+    "vol_price_div_21",
+    "ret_since_filing",
+    "mkt_vol_pctl_252",
+    "mkt_trend_pctl_252"
+  ],
+  "metadata": {
+    "sector": "Small Cap Extended",
+    "params": {
+      "max_depth": 2,
+      "learning_rate": 0.05
+    },
+    "meta_labeling": null
+  }
+}

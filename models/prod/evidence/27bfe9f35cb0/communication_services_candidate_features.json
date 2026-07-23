@@ -1,0 +1,14 @@
+{
+  "features": [
+    "intraday_ret",
+    "resid_rev_5"
+  ],
+  "metadata": {
+    "sector": "Communication Services",
+    "params": {
+      "max_depth": 1,
+      "learning_rate": 0.01
+    },
+    "meta_labeling": null
+  }
+}

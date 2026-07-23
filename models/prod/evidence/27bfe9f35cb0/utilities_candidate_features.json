@@ -1,0 +1,23 @@
+{
+  "features": [
+    "returns",
+    "roll_spread",
+    "spread_pct",
+    "corwin_schultz",
+    "garch_vol",
+    "overnight_ret",
+    "overnight_bias_21",
+    "resid_rev_5",
+    "ret_since_filing",
+    "mkt_vol_pctl_252",
+    "mkt_trend_pctl_252"
+  ],
+  "metadata": {
+    "sector": "Utilities",
+    "params": {
+      "max_depth": 2,
+      "learning_rate": 0.05
+    },
+    "meta_labeling": null
+  }
+}
