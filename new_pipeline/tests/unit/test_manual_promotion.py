@@ -164,3 +164,36 @@ def test_diff_orders_fractional_longs_integer_shorts():
     # without fractionable info the old integer behavior is preserved
     legacy = {o["symbol"]: o for o in diff_orders(targets, {}, prices, 100_000)}
     assert legacy["EXP"]["qty"] == 1
+
+
+def test_diff_orders_fractional_trims_and_integer_dust_suppression():
+    """A fractionable long trims in fractional shares (the tilt-correction
+    path that the adapter's int()-floor turned into qty-0 rejects for four
+    live days); the same sub-share diff on a non-fractionable name rounds to
+    zero executable shares and must be suppressed, not submitted."""
+    prices = {"FRAC": 300.0, "WHOLE": 300.0}
+    orders = diff_orders({"FRAC": 10.0 * 300 / 100_000}, {"FRAC": 10.4},
+                         prices, capital=100_000, fractionable={"FRAC"})
+    assert orders == [{"symbol": "FRAC", "qty": 0.4, "side": "sell", "tif": "day"}]
+    dust = diff_orders({"WHOLE": 10.0 * 300 / 100_000}, {"WHOLE": 10.4},
+                       prices, capital=100_000)
+    assert dust == []  # $120 diff passes the notional guard yet is unfillable
+
+
+def test_diff_orders_side_flip_closes_then_opens():
+    """Long->short flips split into an exact close (fractional held long)
+    followed by an integer short open — a single crossing order is illegal at
+    Alpaca and a fractional crossing doubly so. Short->long mirrors it."""
+    prices = {"FLIP": 100.0}
+    orders = diff_orders({"FLIP": -0.003}, {"FLIP": 0.494}, prices,
+                         capital=100_000, fractionable={"FLIP"})
+    assert orders == [
+        {"symbol": "FLIP", "qty": 0.494, "side": "sell", "tif": "day", "flip": "close"},
+        {"symbol": "FLIP", "qty": 3, "side": "sell", "tif": "day", "flip": "open"},
+    ]
+    back = diff_orders({"FLIP": 0.003}, {"FLIP": -3}, prices,
+                       capital=100_000, fractionable={"FLIP"})
+    assert back == [
+        {"symbol": "FLIP", "qty": 3, "side": "buy", "tif": "day", "flip": "close"},
+        {"symbol": "FLIP", "qty": 3.0, "side": "buy", "tif": "day", "flip": "open"},
+    ]

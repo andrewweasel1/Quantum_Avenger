@@ -62,6 +62,12 @@ def test_broker_market_order_and_positions():
     assert receipt["qty"] == 3.0 and receipt["filled_avg_price"] == 0.0
     assert isinstance(client.submit_order.call_args.kwargs["order_data"], MarketOrderRequest)
     assert broker.get_positions() == {"AAPL": 3.0, "TSLA": -2.0}
+    # fractional quantities survive to the API (int()-flooring made every
+    # sub-share rebalance trim a qty-0 reject); whole floats submit as ints.
+    broker.submit_order({"symbol": "AAPL", "qty": 0.494, "side": "sell", "tif": "day"})
+    assert client.submit_order.call_args.kwargs["order_data"].qty == 0.494
+    broker.submit_order({"symbol": "AAPL", "qty": 3.0, "side": "buy", "tif": "day"})
+    assert client.submit_order.call_args.kwargs["order_data"].qty == 3
 
 
 def test_broker_limit_order():

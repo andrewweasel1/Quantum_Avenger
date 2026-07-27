@@ -127,7 +127,11 @@ def diff_orders(targets: dict, positions: dict, prices: dict, capital: float,
     Long-side targets on ``fractionable`` names therefore trade in fractional
     quantities (3 decimals); Alpaca forbids fractional SHORT opens, so
     short-side targets stay integer (cheap losers round finely anyway).
-    Sub-``min_order_notional`` diffs are skipped (churn guard)."""
+    Sub-``min_order_notional`` diffs are skipped (churn guard).
+
+    Side flips (long->short or short->long) split into a close order followed
+    by an open order: Alpaca rejects a single order crossing through zero, and
+    a fractional held long can only cross via an exact fractional close."""
     fractionable = fractionable or set()
     orders = []
     for symbol in sorted(set(targets) | set(positions)):
@@ -135,13 +139,34 @@ def diff_orders(targets: dict, positions: dict, prices: dict, capital: float,
         if not price or price <= 0:
             continue
         target_w = targets.get(symbol, 0.0)
+        held = positions.get(symbol, 0.0)
         raw_shares = target_w * capital / price
         can_fraction = symbol in fractionable and target_w >= 0.0
         target_shares = round(raw_shares, 3) if can_fraction else int(round(raw_shares))
-        delta = round(target_shares - positions.get(symbol, 0.0), 3)
+        if held and target_shares and (held > 0) != (target_shares > 0):
+            close_qty = round(abs(held), 3) if held > 0 else int(round(abs(held)))
+            if close_qty > 0:
+                orders.append({"symbol": symbol, "qty": close_qty,
+                               "side": "sell" if held > 0 else "buy",
+                               "tif": "day", "flip": "close"})
+            open_qty = (round(abs(target_shares), 3) if can_fraction
+                        else int(abs(target_shares)))
+            if open_qty > 0 and abs(target_shares) * price >= min_order_notional:
+                orders.append({"symbol": symbol, "qty": open_qty,
+                               "side": "buy" if target_shares > 0 else "sell",
+                               "tif": "day", "flip": "open"})
+            continue
+        delta = round(target_shares - held, 3)
         if abs(delta) * price < min_order_notional:
             continue
-        orders.append({"symbol": symbol, "qty": abs(delta),
+        # Executable units: fractional only while the whole move stays on the
+        # fractionable long side; otherwise whole shares, and a diff that
+        # rounds to zero shares is unfillable dust — suppress, don't submit.
+        frac_ok = can_fraction and held >= 0
+        qty = round(abs(delta), 3) if frac_ok else int(round(abs(delta)))
+        if qty <= 0:
+            continue
+        orders.append({"symbol": symbol, "qty": qty,
                        "side": "buy" if delta > 0 else "sell", "tif": "day"})
     return orders
 
@@ -273,13 +298,22 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
         print("DRY RUN — pass --execute to submit to the paper account")
         return
     submitted, skipped = 0, []
+    failed_closes = set()
     for order in orders:
+        if order.get("flip") == "open" and order["symbol"] in failed_closes:
+            # the paired close didn't fill-submit; the open would be an
+            # illegal zero-crossing order — hold the position until it can.
+            skipped.append((order["symbol"], order["side"], "flip close failed"))
+            _logger.warning("SKIPPED %s %s: flip close failed", order['side'], order['symbol'])
+            continue
         try:
             receipt = broker.submit_order(order)
             submitted += 1
             _logger.info("submitted %s %s x%s -> %s", order['side'], order['symbol'],
                          order['qty'], receipt['status'])
         except Exception as exc:  # not-shortable / halted / rejected: skip, keep going
+            if order.get("flip") == "close":
+                failed_closes.add(order["symbol"])
             skipped.append((order["symbol"], order["side"], str(exc)[:90]))
             _logger.warning("SKIPPED %s %s: %s", order['side'], order['symbol'], exc)
     print(f"submitted {submitted}/{len(orders)} orders; skipped {len(skipped)}")

@@ -30,7 +30,12 @@ class AlpacaBroker(BrokerAdapter):
 
     def submit_order(self, order: dict) -> dict:
         symbol = str(order["symbol"])
-        qty = int(order.get("qty", 0))
+        # Fractional quantities must survive to the API: int()-flooring here
+        # turned the book's sub-share rebalance trims into qty-0 rejects and
+        # silently re-introduced the long-leg rounding tilt the sizing fix
+        # was meant to kill. Whole counts stay int for exact API formatting.
+        qty_raw = float(order.get("qty", 0))
+        qty = int(qty_raw) if qty_raw.is_integer() else round(qty_raw, 3)
         side = _SIDE[str(order.get("side", "buy")).lower()]
         tif = _TIF.get(str(order.get("tif", "day")).lower(), TimeInForce.DAY)
         limit_price = order.get("limit_price")
