@@ -190,6 +190,9 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
                         help="calendar warmup for smoothing/decoder history")
     parser.add_argument("--execute", action="store_true",
                         help="actually submit orders (default: dry-run print)")
+    parser.add_argument("--force-rebalance", action="store_true",
+                        help="ignore the grid spacing and re-target the full book "
+                             "today (recovery tool, e.g. after a mis-scored book)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -266,6 +269,9 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
 
     state = (json.loads(Path(args.state_file).read_text())
              if Path(args.state_file).exists() else {})
+    if args.force_rebalance:
+        _logger.warning("--force-rebalance: ignoring grid spacing, full re-target")
+        state.pop("last_rebalance_date", None)
     targets, new_state = compute_targets(panel, params, state, market_by_date,
                                          causal_span=params.get("causal_window_days", 252))
 
@@ -275,6 +281,19 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     broker = AlpacaBroker(os.environ["QA_ALPACA__API_KEY"],
                          os.environ["QA_ALPACA__SECRET_KEY"], paper=True)
     positions = broker.get_positions()
+    # Sizing-price sanity gate: the frame's closes size every order, so a feed
+    # regression (the fake-source fallback priced ASML at $107 vs $1,655 live
+    # and silently mis-sized the book 15x) must abort, not trade. Held names
+    # carry a live mark from the broker — compare where both sides exist.
+    marks = {p.symbol: float(p.current_price)
+             for p in broker._client.get_all_positions() if float(p.current_price) > 0}
+    checked = [(s, prices[s] / marks[s]) for s in marks if prices.get(s)]
+    bad = [(s, r) for s, r in checked if not 0.5 <= r <= 2.0]
+    if checked and len(bad) > max(2, 0.02 * len(checked)):
+        worst = sorted(bad, key=lambda x: abs(x[1] - 1.0), reverse=True)[:5]
+        raise SystemExit(
+            f"refusing to trade: {len(bad)}/{len(checked)} sizing prices diverge "
+            f">2x from live marks (worst: {worst}) — data feed regression?")
     try:
         from alpaca.trading.enums import AssetClass, AssetStatus
         from alpaca.trading.requests import GetAssetsRequest

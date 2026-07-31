@@ -96,8 +96,17 @@ def build_training_frame(
     see :func:`apply_membership_mask`. ``None`` keeps every row (fixtures with
     placeholder dates, direct callers).
     """
-    source = source or FakeMarketDataSource()
+    # A live run_mode must never silently backtest on synthetic bars: the paper
+    # executor called this directly without a source and traded a fake-scored
+    # book for a week. Mirror run_offline_pipeline's resolution here so every
+    # direct caller gets real data in live modes (factory raises without keys).
     cfg = cfg or get_config()
+    if source is None:
+        from new_pipeline.adapters.factory import LIVE_MODES, build_adapters
+
+        if (cfg.system.run_mode or "offline").lower() in LIVE_MODES:
+            source = build_adapters(cfg).market_data
+    source = source or FakeMarketDataSource()
     rows = []
     empty_symbols = 0
     for symbol in symbols:
