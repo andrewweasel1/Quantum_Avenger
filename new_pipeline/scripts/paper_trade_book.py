@@ -186,8 +186,11 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     parser.add_argument("--state-file", default="./models/prod/book_state.json")
     parser.add_argument("--capital", type=float, default=None,
                         help="book notional (default execution.account_capital)")
-    parser.add_argument("--lookback-days", type=int, default=90,
-                        help="calendar warmup for smoothing/decoder history")
+    parser.add_argument("--lookback-days", type=int, default=420,
+                        help="calendar warmup for features/smoothing/decoder history "
+                             "(must cover the 252-trading-day momentum/seasonality "
+                             "warmup; 90d starves them on real data and collapses "
+                             "the scored universe)")
     parser.add_argument("--execute", action="store_true",
                         help="actually submit orders (default: dry-run print)")
     parser.add_argument("--force-rebalance", action="store_true",
@@ -316,6 +319,12 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     if not args.execute:
         print("DRY RUN — pass --execute to submit to the paper account")
         return
+    # Persist the new anchors BEFORE submitting: new_state depends only on the
+    # targets (not the fills), and a mid-loop crash previously lost the state
+    # write, leaving the next run diffing against stale anchors.
+    Path(args.state_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.state_file).write_text(json.dumps(new_state, indent=1))
+    print(f"state saved -> {args.state_file}")
     submitted, skipped = 0, []
     failed_closes = set()
     for order in orders:
@@ -340,9 +349,6 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
         from collections import Counter
         reasons = Counter(m.split('"message":')[-1][:40] for _, _, m in skipped)
         print("  top skip reasons:", dict(reasons.most_common(3)))
-    Path(args.state_file).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.state_file).write_text(json.dumps(new_state, indent=1))
-    print(f"state saved -> {args.state_file}")
 
 
 if __name__ == "__main__":  # pragma: no cover
