@@ -8,8 +8,13 @@ receipt shape the orchestrator/trade-log expect. Loaded lazily for a live
 """
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce
-from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
+from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
+from alpaca.trading.requests import (
+    LimitOrderRequest,
+    MarketOrderRequest,
+    StopLossRequest,
+    TakeProfitRequest,
+)
 
 from new_pipeline.execution.broker import BrokerAdapter
 
@@ -39,13 +44,26 @@ class AlpacaBroker(BrokerAdapter):
         side = _SIDE[str(order.get("side", "buy")).lower()]
         tif = _TIF.get(str(order.get("tif", "day")).lower(), TimeInForce.DAY)
         limit_price = order.get("limit_price")
+        # Bracket legs (intraday runner): server-side stop/target protection
+        # attached to the entry — one order, no client-side stop polling.
+        # Absent both keys, behavior is byte-identical to the daily path.
+        extra = {}
+        if order.get("stop_loss") is not None or order.get("take_profit") is not None:
+            extra["order_class"] = OrderClass.BRACKET
+            if order.get("stop_loss") is not None:
+                extra["stop_loss"] = StopLossRequest(
+                    stop_price=round(float(order["stop_loss"]), 2))
+            if order.get("take_profit") is not None:
+                extra["take_profit"] = TakeProfitRequest(
+                    limit_price=round(float(order["take_profit"]), 2))
         if limit_price is not None:
             request = LimitOrderRequest(
                 symbol=symbol, qty=qty, side=side, time_in_force=tif,
-                limit_price=round(float(limit_price), 2),
+                limit_price=round(float(limit_price), 2), **extra,
             )
         else:
-            request = MarketOrderRequest(symbol=symbol, qty=qty, side=side, time_in_force=tif)
+            request = MarketOrderRequest(symbol=symbol, qty=qty, side=side,
+                                         time_in_force=tif, **extra)
 
         placed = self._client.submit_order(order_data=request)
         return {

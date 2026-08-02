@@ -252,6 +252,39 @@ always constructs the broker with `paper=True`. Per-sector threshold models
 can additionally be replayed through the trade-graph runner
 (`new_pipeline/execution/runner.py`), which skips book-level champions.
 
+## Intraday stack (small/mid-cap ORB v1)
+
+A sibling product line under `new_pipeline/intraday/`: minutes-scale,
+always flat by the EXCHANGE close (early closes honored via the committed
+session calendar), long-only opening range breakout on a hybrid universe
+(liquidity-filtered extended-cap base + a causal-at-open daily scanner).
+It rides the same honest gauntlet on per-session returns — deflated DSR
+with N_eff over the 12-combo trial family, CSCV PBO, the family-wise
+per-regime HMM gate, and a TIMING null (same picks, random entry minutes,
+identical range-derived exits and spread-dominated costs) in the standard
+`synthetic_sharpe` slot. Promotion key: `"Intraday ORB"`.
+
+```bash
+# one-time: session calendar fixture (committed) + minute-bar vault (resumable)
+python -m new_pipeline.scripts.ingest_minute_vault --refresh-calendar
+python -m new_pipeline.scripts.ingest_minute_vault --start 2024-08 --end 2026-08
+
+# official backtest through the gauntlet
+python -m new_pipeline.intraday.run --start 2024-09-01 --end 2026-07-31
+
+# paper session runner (bare-metal host only; dry-run default)
+python -m new_pipeline.scripts.intraday_paper_session            # plan
+python -m new_pipeline.scripts.intraday_paper_session --execute  # trade one session
+```
+
+The paper runner trades ONLY through dedicated keys
+(`QA_ALPACA_INTRADAY__API_KEY/SECRET_KEY`, PK-prefixed) and refuses to run
+if they are missing or identical to the daily book's keys — the two live
+books never share an account, margin, or day-trade counts. It requires an
+active `"Intraday ORB"` promotion in the registry, submits bracket orders
+(server-side stop/target legs), and must live on a persistent host: a
+reclaimable research container cannot hold a 6.5-hour session loop.
+
 ## Repository map
 
 | Path | What lives there |
