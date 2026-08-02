@@ -220,3 +220,4 @@ __marimo__/
 # Live API run working dirs (bulky parquets/models; curated evidence JSONs
 # are committed separately under models/prod/evidence/<run_id>/)
 data/api_runs/
+data/minute_vault/
