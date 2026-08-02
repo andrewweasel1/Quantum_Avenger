@@ -295,6 +295,30 @@ fundamentals:
 short_volume:
   vault_path: ""
 
+# Minute-bar intraday stack (small/mid-cap ORB v1). Separate vault + universe
+# filters + promotion key; never touches the frozen daily champion. ORB axes
+# (range_minutes x stop_styles x target_r_multiples) form one deflation-priced
+# trial family — widening any list adds trials the DSR must pay for.
+intraday:
+  vault_dir: "./data/minute_vault"
+  bar_minutes: 1
+  history_months: 24
+  universe_segments:
+    - "Small Cap Extended"
+    - "Mid Cap Extended"
+  min_adv_dollars: 5000000.0
+  min_price: 3.0
+  scanner_top_n: 60
+  range_minutes: [5, 15, 30]
+  stop_styles: ["or_low", "or_mid"]
+  target_r_multiples: [2.0, 0.0]
+  entry_buffer_bps: 5.0
+  risk_bps: 25.0
+  max_position_pct: 5.0
+  max_concurrent: 15
+  flatten_buffer_min: 5
+  spread_floor_bps: 15.0
+
 dashboard:
   veto_ledger_path: "./data/ledger/veto_ledger.parquet"
   trade_log_path: "./data/ledger/trade_log.parquet"

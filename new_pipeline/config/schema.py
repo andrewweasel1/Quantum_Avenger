@@ -326,6 +326,36 @@ class ShortVolumeConfig(BaseModel):
     vault_path: str = ""  # StaticShortVolumeSource CSV; "" -> feature family off
 
 
+class IntradayConfig(BaseModel):
+    """Minute-bar intraday stack (small/mid-cap ORB v1). Sibling to the daily
+    tournament: separate vault, universe filters, and its own promotion key;
+    nothing here alters the frozen daily champion's behavior."""
+
+    vault_dir: str = "./data/minute_vault"  # per (symbol, month) parquet tree
+    bar_minutes: int = 1
+    history_months: int = 24
+    # Static base: liquid1500 extended-cap segments + liquidity floors
+    # (computed causally from daily bars at run time).
+    universe_segments: list[str] = Field(
+        default_factory=lambda: ["Small Cap Extended", "Mid Cap Extended"])
+    min_adv_dollars: float = 5_000_000.0  # 20d median dollar volume floor
+    min_price: float = 3.0
+    # Daily scanner overlay: causal-at-open ranking, top_n admitted to ORB.
+    scanner_top_n: int = 60
+    # ORB trial family (deflation-priced together; every axis value is a trial).
+    range_minutes: list[int] = Field(default_factory=lambda: [5, 15, 30])
+    stop_styles: list[str] = Field(default_factory=lambda: ["or_low", "or_mid"])
+    target_r_multiples: list[float] = Field(default_factory=lambda: [2.0, 0.0])  # 0 -> no target
+    entry_buffer_bps: float = 5.0
+    # Risk: fixed-fractional per trade against the stop distance.
+    risk_bps: float = 25.0            # of equity, per trade
+    max_position_pct: float = 5.0     # of equity, per name
+    max_concurrent: int = 15
+    flatten_buffer_min: int = 5       # exit N minutes before session close
+    # Costs: spread-dominated. Per-side charge = max(cs_spread/2, floor) + impact.
+    spread_floor_bps: float = 15.0
+
+
 class DashboardConfig(BaseModel):
     veto_ledger_path: str = "./data/ledger/veto_ledger.parquet"
     trade_log_path: str = "./data/ledger/trade_log.parquet"
@@ -377,5 +407,6 @@ class AppConfig(BaseModel):
     news: NewsConfig = Field(default_factory=NewsConfig)
     fundamentals: FundamentalsConfig = Field(default_factory=FundamentalsConfig)
     short_volume: ShortVolumeConfig = Field(default_factory=ShortVolumeConfig)
+    intraday: IntradayConfig = Field(default_factory=IntradayConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     alpaca: AlpacaConfig = Field(default_factory=AlpacaConfig)

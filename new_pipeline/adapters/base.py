@@ -59,6 +59,23 @@ class Bar:
 
 
 @dataclass(frozen=True)
+class MinuteBar:
+    """Intraday bar. ``ts`` is the bar OPEN time (Alpaca's convention), tz-aware
+    UTC; session bookkeeping (open/close/early closes) belongs to the exchange
+    calendar, never to hardcoded clock times. ``vwap`` rides along because the
+    feed provides it and intraday anchors (opening range context, participation
+    caps) want it without a recomputation pass."""
+
+    ts: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    vwap: float
+
+
+@dataclass(frozen=True)
 class FundamentalSnapshot:
     """Point-in-time fundamentals: the values knowable on/after ``as_of`` (the filing
     date), used for value/quality cross-sectional factors. Per-share so they divide
