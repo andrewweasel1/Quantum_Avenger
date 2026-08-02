@@ -68,13 +68,18 @@ def opening_range(ts: np.ndarray, high: np.ndarray, low: np.ndarray,
 def trade_path(ts: np.ndarray, open_: np.ndarray, high: np.ndarray,
                low: np.ndarray, close: np.ndarray, session_open: datetime,
                session_close: datetime, combo: Combo, entry_buffer_bps: float,
-               flatten_buffer_min: int) -> TradePath | None:
+               flatten_buffer_min: int,
+               entry_override: int | None = None) -> TradePath | None:
     """The full long-only ORB lifecycle for one symbol-session, or None.
 
     Entry: first bar CLOSE above or_high*(1+buffer) after the range completes
     fires the signal; the fill is the NEXT bar's open. Entries are only taken
     while there is still room to exit (the fill bar must precede the flatten
-    bar). At most one trade per symbol per session."""
+    bar). At most one trade per symbol per session.
+
+    ``entry_override`` (timing-null seam): skip the breakout scan and enter at
+    that bar index instead — same range-derived stop/target, same flatten —
+    so the null destroys exactly one thing, the breakout TIMING."""
     or_high, or_low, after = opening_range(ts, high, low, session_open, combo.k_minutes)
     if not np.isfinite(or_high) or after >= len(ts):
         return None
@@ -83,13 +88,18 @@ def trade_path(ts: np.ndarray, open_: np.ndarray, high: np.ndarray,
     if flatten_idx <= after:
         return None
 
-    trigger = or_high * (1.0 + entry_buffer_bps / 1e4)
-    fired = np.flatnonzero(close[after:flatten_idx] > trigger)
-    if fired.size == 0:
-        return None
-    entry_idx = after + int(fired[0]) + 1  # next-bar fill
-    if entry_idx > flatten_idx:
-        return None
+    if entry_override is not None:
+        entry_idx = int(entry_override)
+        if not (after < entry_idx <= flatten_idx):
+            return None
+    else:
+        trigger = or_high * (1.0 + entry_buffer_bps / 1e4)
+        fired = np.flatnonzero(close[after:flatten_idx] > trigger)
+        if fired.size == 0:
+            return None
+        entry_idx = after + int(fired[0]) + 1  # next-bar fill
+        if entry_idx > flatten_idx:
+            return None
     entry_px = float(open_[entry_idx])
 
     stop_px = or_low if combo.stop_style == "or_low" else (or_high + or_low) / 2.0

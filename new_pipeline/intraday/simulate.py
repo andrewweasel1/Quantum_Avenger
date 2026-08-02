@@ -87,9 +87,14 @@ def _side_cost_bps(notional: float, spread_bps: float, vol_minute: float,
 
 def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
                 combos: list[Combo], stats: pl.DataFrame, cfg,
-                equity: float) -> tuple[dict[str, float], list[Trade]]:
+                equity: float,
+                entry_rng: np.random.Generator | None = None
+                ) -> tuple[dict[str, float], list[Trade]]:
     """One session across all combos. Returns ({combo_key: session_return},
-    trade ledger). ``minutes`` is the session-filtered frame for this day."""
+    trade ledger). ``minutes`` is the session-filtered frame for this day.
+    ``entry_rng`` switches every entry to a RANDOM in-session bar (the timing
+    null): same names, same range-derived stops, same costs — only the
+    breakout timing is destroyed."""
     icfg = cfg.intraday
     day_stats = {r["ticker"]: r for r in
                  stats.filter(pl.col("date") == session.day).iter_rows(named=True)}
@@ -111,9 +116,13 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
             bars = arrays.get(ticker)
             if bars is None or len(bars["ts"]) == 0:
                 continue
+            override = None
+            if entry_rng is not None:
+                override = int(entry_rng.integers(1, len(bars["ts"])))
             path = trade_path(bars["ts"], bars["open"], bars["high"], bars["low"],
                               bars["close"], session.open_utc, session.close_utc,
-                              combo, icfg.entry_buffer_bps, icfg.flatten_buffer_min)
+                              combo, icfg.entry_buffer_bps, icfg.flatten_buffer_min,
+                              entry_override=override)
             if path is not None:
                 candidates.append((ticker, path))
         candidates.sort(key=lambda tp: (tp[1].entry_idx, tp[0]))
