@@ -60,6 +60,28 @@ def load_minutes(vault_dir: Path, symbols: list[str], start: datetime,
             .sort(["ticker", "ts"]))
 
 
+def session_daily(regular: pl.DataFrame) -> pl.DataFrame:
+    """Daily OHLCV aggregated from SESSION-FILTERED minute bars — the single
+    price source for liquidity floors and the scanner, so the intraday stack
+    never mixes two feeds' views of the same day. Requires the
+    ``session_date`` column that `filter_to_sessions` attaches."""
+    if regular.is_empty():
+        return pl.DataFrame(schema={"date": pl.Date, "ticker": pl.Utf8,
+                                    "open": pl.Float64, "high": pl.Float64,
+                                    "low": pl.Float64, "close": pl.Float64,
+                                    "volume": pl.Int64, "dollar_vol": pl.Float64})
+    return (regular.sort(["ticker", "ts"])
+            .group_by(["ticker", "session_date"], maintain_order=True)
+            .agg(pl.col("open").first(),
+                 pl.col("high").max(),
+                 pl.col("low").min(),
+                 pl.col("close").last(),
+                 pl.col("volume").sum(),
+                 (pl.col("close") * pl.col("volume")).sum().alias("dollar_vol"))
+            .rename({"session_date": "date"})
+            .sort(["ticker", "date"]))
+
+
 def filter_to_sessions(frame: pl.DataFrame, sessions: dict[date, Session]) -> pl.DataFrame:
     """Keep regular-hours bars only: session open <= ts < session close, per the
     exchange calendar (early closes included). Bars on non-session days drop."""
