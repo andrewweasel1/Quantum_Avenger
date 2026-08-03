@@ -86,7 +86,9 @@ def test_evaluate_orb_planted_edge_and_registry_row(tmp_path):
     result = evaluate_orb(matrix, days, combos, ledger, daily, minutes_by_day,
                           sessions, picks, stats, cfg, equity=100_000.0, seed=0)
     assert result["report"].dsr > 0.9  # planted edge survives deflation
-    assert result["champion"].key == "k5|or_low|none"
+    # a bare combo list rides the compat path as a single "default" variant
+    assert result["champion"].key == "default|k5|or_low|none"
+    assert result["champion"].combo.k_minutes == 5
     diag = result["diagnostics"]
     assert diag["n_trades"] == 90 and 0 < diag["cost_share_of_gross"] < 1
     assert len(diag["timing_null_sharpes"]) == 4
@@ -120,7 +122,7 @@ def test_full_run_cli_on_synthetic_vault(tmp_path, monkeypatch):
     rng = np.random.default_rng(1)
     for sym in ("AAA", "BBB"):
         by_month: dict[tuple[int, int], list] = {}
-        for day, sess in sessions.items():
+        for day in sessions:
             frame = _session_minutes(day, sym, drift=float(rng.normal(0.03, 0.03)))
             bars = [MinuteBar(r["ts"], r["open"], r["high"], r["low"], r["close"],
                               r["volume"], r["close"]) for r in frame.iter_rows(named=True)]
@@ -143,3 +145,41 @@ def test_full_run_cli_on_synthetic_vault(tmp_path, monkeypatch):
     run(days[0], days[-1], out2, equity=100_000.0, seed=0)
     matrix2 = pl.read_parquet(out2 / "intraday_orb_returns_matrix.parquet")
     assert matrix1.equals(matrix2)
+
+
+def test_trial_family_crosses_scanners_and_constructions():
+    """The scanner weighting is a real experimental axis: each variant trades
+    its OWN pick list, every (variant x construction) pair is a priced column,
+    and the ledger tags trades with the variant that generated them."""
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.entry_buffer_bps = 0.0
+    cfg.intraday.scanner_variants = ["attention", "tradable"]
+    from new_pipeline.intraday.orb import Trial, trials_from_config
+    from new_pipeline.intraday.simulate import run_backtest_trials
+
+    sessions = _sessions(6)
+    minutes_by_day = {}
+    for d in sessions:
+        minutes_by_day[d] = pl.concat([_session_minutes(d, "AAA", 0.05),
+                                       _session_minutes(d, "BBB", 0.02)])
+    # attention picks AAA only, tradable picks BBB only -> different books
+    picks_by_variant = {"attention": {d: ["AAA"] for d in sessions},
+                        "tradable": {d: ["BBB"] for d in sessions}}
+    stats = pl.DataFrame({"date": list(sessions) * 2,
+                          "ticker": ["AAA"] * len(sessions) + ["BBB"] * len(sessions),
+                          "spread_bps": [30.0] * (2 * len(sessions)),
+                          "vol_minute": [0.0] * (2 * len(sessions))})
+    trials = [Trial("attention", Combo(5, "or_low", 0.0)),
+              Trial("tradable", Combo(5, "or_low", 0.0))]
+    matrix, days, ledger = run_backtest_trials(minutes_by_day, sessions,
+                                               picks_by_variant, trials, stats,
+                                               cfg, equity=100_000.0)
+    assert matrix.shape == (6, 2)
+    assert not np.allclose(matrix[:, 0], matrix[:, 1])  # different picks, different P&L
+    tagged = {t.combo_key for t in ledger}
+    assert tagged == {"attention|k5|or_low|none", "tradable|k5|or_low|none"}
+    assert {t.ticker for t in ledger if t.combo_key.startswith("attention")} == {"AAA"}
+    # the config cross is the full family: 2 scanners x 12 constructions
+    cfg.intraday.scanner_variants = ["attention", "tradable"]
+    assert len(trials_from_config(cfg)) == 24

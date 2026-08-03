@@ -33,6 +33,8 @@ def _per_period_sharpe(column: np.ndarray) -> float:
 def timing_null_margin(minutes_by_day, sessions, picks_by_day, combo, stats,
                        cfg, equity: float, n_iter: int, seed: int,
                        champion_sharpe: float) -> tuple[float, list[float]]:
+    """Null for the ENTRY TIMING only: the champion's own scanner picks and
+    construction, entered at random in-session minutes."""
     """champion_sharpe - Q95 of the random-entry null Sharpe distribution."""
     rng = np.random.default_rng(seed)
     days = sorted(d for d in minutes_by_day if d in sessions)
@@ -67,22 +69,32 @@ def market_series(daily: pl.DataFrame, days: list) -> tuple[np.ndarray, np.ndarr
     return rets, vol
 
 
-def evaluate_orb(matrix: np.ndarray, days: list, combos, ledger, daily: pl.DataFrame,
-                 minutes_by_day, sessions, picks_by_day, stats, cfg,
+def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataFrame,
+                 minutes_by_day, sessions, picks_by_variant, stats, cfg,
                  equity: float, seed: int = 0) -> dict:
-    """Full gauntlet verdict + manifest diagnostics for the champion combo."""
+    """Full gauntlet verdict + manifest diagnostics for the champion trial.
+
+    ``trials`` are (scanner variant x construction) pairs and ``picks_by_variant``
+    maps each variant to its own {day: picks}; a plain combo list with a single
+    {day: picks} dict still works (single-variant runs)."""
+    from new_pipeline.intraday.orb import Trial
+
+    trials = [t if isinstance(t, Trial) else Trial("default", t) for t in trials]
+    if not picks_by_variant or not isinstance(next(iter(picks_by_variant.values())), dict):
+        picks_by_variant = {"default": picks_by_variant}
     per_combo_sr = np.array([_per_period_sharpe(matrix[:, j])
                              for j in range(matrix.shape[1])])
     champ_idx = int(np.argmax(per_combo_sr))
-    champion = combos[champ_idx]
+    champion = trials[champ_idx]
     champ_sessions = matrix[:, champ_idx]
+    champ_picks = picks_by_variant.get(champion.variant, {})
 
     n_eff = effective_number_of_trials(matrix.T)  # one trial per row
     report = deflated_sharpe_report(champ_sessions, n_eff,
                                     trial_sharpes=per_combo_sr.tolist())
     cscv = evaluate_cscv(matrix, n_partitions=cfg.evaluation.pbo_partitions)
     margin, nulls = timing_null_margin(
-        minutes_by_day, sessions, picks_by_day, champion, stats, cfg, equity,
+        minutes_by_day, sessions, champ_picks, champion.combo, stats, cfg, equity,
         n_iter=cfg.long_short.null_iterations, seed=seed,
         champion_sharpe=float(per_combo_sr[champ_idx]))
 
@@ -96,7 +108,10 @@ def evaluate_orb(matrix: np.ndarray, days: list, combos, ledger, daily: pl.DataF
         decode_returns=mkt_rets)
 
     half = len(days) // 2
-    champ_trades = [t for t in ledger if t.combo_key == champion.key]
+    # Trial runs tag ledger rows "<variant>|<combo>"; the single-variant compat
+    # path leaves them bare — accept either spelling of the champion's trades.
+    champ_keys = {champion.key, champion.combo.key}
+    champ_trades = [t for t in ledger if t.combo_key in champ_keys]
     diagnostics = {
         "combo": champion.key,
         "session_sharpe": float(per_combo_sr[champ_idx]),
@@ -113,8 +128,12 @@ def evaluate_orb(matrix: np.ndarray, days: list, combos, ledger, daily: pl.DataF
         "first_half_sharpe": _per_period_sharpe(champ_sessions[:half]),
         "second_half_sharpe": _per_period_sharpe(champ_sessions[half:]),
         "timing_null_sharpes": nulls,
-        "trial_sharpes": {c.key: float(s)
-                          for c, s in zip(combos, per_combo_sr, strict=True)},
+        "scanner_variant": champion.variant,
+        "gross_bps_mean": (
+            float(np.mean([t.gross_pnl / max(t.shares * t.entry_px, 1e-9) * 1e4
+                           for t in champ_trades])) if champ_trades else 0.0),
+        "trial_sharpes": {t.key: float(s)
+                          for t, s in zip(trials, per_combo_sr, strict=True)},
         "regime_promoted": bool(verdict.promoted),
     }
 

@@ -19,7 +19,7 @@ set is deterministic and never exceeds the cap at any instant it binds.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 import numpy as np
@@ -158,6 +158,34 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
                 cost_dollars=cost, net_pnl=gross - cost))
         session_returns[combo.key] = pnl / equity
     return session_returns, ledger
+
+
+def run_backtest_trials(minutes_by_day, sessions: dict[date, Session],
+                        picks_by_variant: dict[str, dict[date, list[str]]],
+                        trials, stats: pl.DataFrame, cfg, equity: float):
+    """(scanner variant x construction) trial family -> ((n_sessions x n_trials)
+    matrix, days, ledger). Each variant supplies its own pick list, so the
+    scanner weighting is a genuine experimental axis and not a fixed input."""
+    days = sorted(d for d in minutes_by_day if d in sessions)
+    matrix = np.zeros((len(days), len(trials)))
+    ledger: list[Trade] = []
+    by_variant: dict[str, list[Combo]] = {}
+    for trial in trials:
+        by_variant.setdefault(trial.variant, []).append(trial.combo)
+    column = {t.key: j for j, t in enumerate(trials)}
+
+    for i, day in enumerate(days):
+        for variant, combos in by_variant.items():
+            picks = picks_by_variant.get(variant, {}).get(day, [])
+            if not picks:
+                continue
+            rets, trades = run_session(minutes_by_day[day], sessions[day], picks,
+                                       combos, stats, cfg, equity)
+            for combo in combos:
+                matrix[i, column[f"{variant}|{combo.key}"]] = rets.get(combo.key, 0.0)
+            for trade in trades:
+                ledger.append(replace(trade, combo_key=f"{variant}|{trade.combo_key}"))
+    return matrix, days, ledger
 
 
 def run_backtest(minutes_by_day, sessions: dict[date, Session],

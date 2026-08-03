@@ -32,9 +32,10 @@ from new_pipeline.intraday.data import (
     session_daily,
 )
 from new_pipeline.intraday.evaluate import REGISTRY_KEY, evaluate_orb, record
-from new_pipeline.intraday.orb import combos_from_config
-from new_pipeline.intraday.simulate import run_backtest, trailing_stats
-from new_pipeline.intraday.universe import scan_day, segment_symbols
+from new_pipeline.intraday.orb import trials_from_config
+from new_pipeline.intraday.scanner import apply_floors, build_signal_frame, scan_day
+from new_pipeline.intraday.simulate import run_backtest_trials, trailing_stats
+from new_pipeline.intraday.universe import segment_symbols
 
 SLUG = "intraday_orb"
 
@@ -58,7 +59,8 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
     # Pass A: dailies for the whole window (+1 month back for trailing warmup).
     daily_frames = []
     months = months_between(start, end)
-    warm_y, warm_m = (months[0][0] - 1, 12) if months[0][1] == 1 else (months[0][0], months[0][1] - 1)
+    warm_y, warm_m = ((months[0][0] - 1, 12) if months[0][1] == 1
+                      else (months[0][0], months[0][1] - 1))
     for year, month in [(warm_y, warm_m), *months]:
         w_start, w_end = _month_window(year, month)
         chunk = load_minutes(vault, symbols, w_start, w_end)
@@ -70,20 +72,26 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
     daily = pl.concat(daily_frames).sort(["ticker", "date"])
     print(f"dailies: {daily.height} rows, {daily['ticker'].n_unique()} names")
 
-    picks_by_day = {}
-    for day in sorted(sessions):
-        picks_by_day[day] = scan_day(daily, day, cfg.intraday.scanner_top_n,
-                                     cfg.intraday.min_adv_dollars, cfg.intraday.min_price)
+    signals = apply_floors(build_signal_frame(daily), cfg.intraday.min_adv_dollars,
+                           cfg.intraday.min_price)
+    picks_by_variant: dict[str, dict] = {}
+    for variant in cfg.intraday.scanner_variants:
+        picks_by_variant[variant] = {
+            day: scan_day(signals, day, cfg.intraday.scanner_top_n, weights=variant)
+            for day in sorted(sessions)}
     stats = trailing_stats(daily)
-    n_active = sum(1 for p in picks_by_day.values() if p)
-    print(f"scanner: {n_active}/{len(sessions)} sessions with picks")
+    for variant, picks in picks_by_variant.items():
+        active = sum(1 for p in picks.values() if p)
+        print(f"scanner[{variant}]: {active}/{len(sessions)} sessions, "
+              f"top {cfg.intraday.scanner_top_n}")
 
     # Pass B: minute bars for picked names only, month by month.
     minutes_by_day: dict[date, pl.DataFrame] = {}
     for year, month in months:
         w_start, w_end = _month_window(year, month)
         month_days = [d for d in sessions if d.year == year and d.month == month]
-        needed = sorted({t for d in month_days for t in picks_by_day.get(d, [])})
+        needed = sorted({t for picks in picks_by_variant.values()
+                         for d in month_days for t in picks.get(d, [])})
         if not needed:
             continue
         chunk = filter_to_sessions(load_minutes(vault, needed, w_start, w_end), sessions_all)
@@ -94,17 +102,20 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
             if key in sessions:
                 minutes_by_day[key] = sub
 
-    combos = combos_from_config(cfg)
-    matrix, days, ledger = run_backtest(minutes_by_day, sessions, picks_by_day,
-                                        combos, stats, cfg, equity)
-    print(f"simulated: {matrix.shape[0]} sessions x {matrix.shape[1]} combos, "
+    trials = trials_from_config(cfg)
+    matrix, days, ledger = run_backtest_trials(minutes_by_day, sessions,
+                                               picks_by_variant, trials, stats,
+                                               cfg, equity)
+    print(f"simulated: {matrix.shape[0]} sessions x {matrix.shape[1]} trials "
+          f"({len(cfg.intraday.scanner_variants)} scanners x "
+          f"{len(trials) // max(len(cfg.intraday.scanner_variants), 1)} constructions), "
           f"{len(ledger)} trades")
 
-    result = evaluate_orb(matrix, days, combos, ledger, daily, minutes_by_day,
-                          sessions, picks_by_day, stats, cfg, equity, seed=seed)
+    result = evaluate_orb(matrix, days, trials, ledger, daily, minutes_by_day,
+                          sessions, picks_by_variant, stats, cfg, equity, seed=seed)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    keys = [c.key for c in combos]
+    keys = [t.key for t in trials]
     pl.DataFrame({"date": days, **{k: matrix[:, j] for j, k in enumerate(keys)}}
                  ).write_parquet(output_dir / f"{SLUG}_returns_matrix.parquet")
     pl.DataFrame({"date": days}).write_parquet(output_dir / f"{SLUG}_sample_dates.parquet")
@@ -130,7 +141,9 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
     manifest = {
         "kind": "intraday_orb",
         "key": REGISTRY_KEY,
-        "best_params": {"combo": result["champion"].key,
+        "best_params": {"trial": result["champion"].key,
+                        "scanner_variant": result["champion"].variant,
+                        "scanner_variants_priced": cfg.intraday.scanner_variants,
                         **{f: getattr(cfg.intraday, f) for f in
                            ("entry_buffer_bps", "risk_bps", "max_position_pct",
                             "max_concurrent", "flatten_buffer_min", "spread_floor_bps",

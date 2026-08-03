@@ -124,8 +124,31 @@ def trade_path(ts: np.ndarray, open_: np.ndarray, high: np.ndarray,
 
 
 def combos_from_config(cfg) -> list[Combo]:
-    """The deflation-priced trial family, in a stable order."""
+    """The ORB construction axes, in a stable order."""
     return [Combo(k, stop, target)
             for k in cfg.intraday.range_minutes
             for stop in cfg.intraday.stop_styles
             for target in cfg.intraday.target_r_multiples]
+
+
+@dataclass(frozen=True)
+class Trial:
+    """One priced experiment: a scanner weighting crossed with a construction.
+
+    Making the SCANNER an axis of the trial family is the honest way to search
+    "which signals should the scanner look at" — every weighting tried enters
+    the same deflation, so a winner has to beat the bar the whole search set
+    implies, not the bar its own slice would have."""
+
+    variant: str
+    combo: Combo
+
+    @property
+    def key(self) -> str:
+        return f"{self.variant}|{self.combo.key}"
+
+
+def trials_from_config(cfg) -> list[Trial]:
+    return [Trial(variant, combo)
+            for variant in cfg.intraday.scanner_variants
+            for combo in combos_from_config(cfg)]

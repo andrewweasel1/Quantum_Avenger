@@ -341,7 +341,14 @@ class IntradayConfig(BaseModel):
     min_adv_dollars: float = 5_000_000.0  # 20d median dollar volume floor
     min_price: float = 3.0
     # Daily scanner overlay: causal-at-open ranking, top_n admitted to ORB.
-    scanner_top_n: int = 60
+    # 10 concentrates on the best-ranked names (v1 ran 60 and found gross edge
+    # ~0 with cost varying 5x across the pick set — selection is the lever).
+    scanner_top_n: int = 10
+    # Scanner weightings to PRICE as trials (intraday.scanner.VARIANTS). Every
+    # entry multiplies the trial family the deflation must pay for.
+    scanner_variants: list[str] = Field(
+        default_factory=lambda: ["attention", "tradable", "dislocation",
+                                 "volatility", "cheap_gap"])
     # ORB trial family (deflation-priced together; every axis value is a trial).
     range_minutes: list[int] = Field(default_factory=lambda: [5, 15, 30])
     stop_styles: list[str] = Field(default_factory=lambda: ["or_low", "or_mid"])
