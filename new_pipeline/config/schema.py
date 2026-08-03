@@ -369,6 +369,14 @@ class IntradayConfig(BaseModel):
     mr_entry_z: list[float] = Field(default_factory=lambda: [1.5, 2.5])
     mr_entry_styles: list[str] = Field(default_factory=lambda: ["marketable", "passive"])
     mr_exit_targets: list[str] = Field(default_factory=lambda: ["anchor", "half"])
+    # Activity floors. Champion selection is an argmax over trials, which
+    # systematically favours the THINNEST trial: fewer trades means a more
+    # extreme achievable Sharpe. meanrev_v1 crowned a 3-trade trial active on
+    # 0.6% of sessions at +1.16 annualized, while every trial that actually
+    # traded was negative. Trials below either floor are ineligible to be
+    # champion (a strengthening of the gauntlet, never a softening).
+    min_trades: int = 50
+    min_active_session_frac: float = 0.10
     mr_passive_ttl_min: int = 5   # bars a resting entry limit stays live
     mr_stop_atr: float = 1.0      # stop distance in prior-day ATRs below entry
     # Costs: spread-dominated. Per-side charge = max(cs_spread/2, floor) + impact.

@@ -324,6 +324,8 @@ intraday:
   mr_entry_z: [1.5, 2.5]
   mr_entry_styles: ["marketable", "passive"]
   mr_exit_targets: ["anchor", "half"]
+  min_trades: 50
+  min_active_session_frac: 0.10
   mr_passive_ttl_min: 5
   mr_stop_atr: 1.0
   # Calibrated against 400 real SIP-quoted fills (median half-spread 2.4bps,

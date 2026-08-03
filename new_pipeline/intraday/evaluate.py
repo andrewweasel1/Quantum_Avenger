@@ -84,7 +84,27 @@ def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataF
         picks_by_variant = {"default": picks_by_variant}
     per_combo_sr = np.array([_per_period_sharpe(matrix[:, j])
                              for j in range(matrix.shape[1])])
-    champ_idx = int(np.argmax(per_combo_sr))
+    # ACTIVITY FLOOR. Champion selection is an argmax over trials, and a trial
+    # that barely trades can post an extreme Sharpe off a handful of wins
+    # sitting in a sea of zero-return sessions. meanrev_v1 crowned a 3-trade
+    # trial (0.6% of sessions) at +1.16 annualized while every trial that
+    # genuinely traded was negative — so ineligible trials cannot be champion.
+    icfg = cfg.intraday
+    trade_counts: dict[str, int] = {}
+    for t in ledger:
+        trade_counts[t.combo_key] = trade_counts.get(t.combo_key, 0) + 1
+    eligible = []
+    activity = {}
+    for j, trial in enumerate(trials):
+        n_tr = trade_counts.get(trial.key, trade_counts.get(trial.combo.key, 0))
+        active = float((matrix[:, j] != 0).mean())
+        activity[trial.key] = {"n_trades": n_tr, "active_frac": round(active, 4)}
+        if n_tr >= icfg.min_trades and active >= icfg.min_active_session_frac:
+            eligible.append(j)
+    if eligible:
+        champ_idx = max(eligible, key=lambda j: per_combo_sr[j])
+    else:
+        champ_idx = int(np.argmax(per_combo_sr))  # reported, but vetoed below
     champion = trials[champ_idx]
     champ_sessions = matrix[:, champ_idx]
     champ_picks = picks_by_variant.get(champion.variant, {})
@@ -135,6 +155,10 @@ def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataF
         "trial_sharpes": {t.key: float(s)
                           for t, s in zip(trials, per_combo_sr, strict=True)},
         "regime_promoted": bool(verdict.promoted),
+        "n_eligible_trials": len(eligible),
+        "activity_floor": {"min_trades": icfg.min_trades,
+                           "min_active_session_frac": icfg.min_active_session_frac},
+        "trial_activity": activity,
     }
 
     decision = assess_promotion(
@@ -150,8 +174,13 @@ def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataF
         n_trades=len(champ_trades),
         n_obs=len(days),
     )
-    if decision.promoted and not verdict.promoted:
-        from dataclasses import replace
+    from dataclasses import replace
+    if not eligible:
+        decision = replace(
+            decision, promoted=False,
+            reason=(f"no trial met the activity floor (>={icfg.min_trades} trades "
+                    f"and >={icfg.min_active_session_frac:.0%} of sessions)"))
+    elif decision.promoted and not verdict.promoted:
         decision = replace(decision, promoted=False, reason="failed per-regime DSR")
     return {"decision": decision, "verdict": verdict, "report": report,
             "diagnostics": diagnostics, "champion": champion}

@@ -187,3 +187,60 @@ def test_trial_family_crosses_scanners_and_constructions():
     cfg.intraday.strategy = "meanrev"
     assert len(trials_from_config(cfg)) == 32   # 2 scanners x 16 MR combos
     assert all(t.combo.key.count("|") == 3 for t in trials_from_config(cfg))
+
+
+def test_activity_floor_blocks_a_thin_trial_from_being_champion():
+    """An argmax over trials favours the THINNEST trial — a handful of wins in
+    a sea of zero-return sessions posts a spectacular Sharpe. meanrev_v1
+    crowned a 3-trade trial at +1.16 annualized while every trial that really
+    traded was negative, so trials below the activity floor cannot win."""
+    from new_pipeline.intraday.orb import Trial
+    from new_pipeline.intraday.simulate import Trade
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.min_trades = 50
+    cfg.intraday.min_active_session_frac = 0.10
+    cfg.evaluation.min_regime_obs = 10
+    cfg.long_short.null_iterations = 2
+    sessions = _sessions(120)
+    days = sorted(sessions)
+    minutes_by_day = {d: _session_minutes(d, "AAA", 0.05) for d in sessions}
+    daily = _daily_from(minutes_by_day)
+    picks = {d: ["AAA"] for d in sessions}
+    stats = pl.DataFrame({"date": days, "ticker": ["AAA"] * len(days),
+                          "spread_bps": [30.0] * len(days),
+                          "vol_minute": [0.0] * len(days),
+                          "atr_pct": [0.02] * len(days)})
+    trials = [Trial("thin", Combo(5, "or_low", 0.0)),
+              Trial("busy", Combo(15, "or_low", 0.0))]
+    # thin: 3 huge wins, otherwise flat -> a spectacular but meaningless Sharpe
+    matrix = np.zeros((len(days), 2))
+    matrix[:3, 0] = 0.02
+    # busy: trades most sessions, modestly negative
+    rng = np.random.default_rng(0)
+    matrix[:, 1] = rng.normal(-0.0002, 0.004, len(days))
+    ledger = [Trade(days[i], "AAA", "thin|k5|or_low|none", None, None, 10.0, 10.2,
+                    10, "target", 2.0, 0.1, 1.9) for i in range(3)]
+    ledger += [Trade(days[i], "AAA", "busy|k15|or_low|none", None, None, 10.0, 9.9,
+                     10, "close", -1.0, 0.1, -1.1) for i in range(len(days))]
+    result = evaluate_orb(matrix, days, trials, ledger, daily, minutes_by_day,
+                          sessions, {"thin": picks, "busy": picks}, stats, cfg,
+                          equity=100_000.0, seed=0)
+    # the thin trial has the higher Sharpe but cannot be champion
+    assert _sr(matrix[:, 0]) > _sr(matrix[:, 1])
+    assert result["champion"].variant == "busy"
+    diag = result["diagnostics"]
+    assert diag["n_eligible_trials"] == 1
+    assert diag["trial_activity"]["thin|k5|or_low|none"]["n_trades"] == 3
+    # with NO eligible trial the run is vetoed outright, not crowned
+    cfg.intraday.min_trades = 500
+    none_ok = evaluate_orb(matrix, days, trials, ledger, daily, minutes_by_day,
+                           sessions, {"thin": picks, "busy": picks}, stats, cfg,
+                           equity=100_000.0, seed=0)
+    assert none_ok["decision"].promoted is False
+    assert "activity floor" in none_ok["decision"].reason
+
+
+def _sr(a):
+    return float(a.mean() / a.std(ddof=1))
