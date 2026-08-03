@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,16 @@ class ConfigManager:
             return value.lower() == "true"
         if value.isdigit():
             return int(value)
+        # JSON list/object literals: without this every LIST field (factor_set,
+        # extended_features, scanner_variants, the intraday axes) was
+        # un-overridable from the environment — the string reached pydantic and
+        # failed validation, so run bodies had to edit YAML instead.
+        stripped = value.strip()
+        if stripped[:1] in {"[", "{"}:
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError:
+                return value
         try:
             return float(value)
         except ValueError:
