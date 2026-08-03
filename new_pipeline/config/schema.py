@@ -359,6 +359,18 @@ class IntradayConfig(BaseModel):
     max_position_pct: float = 5.0     # of equity, per name
     max_concurrent: int = 15
     flatten_buffer_min: int = 5       # exit N minutes before session close
+    # Strategy family for an official intraday run: "orb" (opening range
+    # breakout, rejected in runs orb_v1/orb_v2) | "meanrev" (anchor reversion).
+    strategy: str = "meanrev"
+    # Mean-reversion axes (intraday.meanrev). entry_styles is the decisive one:
+    # "passive" rests a limit and fills only on a strict trade-through, so it
+    # pays no spread but inherits adverse selection; "marketable" crosses.
+    mr_anchors: list[str] = Field(default_factory=lambda: ["vwap", "open"])
+    mr_entry_z: list[float] = Field(default_factory=lambda: [1.5, 2.5])
+    mr_entry_styles: list[str] = Field(default_factory=lambda: ["marketable", "passive"])
+    mr_exit_targets: list[str] = Field(default_factory=lambda: ["anchor", "half"])
+    mr_passive_ttl_min: int = 5   # bars a resting entry limit stays live
+    mr_stop_atr: float = 1.0      # stop distance in prior-day ATRs below entry
     # Costs: spread-dominated. Per-side charge = max(cs_spread/2, floor) + impact.
     # Measured, not assumed: 400 real fill events from the orb_v2 ledger priced
     # against SIP NBBO quotes at the fill minute gave a quoted half-spread of
@@ -396,8 +408,12 @@ class AlpacaConfig(BaseModel):
     """Live Alpaca credentials/settings. Keys come from QA_ALPACA__* env vars and
     are never committed; dev/test/backtest run on fakes and ignore these."""
 
-    api_key: str = ""
-    secret_key: str = ""
+    # repr=False keeps live credentials out of every rendered AppConfig: a
+    # pytest assertion or exception traceback that touches the config used to
+    # print the real key and secret in plaintext. Attribute access is
+    # unchanged, so callers read cfg.alpaca.api_key exactly as before.
+    api_key: str = Field(default="", repr=False)
+    secret_key: str = Field(default="", repr=False)
     paper: bool = True
     # "iex" (free real-time; historical daily bars only from ~mid-2020) or
     # "sip" (full history on free keys — only *real-time* SIP needs a paid plan).

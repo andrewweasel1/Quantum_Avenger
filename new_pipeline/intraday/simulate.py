@@ -28,6 +28,8 @@ import polars as pl
 from new_pipeline.features.microstructure import corwin_schultz
 from new_pipeline.features.slippage import hydrodynamic_slippage_bps
 from new_pipeline.intraday.calendar import Session
+from new_pipeline.intraday.meanrev import MRCombo
+from new_pipeline.intraday.meanrev import trade_path as mr_trade_path
 from new_pipeline.intraday.orb import Combo, trade_path
 
 _MINUTES_PER_SESSION = 390.0
@@ -62,23 +64,28 @@ def trailing_stats(daily: pl.DataFrame, window: int = 20) -> pl.DataFrame:
         rets = np.diff(np.log(np.clip(closes, 1e-9, None)), prepend=np.nan)
         vol = (pl.Series(rets).rolling_std(window_size=window)
                .to_numpy() / np.sqrt(_MINUTES_PER_SESSION))
+        highs_a, lows_a, closes_a = highs, lows, closes
+        atr = (pl.Series((highs_a - lows_a) / np.clip(closes_a, 1e-9, None))
+               .rolling_mean(window_size=window).to_numpy())
         frames.append(pl.DataFrame({
             "date": sub["date"],
             "ticker": ticker if isinstance(ticker, str) else ticker[0],
             "spread_bps": np.roll(cs, 1) * 1e4,   # strictly prior
             "vol_minute": np.roll(vol, 1),
+            "atr_pct": np.roll(atr, 1),           # prior-day ATR%, the MR scale
         }).with_row_index("_i").filter(pl.col("_i") > 0).drop("_i"))
     if not frames:
         return pl.DataFrame(schema={"date": pl.Date, "ticker": pl.Utf8,
-                                    "spread_bps": pl.Float64, "vol_minute": pl.Float64})
+                                    "spread_bps": pl.Float64, "vol_minute": pl.Float64,
+                                    "atr_pct": pl.Float64})
     return pl.concat(frames)
 
 
 def _side_cost_bps(notional: float, spread_bps: float, vol_minute: float,
                    bar_dollar_vol: float, spread_floor_bps: float,
-                   slippage_constant: float) -> float:
-    half_spread = max(spread_bps / 2.0 if np.isfinite(spread_bps) else 0.0,
-                      spread_floor_bps)
+                   slippage_constant: float, passive: bool = False) -> float:
+    half_spread = 0.0 if passive else max(
+        spread_bps / 2.0 if np.isfinite(spread_bps) else 0.0, spread_floor_bps)
     impact = hydrodynamic_slippage_bps(
         notional, vol_minute if np.isfinite(vol_minute) else 0.0,
         max(bar_dollar_vol, 1.0), constant=slippage_constant)
@@ -104,6 +111,8 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
         sub = sub.sort("ts")
         arrays[key] = {c: sub[c].to_numpy() for c in ("open", "high", "low", "close", "volume")}
         arrays[key]["ts"] = sub["ts"].to_numpy()
+        if "vwap" in sub.columns:  # feed VWAP anchors mean reversion when present
+            arrays[key]["vwap"] = sub["vwap"].to_numpy()
 
     session_returns: dict[str, float] = {}
     ledger: list[Trade] = []
@@ -119,10 +128,18 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
             override = None
             if entry_rng is not None:
                 override = int(entry_rng.integers(1, len(bars["ts"])))
-            path = trade_path(bars["ts"], bars["open"], bars["high"], bars["low"],
-                              bars["close"], session.open_utc, session.close_utc,
-                              combo, icfg.entry_buffer_bps, icfg.flatten_buffer_min,
-                              entry_override=override)
+            if isinstance(combo, MRCombo):
+                path = mr_trade_path(
+                    bars, session.open_utc, session.close_utc, combo,
+                    atr_pct=float(day_stats.get(ticker, {}).get("atr_pct", float("nan"))),
+                    flatten_buffer_min=icfg.flatten_buffer_min,
+                    passive_ttl_min=icfg.mr_passive_ttl_min,
+                    stop_atr=icfg.mr_stop_atr, entry_override=override)
+            else:
+                path = trade_path(bars["ts"], bars["open"], bars["high"], bars["low"],
+                                  bars["close"], session.open_utc, session.close_utc,
+                                  combo, icfg.entry_buffer_bps, icfg.flatten_buffer_min,
+                                  entry_override=override)
             if path is not None:
                 candidates.append((ticker, path))
         candidates.sort(key=lambda tp: (tp[1].entry_idx, tp[0]))
@@ -143,10 +160,14 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
             exit_notional = shares * path.exit_px
             entry_bar_dv = float(bars["volume"][path.entry_idx]) * path.entry_px
             exit_bar_dv = float(bars["volume"][path.exit_idx]) * path.exit_px
+            # A resting limit the market traded through SUPPLIED liquidity: no
+            # spread, impact only. Crossing legs pay the half-spread as before.
             entry_bps = _side_cost_bps(entry_notional, spread, volm, entry_bar_dv,
-                                       icfg.spread_floor_bps, cfg.features.slippage_constant)
+                                       icfg.spread_floor_bps, cfg.features.slippage_constant,
+                                       passive=path.entry_passive)
             exit_bps = _side_cost_bps(exit_notional, spread, volm, exit_bar_dv,
-                                      icfg.spread_floor_bps, cfg.features.slippage_constant)
+                                      icfg.spread_floor_bps, cfg.features.slippage_constant,
+                                      passive=path.exit_passive)
             gross = shares * (path.exit_px - path.entry_px)
             cost = (entry_notional * entry_bps + exit_notional * exit_bps) / 1e4
             pnl += gross - cost

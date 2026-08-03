@@ -318,6 +318,14 @@ intraday:
   max_position_pct: 5.0
   max_concurrent: 15
   flatten_buffer_min: 5
+  # "orb" (rejected: runs orb_v1/orb_v2) | "meanrev" (anchor reversion).
+  strategy: "meanrev"
+  mr_anchors: ["vwap", "open"]
+  mr_entry_z: [1.5, 2.5]
+  mr_entry_styles: ["marketable", "passive"]
+  mr_exit_targets: ["anchor", "half"]
+  mr_passive_ttl_min: 5
+  mr_stop_atr: 1.0
   # Calibrated against 400 real SIP-quoted fills (median half-spread 2.4bps,
   # p75 5.1); the old 15.0 was ~6x too conservative. Orders still ran 3.5x
   # displayed touch depth — book-walking is the impact term's job, not this.

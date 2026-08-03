@@ -49,8 +49,14 @@ class TradePath:
     exit_px: float
     exit_reason: str  # "stop" | "target" | "close"
     stop_px: float
-    or_high: float
-    or_low: float
+    # ORB range context; mean reversion leaves these at nan.
+    or_high: float = float("nan")
+    or_low: float = float("nan")
+    # Liquidity-PROVIDING legs (a resting limit the market traded through) pay
+    # no spread; liquidity-TAKING legs cross it. Breakouts take on both sides,
+    # so these default False and the ORB path is unchanged.
+    entry_passive: bool = False
+    exit_passive: bool = False
 
 
 def opening_range(ts: np.ndarray, high: np.ndarray, low: np.ndarray,
@@ -148,7 +154,16 @@ class Trial:
         return f"{self.variant}|{self.combo.key}"
 
 
+def constructions_from_config(cfg) -> list:
+    """The configured strategy family's construction axes."""
+    if getattr(cfg.intraday, "strategy", "orb") == "meanrev":
+        from new_pipeline.intraday.meanrev import combos_from_config as mr_combos
+
+        return mr_combos(cfg)
+    return combos_from_config(cfg)
+
+
 def trials_from_config(cfg) -> list[Trial]:
     return [Trial(variant, combo)
             for variant in cfg.intraday.scanner_variants
-            for combo in combos_from_config(cfg)]
+            for combo in constructions_from_config(cfg)]

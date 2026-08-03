@@ -180,6 +180,10 @@ def test_trial_family_crosses_scanners_and_constructions():
     tagged = {t.combo_key for t in ledger}
     assert tagged == {"attention|k5|or_low|none", "tradable|k5|or_low|none"}
     assert {t.ticker for t in ledger if t.combo_key.startswith("attention")} == {"AAA"}
-    # the config cross is the full family: 2 scanners x 12 constructions
+    # the config cross is the full family, and it follows the strategy family
     cfg.intraday.scanner_variants = ["attention", "tradable"]
-    assert len(trials_from_config(cfg)) == 24
+    cfg.intraday.strategy = "orb"
+    assert len(trials_from_config(cfg)) == 24   # 2 scanners x 12 ORB combos
+    cfg.intraday.strategy = "meanrev"
+    assert len(trials_from_config(cfg)) == 32   # 2 scanners x 16 MR combos
+    assert all(t.combo.key.count("|") == 3 for t in trials_from_config(cfg))
