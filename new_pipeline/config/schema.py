@@ -360,7 +360,17 @@ class IntradayConfig(BaseModel):
     max_concurrent: int = 15
     flatten_buffer_min: int = 5       # exit N minutes before session close
     # Costs: spread-dominated. Per-side charge = max(cs_spread/2, floor) + impact.
-    spread_floor_bps: float = 15.0
+    # Measured, not assumed: 400 real fill events from the orb_v2 ledger priced
+    # against SIP NBBO quotes at the fill minute gave a quoted half-spread of
+    # median 2.4 bps / p75 5.1 / p90 10.2 (mean 4.6). The original 15.0 was ~6x
+    # too conservative — 93.5% of fills sat below it. 5.0 (~p75) keeps the floor
+    # on the pessimistic side of the measurement; the Corwin-Schultz estimate
+    # still binds above it for genuinely wide names.
+    # CAVEAT recorded with the calibration: our $5k orders ran a median 3.5x the
+    # displayed size at the touch (59% exceeded it), so real fills walk the book
+    # and the impact term — not this floor — must carry that cost. See
+    # models/prod/evidence/orb_v2/SPREAD_CALIBRATION.md.
+    spread_floor_bps: float = 5.0
 
 
 class DashboardConfig(BaseModel):
