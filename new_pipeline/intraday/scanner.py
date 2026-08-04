@@ -31,6 +31,11 @@ SIGNALS: dict[str, bool] = {
 }
 
 # Pre-registered scanner weightings. "attention" reproduces the v1 default.
+# The union pseudo-variant: not a weighting but a consensus aggregation of
+# several, resolved in scan_day_union.
+UNION_VARIANT = "union"
+UNION_MEMBERS = ("attention", "tradable", "cheap_gap")
+
 VARIANTS: dict[str, dict[str, float]] = {
     "attention": {"gap_abs": 1.0, "rvol": 1.0, "adv_dollar": 1.0},
     "tradable": {"adv_dollar": 1.0, "spread_bps": 1.0, "price": 1.0},
@@ -111,13 +116,26 @@ def scan_day(signals: pl.DataFrame, day, top_n: int,
     signal oriented so HIGH percentile is always the preferred end (a
     ``SIGNALS`` entry of False, e.g. spread, is inverted). Ties break by
     ticker so a rerun reproduces the pick list exactly."""
+    if weights == UNION_VARIANT:
+        return scan_day_union(signals, day, top_n)
+    scored = score_day(signals, day, weights)
+    if scored.is_empty():
+        return []
+    return (scored.sort(["_score", "ticker"], descending=[True, False])
+            ["ticker"].head(top_n).to_list())
+
+
+def score_day(signals: pl.DataFrame, day, weights: dict | str) -> pl.DataFrame:
+    """(ticker, _score) for one session under a weighting. Scores are means of
+    cross-sectional percentile ranks, so they are already comparable ACROSS
+    weightings — which is what lets the union blend them without rescaling."""
     if isinstance(weights, str):
         weights = VARIANTS[weights]
     day_frame = signals.filter((pl.col("date") == day) & pl.col("eligible"))
     used = [s for s in weights if s in SIGNALS]
     day_frame = day_frame.drop_nulls(used)
     if day_frame.is_empty():
-        return []
+        return pl.DataFrame(schema={"ticker": pl.Utf8, "_score": pl.Float64})
     n = day_frame.height
     total = sum(abs(w) for w in weights.values()) or 1.0
     score = pl.lit(0.0)
@@ -126,9 +144,49 @@ def scan_day(signals: pl.DataFrame, day, top_n: int,
         if not SIGNALS[signal]:  # low-is-better -> invert so high always wins
             pct = 1.0 - pct
         score = score + weight * pct
-    return (day_frame.with_columns((score / total).alias("_score"))
-            .sort(["_score", "ticker"], descending=[True, False])
-            ["ticker"].head(top_n).to_list())
+    return day_frame.with_columns((score / total).alias("_score")).select("ticker", "_score")
+
+
+def scan_day_union(signals: pl.DataFrame, day, top_n: int,
+                   members: tuple[str, ...] = UNION_MEMBERS,
+                   per_member_n: int | None = None) -> list[str]:
+    """Consensus-first union of several weightings.
+
+    Every member ranks the eligible set; a name's AGREEMENT is how many members
+    put it in their own top-``per_member_n``. Picks are ordered by agreement
+    first, then by the mean of the member scores (all are percentile means in
+    [0, 1], so averaging them needs no rescaling), then by ticker.
+
+    Why agreement leads: measured on meanrev_v4's z2.5 trades, events picked by
+    2-3 scanners netted 38.6 / 34.0 bps against 17.2 bps for single-scanner
+    picks — consensus more than doubles per-trade edge. The 3-vs-2 ordering is
+    within noise on 57 and 142 events, so the honest reading is "consensus
+    beats solo", not a smooth agreement gradient; leading with agreement
+    captures that without over-reading it.
+
+    The union also widens coverage: the same run had 438 distinct qualifying
+    events across the three scanners versus 275 for the best single one, and
+    event count has been the binding constraint on every intraday verdict."""
+    per_member_n = per_member_n or top_n
+    scores, picked = {}, {}
+    for member in members:
+        frame = score_day(signals, day, member)
+        if frame.is_empty():
+            continue
+        scores[member] = dict(frame.iter_rows())
+        picked[member] = set(
+            frame.sort(["_score", "ticker"], descending=[True, False])
+            ["ticker"].head(per_member_n).to_list())
+    if not scores:
+        return []
+    candidates = set().union(*picked.values()) if picked else set()
+    ranked = []
+    for ticker in candidates:
+        agreement = sum(ticker in sel for sel in picked.values())
+        blended = sum(s.get(ticker, 0.0) for s in scores.values()) / len(scores)
+        ranked.append((agreement, blended, ticker))
+    ranked.sort(key=lambda r: (-r[0], -r[1], r[2]))
+    return [ticker for _, _, ticker in ranked[:top_n]]
 
 
 def signal_ic(ledger: pl.DataFrame, signals: pl.DataFrame,
