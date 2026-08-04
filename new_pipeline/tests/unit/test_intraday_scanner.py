@@ -145,9 +145,13 @@ def test_union_ranks_consensus_ahead_of_a_higher_scoring_solo_pick():
         assert [blended[t] for t in same] == sorted((blended[t] for t in same), reverse=True)
 
 
-def test_union_widens_coverage_beyond_any_single_scanner():
-    """The point of the union: more distinct qualifying names than the best
-    single weighting, since event count is the binding constraint.
+def test_union_draws_from_more_than_one_members_list():
+    """The union re-ranks a POOLED candidate set: at equal per-member budget it
+    reaches names no single weighting would take, while never exceeding its own
+    top_n. It does NOT widen coverage — a top_n-name scanner admits top_n names
+    however it orders them, which is why meanrev_v5 measured the union covering
+    8,331 events against attention's 8,685. Coverage is set by scanner_top_n
+    and history length, never by the ranking rule.
 
     The fixture decouples the signal axes the way a real cross-section does —
     ADV, spread, gap, volume-spike and price ranks are five DIFFERENT
@@ -169,17 +173,20 @@ def test_union_widens_coverage_beyond_any_single_scanner():
         )
     signals = apply_floors(build_signal_frame(_daily(rows)), 500_000, 3.0)
     day = D0 + timedelta(days=24)
-    union = set(scan_day_union(signals, day, top_n=20, per_member_n=10))
     singles = {m: set(scan_day(signals, day, 10, weights=m)) for m in UNION_MEMBERS}
     pool = set().union(*singles.values())
     # the members genuinely disagree here, so the pool exceeds any one list
     assert len(pool) > max(len(s) for s in singles.values()) == 10
-    # the union covers more names than the best single scanner, and every name
-    # it takes was selected by at least one member (it invents nothing)
-    assert len(union) > max(len(s) for s in singles.values())
-    assert union <= pool
-    # and it reaches beyond each individual member's own picks
-    assert all(union - singles[m] for m in UNION_MEMBERS)
+    # SAME budget as each member — the comparison that meanrev_v5 actually ran
+    union = set(scan_day_union(signals, day, top_n=10, per_member_n=10))
+    assert len(union) == 10                      # never more than its own top_n
+    assert union <= pool                         # invents nothing
+    assert any(union - singles[m] for m in UNION_MEMBERS)  # reaches past a member
+    # agreement-first means the consensus core is always seated first
+    assert set.intersection(*(set(v) for v in singles.values())) <= union
+    # a bigger budget buys more names; the RANKING never does
+    wide = set(scan_day_union(signals, day, top_n=20, per_member_n=10))
+    assert len(wide) > len(union) and wide <= pool
 
 
 def test_union_is_reachable_through_the_standard_scan_entry_point():

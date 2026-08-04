@@ -352,9 +352,14 @@ class IntradayConfig(BaseModel):
     scanner_top_n: int = 50
     # Scanner weightings to PRICE as trials (intraday.scanner.VARIANTS). Every
     # entry multiplies the trial family the deflation must pay for.
-    scanner_variants: list[str] = Field(
-        default_factory=lambda: ["attention", "tradable", "dislocation",
-                                 "volatility", "cheap_gap"])
+    # Collapsed to "attention" alone by meanrev_v5, which priced all three
+    # survivors plus a consensus "union" of them (128 trials, one construction
+    # axis at a time): attention won 19/32 constructions outright and netted
+    # 43.1 bps at z2.5 against 24.9 (tradable), 25.5 (union) and 17.7
+    # (cheap_gap). Nothing beat it on any construction, so carrying the others
+    # bought a 4x trial family and no champion. Re-add an entry only with
+    # evidence, never to widen a search.
+    scanner_variants: list[str] = Field(default_factory=lambda: ["attention"])
     # ORB trial family (deflation-priced together; every axis value is a trial).
     range_minutes: list[int] = Field(default_factory=lambda: [5, 15, 30])
     stop_styles: list[str] = Field(default_factory=lambda: ["or_low", "or_mid"])

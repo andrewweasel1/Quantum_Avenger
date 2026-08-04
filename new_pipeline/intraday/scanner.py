@@ -157,16 +157,21 @@ def scan_day_union(signals: pl.DataFrame, day, top_n: int,
     first, then by the mean of the member scores (all are percentile means in
     [0, 1], so averaging them needs no rescaling), then by ticker.
 
-    Why agreement leads: measured on meanrev_v4's z2.5 trades, events picked by
-    2-3 scanners netted 38.6 / 34.0 bps against 17.2 bps for single-scanner
-    picks — consensus more than doubles per-trade edge. The 3-vs-2 ordering is
-    within noise on 57 and 142 events, so the honest reading is "consensus
-    beats solo", not a smooth agreement gradient; leading with agreement
-    captures that without over-reading it.
+    REJECTED by meanrev_v5 — kept for reproducibility, not in the standing
+    spec. Priced against its own members it won 0 of 32 constructions and beat
+    the best member on none, netting 25.5 bps against `attention`'s 43.1.
 
-    The union also widens coverage: the same run had 438 distinct qualifying
-    events across the three scanners versus 275 for the best single one, and
-    event count has been the binding constraint on every intraday verdict."""
+    The motivating v4 statistic (2-3 scanner agreement netting 38.6 / 34.0 bps
+    against 17.2 for solo picks) pooled events ACROSS the three books, so
+    "solo" mixed attention-only picks with the weaker rankers' — it showed
+    consensus beating the AVERAGE scanner, not the best one. `attention` alone
+    nets 43.1, above the consensus bucket.
+
+    The coverage argument was also wrong: 438 distinct events across three
+    50-name scanners versus 275 for one is three scanners' capacity, not a
+    property of consensus. A single top-N scanner admits N names however it
+    orders them — v5 measured the union at 8,331 events against attention's
+    8,685."""
     per_member_n = per_member_n or top_n
     scores, picked = {}, {}
     for member in members:
