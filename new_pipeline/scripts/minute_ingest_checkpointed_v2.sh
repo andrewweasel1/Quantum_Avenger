@@ -8,17 +8,24 @@
 # store; idempotent at file level).
 #
 # Usage: SC=<scratchpad dir> bash new_pipeline/scripts/minute_ingest_checkpointed_v2.sh
+#   Backfill a different span:  SC=... START_YM=2021-09 END_YM=2024-07 bash ...
 set -euo pipefail
 SC="${SC:?set SC to the scratchpad dir}"
+START_YM="${START_YM:-2024-08}"
+END_YM="${END_YM:-2026-08}"
 REPO="$(pwd)"
 VAULT="$SC/minute_vault/by_symbol_month"
 ARCH="data/minute_archives"
 mkdir -p "$VAULT" "$REPO/$ARCH"
 
-MONTHS=$(python3 - <<'PY'
+MONTHS=$(START_YM="$START_YM" END_YM="$END_YM" python3 - <<'PY'
+import os
 from datetime import date
 from new_pipeline.intraday.data import months_between
-print(" ".join(f"{y:04d}{m:02d}" for y, m in months_between(date(2024, 8, 1), date(2026, 8, 1))))
+sy, sm = map(int, os.environ["START_YM"].split("-"))
+ey, em = map(int, os.environ["END_YM"].split("-"))
+print(" ".join(f"{y:04d}{m:02d}"
+                for y, m in months_between(date(sy, sm, 1), date(ey, em, 1))))
 PY
 )
 
