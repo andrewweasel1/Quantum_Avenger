@@ -182,14 +182,20 @@ def test_trial_family_crosses_scanners_and_constructions():
     assert {t.ticker for t in ledger if t.combo_key.startswith("attention")} == {"AAA"}
     # the config cross is the full family, and it follows the strategy family
     cfg.intraday.scanner_variants = ["attention", "tradable"]
+    # Trial count is the product of every priced axis, computed from config so
+    # this pins the multiplication rather than a snapshot of today's defaults.
     cfg.intraday.sizing_models = ["uncapped"]
     cfg.intraday.strategy = "orb"
-    assert len(trials_from_config(cfg)) == 24   # 2 scanners x 12 ORB combos
+    n_orb = (len(cfg.intraday.range_minutes) * len(cfg.intraday.stop_styles)
+             * len(cfg.intraday.target_r_multiples))
+    assert len(trials_from_config(cfg)) == 2 * n_orb
     cfg.intraday.strategy = "meanrev"
-    assert len(trials_from_config(cfg)) == 32   # 2 scanners x 16 MR combos
+    n_mr = (len(cfg.intraday.mr_anchors) * len(cfg.intraday.mr_entry_z)
+            * len(cfg.intraday.mr_entry_styles) * len(cfg.intraday.mr_exit_targets))
+    assert len(trials_from_config(cfg)) == 2 * n_mr
     # the sizing axis multiplies whatever family it is crossed with
     cfg.intraday.sizing_models = ["volume_part", "touch_cap", "uncapped"]
-    assert len(trials_from_config(cfg)) == 96
+    assert len(trials_from_config(cfg)) == 2 * 3 * n_mr
     assert all(t.combo.key.count("|") == 3 for t in trials_from_config(cfg))
 
 

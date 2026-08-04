@@ -321,7 +321,7 @@ intraday:
   # "orb" (rejected: runs orb_v1/orb_v2) | "meanrev" (anchor reversion).
   strategy: "meanrev"
   mr_anchors: ["vwap", "open"]
-  mr_entry_z: [1.5, 2.5]
+  mr_entry_z: [0.5, 1.0, 1.5, 2.5]
   mr_entry_styles: ["marketable", "passive"]
   mr_exit_targets: ["anchor", "half"]
   min_trades: 50
@@ -334,7 +334,7 @@ intraday:
   spread_floor_bps: 5.0
   quote_vault_dir: "./data/quote_vault"
   max_touch_participation: 1.0
-  sizing_models: ["volume_part", "touch_cap", "uncapped"]
+  sizing_models: ["touch_cap"]
   volume_participation_rate: 0.10
   exec_window_min: 5
   allow_cs_fallback: true

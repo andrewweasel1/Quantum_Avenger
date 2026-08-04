@@ -366,7 +366,10 @@ class IntradayConfig(BaseModel):
     # "passive" rests a limit and fills only on a strict trade-through, so it
     # pays no spread but inherits adverse selection; "marketable" crosses.
     mr_anchors: list[str] = Field(default_factory=lambda: ["vwap", "open"])
-    mr_entry_z: list[float] = Field(default_factory=lambda: [1.5, 2.5])
+    # Tighter thresholds added: 1.5-2.5 prior-day ATRs is a rare intraday
+    # stretch (~0.19 trades/session), and sample size was the binding
+    # constraint on the DSR, not the edge.
+    mr_entry_z: list[float] = Field(default_factory=lambda: [0.5, 1.0, 1.5, 2.5])
     mr_entry_styles: list[str] = Field(default_factory=lambda: ["marketable", "passive"])
     mr_exit_targets: list[str] = Field(default_factory=lambda: ["anchor", "half"])
     # Activity floors. Champion selection is an argmax over trials, which
@@ -409,8 +412,11 @@ class IntradayConfig(BaseModel):
     #                single-shot execution; positions collapse ~33x.
     #   uncapped     fire the full position at the touch and pay the whole
     #                book-walk. Deliberately pessimistic.
-    sizing_models: list[str] = Field(
-        default_factory=lambda: ["volume_part", "touch_cap", "uncapped"])
+    # touch_cap only, as the standing spec: meanrev_v2 priced all three and it
+    # was the sole net-positive model (+1.9bps/trade vs -2.3 volume_part and
+    # -58.7 uncapped), because fitting inside displayed depth eliminates
+    # book-walking entirely. The other two stay available for re-pricing.
+    sizing_models: list[str] = Field(default_factory=lambda: ["touch_cap"])
     volume_participation_rate: float = 0.10  # share of window flow a worked order takes
     exec_window_min: int = 5                 # minutes an order is worked over
     # Fall back to Corwin-Schultz where a name-month has no measured cell;
