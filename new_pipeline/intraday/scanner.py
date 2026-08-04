@@ -31,10 +31,23 @@ SIGNALS: dict[str, bool] = {
 }
 
 # Pre-registered scanner weightings. "attention" reproduces the v1 default.
-# The union pseudo-variant: not a weighting but a consensus aggregation of
-# several, resolved in scan_day_union.
+# The union pseudo-variants: not weightings but consensus aggregations of
+# several, resolved in scan_day_union / scan_day_union_v2.
 UNION_VARIANT = "union"
+UNION_V2_VARIANT = "union_v2"
 UNION_MEMBERS = ("attention", "tradable", "cheap_gap")
+# union_v2's backbone ranker: the scanner meanrev_v5 showed beats every other
+# on 19/32 constructions (43.1 net bps at z2.5 vs 17.7-25.5). v2 exists
+# because v1's blended-score tiebreak averaged in the WEAKER rankers' opinions
+# and so demoted attention's best idiosyncratic picks.
+UNION_V2_PRIMARY = "attention"
+# Consensus is drawn from a WIDER per-member window than the final budget.
+# It has to be: unanimity within each member's top-N is by construction a
+# subset of the primary's own top-N, so filling the remainder from the primary
+# would return the primary's list exactly — a no-op. At 2x, names all three
+# scanners rate top-100 can be promoted ahead of the primary's own ranks 51+,
+# which is the only way the rule can differ from `attention` at all.
+UNION_V2_POOL_MULT = 2
 
 VARIANTS: dict[str, dict[str, float]] = {
     "attention": {"gap_abs": 1.0, "rvol": 1.0, "adv_dollar": 1.0},
@@ -118,6 +131,8 @@ def scan_day(signals: pl.DataFrame, day, top_n: int,
     ticker so a rerun reproduces the pick list exactly."""
     if weights == UNION_VARIANT:
         return scan_day_union(signals, day, top_n)
+    if weights == UNION_V2_VARIANT:
+        return scan_day_union_v2(signals, day, top_n)
     scored = score_day(signals, day, weights)
     if scored.is_empty():
         return []
@@ -192,6 +207,58 @@ def scan_day_union(signals: pl.DataFrame, day, top_n: int,
         ranked.append((agreement, blended, ticker))
     ranked.sort(key=lambda r: (-r[0], -r[1], r[2]))
     return [ticker for _, _, ticker in ranked[:top_n]]
+
+
+def _ranked(signals: pl.DataFrame, day, weights) -> list[str]:
+    """Full eligible ranking under one weighting, best first."""
+    frame = score_day(signals, day, weights)
+    if frame.is_empty():
+        return []
+    return (frame.sort(["_score", "ticker"], descending=[True, False])
+            ["ticker"].to_list())
+
+
+def scan_day_union_v2(signals: pl.DataFrame, day, top_n: int,
+                      members: tuple[str, ...] = UNION_MEMBERS,
+                      primary: str = UNION_V2_PRIMARY,
+                      pool_n: int | None = None) -> list[str]:
+    """Unanimous consensus first, then the primary scanner's own order.
+
+    Differs from :func:`scan_day_union` in what breaks ties BELOW the consensus
+    tier. v1 used the blended mean of all three member scores, which averages
+    in the weaker rankers and demotes the primary's best idiosyncratic picks —
+    meanrev_v5 measured the cost: 25.5 net bps against `attention`'s 43.1, and
+    a book keeping only 61% of attention's events but 75-76% of the other two's.
+    v2 keeps the consensus signal but hands every remaining slot to the primary
+    ranker outright, so it can only ever hold consensus names plus attention's
+    own picks.
+
+    Consensus is unanimity within each member's top ``pool_n`` (default
+    ``UNION_V2_POOL_MULT * top_n``), NOT within top_n. Unanimity at top_n would
+    be a subset of the primary's top_n, making the whole rule a no-op that
+    returns the primary's list reordered.
+
+    Ordering: consensus names in the primary's rank order, then the primary's
+    remaining names in its own order. Ordering only reaches the book through
+    ``max_concurrent``, which binds at low entry-z and not at z2.5."""
+    pool_n = pool_n or top_n * UNION_V2_POOL_MULT
+    rankings = {m: _ranked(signals, day, m) for m in members}
+    primary_rank = rankings.get(primary) or _ranked(signals, day, primary)
+    if not primary_rank:
+        return []
+    pools = [set(r[:pool_n]) for r in rankings.values() if r]
+    consensus = set.intersection(*pools) if pools else set()
+    order = {t: i for i, t in enumerate(primary_rank)}
+    # Consensus names the primary cannot rank at all sort last among consensus.
+    picks = sorted(consensus, key=lambda t: order.get(t, len(order)))[:top_n]
+    seen = set(picks)
+    for ticker in primary_rank:
+        if len(picks) >= top_n:
+            break
+        if ticker not in seen:
+            picks.append(ticker)
+            seen.add(ticker)
+    return picks[:top_n]
 
 
 def signal_ic(ledger: pl.DataFrame, signals: pl.DataFrame,

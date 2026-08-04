@@ -190,7 +190,12 @@ def test_union_draws_from_more_than_one_members_list():
 
 
 def test_union_is_reachable_through_the_standard_scan_entry_point():
-    from new_pipeline.intraday.scanner import UNION_VARIANT, scan_day_union
+    from new_pipeline.intraday.scanner import (
+        UNION_V2_VARIANT,
+        UNION_VARIANT,
+        scan_day_union,
+        scan_day_union_v2,
+    )
 
     rows = []
     for i in range(8):
@@ -199,3 +204,71 @@ def test_union_is_reachable_through_the_standard_scan_entry_point():
     day = D0 + timedelta(days=24)
     assert (scan_day(signals, day, 5, weights=UNION_VARIANT)
             == scan_day_union(signals, day, 5))
+    assert (scan_day(signals, day, 5, weights=UNION_V2_VARIANT)
+            == scan_day_union_v2(signals, day, 5))
+
+
+def _decoupled_signals(n=30):
+    """A cross-section where the weightings genuinely disagree: ADV, spread,
+    gap, volume-spike and price ranks are five different permutations."""
+    rows = []
+    for i in range(n):
+        rows += _flex_series(
+            f"T{i:02d}", 25,
+            dv=(i + 1) * 1_000_000,
+            spread=0.001 * (n - (7 * i) % n),
+            gap=0.002 * ((11 * i) % n),
+            vol_mult=1.0 + 0.2 * ((13 * i) % n),
+            close=5.0 + (17 * i) % n,
+        )
+    return apply_floors(build_signal_frame(_daily(rows)), 500_000, 3.0)
+
+
+def test_union_v2_at_pool_equal_to_budget_degenerates_to_the_primary():
+    """The reason union_v2 draws consensus from a WIDER window than it spends.
+
+    Unanimity within each member's top-N is by construction a subset of the
+    primary's top-N, so filling the remainder from the primary returns the
+    primary's own list — same set, merely reordered. Pinned because it is the
+    silent failure mode: a run configured this way would look like a new
+    scanner and be a bit-identical no-op."""
+    from new_pipeline.intraday.scanner import UNION_V2_PRIMARY, scan_day_union_v2
+
+    signals = _decoupled_signals()
+    day = D0 + timedelta(days=24)
+    degenerate = scan_day_union_v2(signals, day, top_n=10, pool_n=10)
+    primary = scan_day(signals, day, 10, weights=UNION_V2_PRIMARY)
+    assert set(degenerate) == set(primary)
+    # ...and a wider consensus window is what breaks the degeneracy
+    widened = scan_day_union_v2(signals, day, top_n=10, pool_n=20)
+    assert set(widened) != set(primary)
+
+
+def test_union_v2_holds_only_consensus_names_and_primary_picks():
+    """The v2 invariant that v1 lacked: every slot is either a unanimous name
+    or one the primary chose itself — the weaker rankers can ADD via consensus
+    but can never displace a primary pick with a name of their own."""
+    from new_pipeline.intraday.scanner import (
+        UNION_MEMBERS,
+        UNION_V2_PRIMARY,
+        scan_day_union_v2,
+    )
+
+    signals = _decoupled_signals()
+    day = D0 + timedelta(days=24)
+    top_n, pool_n = 10, 20
+    picks = scan_day_union_v2(signals, day, top_n=top_n, pool_n=pool_n)
+    assert len(picks) == top_n
+    assert picks == scan_day_union_v2(signals, day, top_n=top_n, pool_n=pool_n)
+
+    consensus = set.intersection(*(
+        set(scan_day(signals, day, pool_n, weights=m)) for m in UNION_MEMBERS))
+    primary_full = scan_day(signals, day, 10_000, weights=UNION_V2_PRIMARY)
+    assert set(picks) <= consensus | set(primary_full[:top_n])
+    # consensus is seated first, before any non-consensus primary pick
+    tiers = [p in consensus for p in picks]
+    assert tiers == sorted(tiers, reverse=True)
+    # and within the consensus tier, the PRIMARY's order decides
+    order = {t: i for i, t in enumerate(primary_full)}
+    head = [order[p] for p in picks if p in consensus]
+    assert head == sorted(head)
