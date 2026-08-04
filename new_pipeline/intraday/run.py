@@ -135,6 +135,9 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
             "gross_pnl": [t.gross_pnl for t in ledger],
             "cost_dollars": [t.cost_dollars for t in ledger],
             "net_pnl": [t.net_pnl for t in ledger],
+            "spread_bps": [t.spread_bps for t in ledger],
+            "impact_bps": [t.impact_bps for t in ledger],
+            "cs_spread_bps": [t.cs_spread_bps for t in ledger],
         }).write_parquet(output_dir / f"{SLUG}_ledger.parquet")
 
     verdict = result["verdict"]

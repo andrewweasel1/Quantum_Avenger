@@ -197,3 +197,39 @@ def test_live_credentials_never_render_in_a_config_repr():
     assert "supersecretvalue" not in rendered
     # ...while attribute access is untouched for the callers that need them
     assert cfg.alpaca.api_key == "PKSECRETKEYVALUE"
+
+
+def test_cost_attribution_separates_spread_from_impact():
+    """Every ledger row records WHICH term charged it. Without this the
+    meanrev_v1 post-mortem could not tell a 54bps round trip apart from a
+    5bps floor plus a runaway impact model."""
+    import polars as pl
+    from new_pipeline.intraday.simulate import run_session
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.spread_floor_bps = 5.0
+    rows = [(0, 10.0, 10.0, 10.0, 10.0), (1, 10.0, 10.0, 9.6, 9.6),
+            (2, 9.7, 9.9, 9.55, 9.8), (3, 9.8, 10.4, 9.8, 10.3),
+            (380, 10.3, 10.3, 10.2, 10.2)]
+    minutes = pl.DataFrame({
+        "ticker": ["AAA"] * len(rows),
+        "ts": [OPEN + timedelta(minutes=r[0]) for r in rows],
+        "open": [r[1] for r in rows], "high": [r[2] for r in rows],
+        "low": [r[3] for r in rows], "close": [r[4] for r in rows],
+        "volume": [500_000] * len(rows),
+    })
+    # CS says the full spread is 80bps -> a 40bps half-spread dwarfs the floor
+    stats = pl.DataFrame({"date": [SESSION.day], "ticker": ["AAA"],
+                          "spread_bps": [80.0], "vol_minute": [0.0],
+                          "atr_pct": [ATR]})
+    _, ledger = run_session(minutes, SESSION, ["AAA"],
+                            [MRCombo("open", 1.5, "marketable", "anchor")],
+                            stats, cfg, equity=100_000.0)
+    trade = ledger[0]
+    assert trade.cs_spread_bps == 80.0
+    assert trade.spread_bps == 40.0   # entry leg only; the target exit rested
+    assert trade.impact_bps == 0.0    # vol_minute 0 -> no impact term
+    # the recorded parts reconstruct the charged total
+    notional = trade.shares * trade.entry_px
+    assert abs(trade.cost_dollars - notional * 40.0 / 1e4) < 0.05

@@ -1,0 +1,19 @@
+{
+ "n_events": 400,
+ "n_missing": 0,
+ "half_spread_bps": {
+  "p10": 1.487212128757366,
+  "p25": 2.714751524407862,
+  "p50": 5.053511149917435,
+  "p75": 10.972440393264527,
+  "p90": 19.942699158784457,
+  "p95": 31.95843562825337
+ },
+ "half_spread_mean": 9.121706613619859,
+ "configured_floor_bps": 5.0,
+ "share_below_floor": 0.485,
+ "depth_ratio_median": 6.771128842359912,
+ "share_over_displayed": 0.64,
+ "window_seconds": 60,
+ "sample_seed": 0
+}

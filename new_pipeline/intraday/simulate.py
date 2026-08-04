@@ -49,6 +49,10 @@ class Trade:
     gross_pnl: float
     cost_dollars: float
     net_pnl: float
+    # Cost attribution, round trip: which term actually charged the trade.
+    spread_bps: float = 0.0      # half-spread legs (0 when both legs rested)
+    impact_bps: float = 0.0      # hydrodynamic size-vs-liquidity term
+    cs_spread_bps: float = 0.0   # the raw Corwin-Schultz FULL-spread estimate
 
 
 def trailing_stats(daily: pl.DataFrame, window: int = 20) -> pl.DataFrame:
@@ -83,13 +87,19 @@ def trailing_stats(daily: pl.DataFrame, window: int = 20) -> pl.DataFrame:
 
 def _side_cost_bps(notional: float, spread_bps: float, vol_minute: float,
                    bar_dollar_vol: float, spread_floor_bps: float,
-                   slippage_constant: float, passive: bool = False) -> float:
+                   slippage_constant: float,
+                   passive: bool = False) -> tuple[float, float]:
+    """(half_spread_bps, impact_bps) for one leg — returned SEPARATELY so every
+    ledger row records which term drove its cost. Storing only the total made
+    the meanrev_v1 post-mortem guesswork: a 54 bps round trip is unexplainable
+    against a 5 bps floor without knowing whether the Corwin-Schultz estimate
+    or the impact model produced it."""
     half_spread = 0.0 if passive else max(
         spread_bps / 2.0 if np.isfinite(spread_bps) else 0.0, spread_floor_bps)
     impact = hydrodynamic_slippage_bps(
         notional, vol_minute if np.isfinite(vol_minute) else 0.0,
         max(bar_dollar_vol, 1.0), constant=slippage_constant)
-    return half_spread + min(impact, 250.0)  # cap the model, never negative edge
+    return half_spread, min(impact, 250.0)  # cap the model, never negative edge
 
 
 def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
@@ -162,12 +172,13 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
             exit_bar_dv = float(bars["volume"][path.exit_idx]) * path.exit_px
             # A resting limit the market traded through SUPPLIED liquidity: no
             # spread, impact only. Crossing legs pay the half-spread as before.
-            entry_bps = _side_cost_bps(entry_notional, spread, volm, entry_bar_dv,
-                                       icfg.spread_floor_bps, cfg.features.slippage_constant,
-                                       passive=path.entry_passive)
-            exit_bps = _side_cost_bps(exit_notional, spread, volm, exit_bar_dv,
-                                      icfg.spread_floor_bps, cfg.features.slippage_constant,
-                                      passive=path.exit_passive)
+            entry_spread, entry_impact = _side_cost_bps(
+                entry_notional, spread, volm, entry_bar_dv, icfg.spread_floor_bps,
+                cfg.features.slippage_constant, passive=path.entry_passive)
+            exit_spread, exit_impact = _side_cost_bps(
+                exit_notional, spread, volm, exit_bar_dv, icfg.spread_floor_bps,
+                cfg.features.slippage_constant, passive=path.exit_passive)
+            entry_bps, exit_bps = entry_spread + entry_impact, exit_spread + exit_impact
             gross = shares * (path.exit_px - path.entry_px)
             cost = (entry_notional * entry_bps + exit_notional * exit_bps) / 1e4
             pnl += gross - cost
@@ -176,7 +187,10 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
                 entry_ts=bars["ts"][path.entry_idx], exit_ts=bars["ts"][path.exit_idx],
                 entry_px=path.entry_px, exit_px=path.exit_px, shares=shares,
                 exit_reason=path.exit_reason, gross_pnl=gross,
-                cost_dollars=cost, net_pnl=gross - cost))
+                cost_dollars=cost, net_pnl=gross - cost,
+                spread_bps=entry_spread + exit_spread,
+                impact_bps=entry_impact + exit_impact,
+                cs_spread_bps=float(spread) if np.isfinite(spread) else float("nan")))
         session_returns[combo.key] = pnl / equity
     return session_returns, ledger
 
