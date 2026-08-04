@@ -343,7 +343,13 @@ class IntradayConfig(BaseModel):
     # Daily scanner overlay: causal-at-open ranking, top_n admitted to ORB.
     # 10 concentrates on the best-ranked names (v1 ran 60 and found gross edge
     # ~0 with cost varying 5x across the pick set — selection is the lever).
-    scanner_top_n: int = 10
+    # 50, up from 10: meanrev_v3 established that the binding constraint is the
+    # EVENT RATE of extreme dislocations (~0.06 trades/session/trial at z2.5),
+    # and that it cannot be relaxed by lowering the threshold. Admitting more
+    # names per session raises event count while holding the signal definition
+    # fixed — the honest direction. Deeper ranks are less tradable, but
+    # touch_cap sizing self-corrects by giving thin names smaller positions.
+    scanner_top_n: int = 50
     # Scanner weightings to PRICE as trials (intraday.scanner.VARIANTS). Every
     # entry multiplies the trial family the deflation must pay for.
     scanner_variants: list[str] = Field(

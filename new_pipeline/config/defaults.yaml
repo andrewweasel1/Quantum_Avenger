@@ -308,7 +308,7 @@ intraday:
     - "Mid Cap Extended"
   min_adv_dollars: 5000000.0
   min_price: 3.0
-  scanner_top_n: 10
+  scanner_top_n: 50
   scanner_variants: ["attention", "tradable", "dislocation", "volatility", "cheap_gap"]
   range_minutes: [5, 15, 30]
   stop_styles: ["or_low", "or_mid"]
