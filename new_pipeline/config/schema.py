@@ -391,6 +391,17 @@ class IntradayConfig(BaseModel):
     # and the impact term — not this floor — must carry that cost. See
     # models/prod/evidence/orb_v2/SPREAD_CALIBRATION.md.
     spread_floor_bps: float = 5.0
+    # MEASURED quote statistics replace Corwin-Schultz, which overstated the
+    # spread ~4x on gap-selected small caps and set ~90% of every intraday
+    # trading cost (evidence/meanrev_v1/COST_AUTOPSY.md).
+    quote_vault_dir: str = "./data/quote_vault"
+    # Position size may not exceed this multiple of the DISPLAYED touch
+    # notional. meanrev_v1 ran a median 6.77x the touch, so most of its real
+    # cost was book-walking the old bar-volume impact term never charged.
+    max_touch_participation: float = 1.0
+    # Fall back to Corwin-Schultz where a name-month has no measured cell;
+    # runs record the measured-coverage share so a thin vault is visible.
+    allow_cs_fallback: bool = True
 
 
 class DashboardConfig(BaseModel):

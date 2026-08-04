@@ -23,7 +23,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
-
 from new_pipeline.config import get_config
 from new_pipeline.intraday.calendar import load_sessions
 from new_pipeline.intraday.data import months_between

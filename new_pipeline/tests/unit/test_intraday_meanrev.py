@@ -233,3 +233,74 @@ def test_cost_attribution_separates_spread_from_impact():
     # the recorded parts reconstruct the charged total
     notional = trade.shares * trade.entry_px
     assert abs(trade.cost_dollars - notional * 40.0 / 1e4) < 0.05
+
+
+def _mr_frame():
+    import polars as pl
+    rows = [(0, 10.0, 10.0, 10.0, 10.0), (1, 10.0, 10.0, 9.6, 9.6),
+            (2, 9.7, 9.9, 9.55, 9.8), (3, 9.8, 10.4, 9.8, 10.3),
+            (380, 10.3, 10.3, 10.2, 10.2)]
+    return pl.DataFrame({
+        "ticker": ["AAA"] * len(rows),
+        "ts": [OPEN + timedelta(minutes=r[0]) for r in rows],
+        "open": [r[1] for r in rows], "high": [r[2] for r in rows],
+        "low": [r[3] for r in rows], "close": [r[4] for r in rows],
+        "volume": [500_000] * len(rows)})
+
+
+def test_measured_spread_beats_the_corwin_schultz_fallback():
+    """When the quote vault covers a name-month the MEASURED half-spread is
+    charged; Corwin-Schultz — biased ~4x on these names — is only a fallback."""
+    import polars as pl
+    from new_pipeline.intraday.simulate import run_session
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.max_touch_participation = 100.0  # isolate the spread term
+    combo = [MRCombo("open", 1.5, "marketable", "anchor")]
+    base_stats = {"date": [SESSION.day], "ticker": ["AAA"], "spread_bps": [80.0],
+                  "vol_minute": [0.0], "atr_pct": [ATR]}
+    # CS-only: charges 80/2 = 40bps on the entry leg
+    _, cs_led = run_session(_mr_frame(), SESSION, ["AAA"], combo,
+                            pl.DataFrame(base_stats), cfg, equity=100_000.0)
+    assert cs_led[0].spread_bps == 40.0
+    # measured: 5bps half-spread wins, and CS is ignored entirely
+    measured = pl.DataFrame({**base_stats, "half_spread_bps": [5.0],
+                             "touch_notional": [1e9]})
+    _, m_led = run_session(_mr_frame(), SESSION, ["AAA"], combo, measured, cfg,
+                           equity=100_000.0)
+    assert m_led[0].spread_bps == 5.0
+    assert m_led[0].cost_dollars < cs_led[0].cost_dollars
+
+
+def test_impact_charges_book_walking_and_the_cap_prevents_it():
+    """Impact is participation against DISPLAYED depth, not bar volume: an
+    order 5x the touch crosses levels and pays; the participation cap sizes
+    the order back inside the touch so it doesn't."""
+    import polars as pl
+    from new_pipeline.intraday.quotes import book_walk_impact_bps
+    from new_pipeline.intraday.simulate import run_session
+
+    # unit: 5x the touch at a 4bps half-spread -> 4 * (5-1)/2 = 8bps
+    assert book_walk_impact_bps(5000.0, 4.0, 1000.0) == 8.0
+    assert book_walk_impact_bps(900.0, 4.0, 1000.0) == 0.0  # fits inside
+
+    reload_config()
+    cfg = base.get_config()
+    combo = [MRCombo("open", 1.5, "marketable", "anchor")]
+    stats = pl.DataFrame({"date": [SESSION.day], "ticker": ["AAA"],
+                          "spread_bps": [float("nan")], "vol_minute": [0.0],
+                          "atr_pct": [ATR], "half_spread_bps": [5.0],
+                          "touch_notional": [400.0]})
+    cfg.intraday.max_touch_participation = 100.0   # allow a huge order
+    _, big = run_session(_mr_frame(), SESSION, ["AAA"], combo, stats, cfg,
+                         equity=100_000.0)
+    assert big[0].impact_bps > 0.0                 # it walked the book
+    cfg.intraday.max_touch_participation = 1.0     # size back inside the touch
+    _, capped = run_session(_mr_frame(), SESSION, ["AAA"], combo, stats, cfg,
+                            equity=100_000.0)
+    assert capped[0].impact_bps == 0.0
+    assert capped[0].shares < big[0].shares
+    # gross bps is size-invariant, so the capped trade is strictly better per $
+    assert (capped[0].cost_dollars / (capped[0].shares * capped[0].entry_px)
+            < big[0].cost_dollars / (big[0].shares * big[0].entry_px))

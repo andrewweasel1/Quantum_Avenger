@@ -33,6 +33,7 @@ from new_pipeline.intraday.data import (
 )
 from new_pipeline.intraday.evaluate import REGISTRY_KEY, evaluate_orb, record
 from new_pipeline.intraday.orb import trials_from_config
+from new_pipeline.intraday.quotes import load_quote_vault, quote_stats_for
 from new_pipeline.intraday.scanner import apply_floors, build_signal_frame, scan_day
 from new_pipeline.intraday.simulate import run_backtest_trials, trailing_stats
 from new_pipeline.intraday.universe import segment_symbols
@@ -80,6 +81,19 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
             day: scan_day(signals, day, cfg.intraday.scanner_top_n, weights=variant)
             for day in sorted(sessions)}
     stats = trailing_stats(daily)
+    # Join the MEASURED quote statistics; where a name-month has no cell the
+    # Corwin-Schultz fallback applies and the coverage share is reported, so a
+    # thin vault is visible in the manifest rather than silently assumed away.
+    quote_vault = load_quote_vault(Path(cfg.intraday.quote_vault_dir))
+    qs = quote_stats_for(quote_vault, sorted(sessions))
+    if not qs.is_empty():
+        stats = stats.join(qs, on=["date", "ticker"], how="left")
+        covered = float(stats["half_spread_bps"].is_not_null().mean())
+    else:
+        covered = 0.0
+    print(f"quote vault: {quote_vault.height} cells, "
+          f"measured-spread coverage {covered:.1%} of name-days"
+          + ("" if covered else " — FALLING BACK to Corwin-Schultz (~4x biased)"))
     for variant, picks in picks_by_variant.items():
         active = sum(1 for p in picks.values() if p)
         print(f"scanner[{variant}]: {active}/{len(sessions)} sessions, "
@@ -160,6 +174,10 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
                            for s, r in verdict.per_regime.items()},
         },
         "window": {"start": str(start), "end": str(end), "equity": equity, "seed": seed},
+        "cost_model": {"measured_spread_coverage": round(covered, 4),
+                       "quote_vault_cells": quote_vault.height,
+                       "max_touch_participation": cfg.intraday.max_touch_participation,
+                       "cs_fallback_allowed": cfg.intraday.allow_cs_fallback},
     }
     candidate_path = output_dir / f"{SLUG}_candidate.json"
     candidate_path.write_text(json.dumps(manifest, indent=1))

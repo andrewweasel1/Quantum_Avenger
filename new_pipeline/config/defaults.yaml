@@ -332,6 +332,9 @@ intraday:
   # p75 5.1); the old 15.0 was ~6x too conservative. Orders still ran 3.5x
   # displayed touch depth — book-walking is the impact term's job, not this.
   spread_floor_bps: 5.0
+  quote_vault_dir: "./data/quote_vault"
+  max_touch_participation: 1.0
+  allow_cs_fallback: true
 
 dashboard:
   veto_ledger_path: "./data/ledger/veto_ledger.parquet"

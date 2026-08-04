@@ -31,6 +31,7 @@ from new_pipeline.intraday.calendar import Session
 from new_pipeline.intraday.meanrev import MRCombo
 from new_pipeline.intraday.meanrev import trade_path as mr_trade_path
 from new_pipeline.intraday.orb import Combo, trade_path
+from new_pipeline.intraday.quotes import book_walk_impact_bps, max_participation_shares
 
 _MINUTES_PER_SESSION = 390.0
 
@@ -87,18 +88,34 @@ def trailing_stats(daily: pl.DataFrame, window: int = 20) -> pl.DataFrame:
 
 def _side_cost_bps(notional: float, spread_bps: float, vol_minute: float,
                    bar_dollar_vol: float, spread_floor_bps: float,
-                   slippage_constant: float,
-                   passive: bool = False) -> tuple[float, float]:
+                   slippage_constant: float, passive: bool = False,
+                   measured_half_bps: float = float("nan"),
+                   touch_notional: float = 0.0) -> tuple[float, float]:
     """(half_spread_bps, impact_bps) for one leg — returned SEPARATELY so every
     ledger row records which term drove its cost. Storing only the total made
     the meanrev_v1 post-mortem guesswork: a 54 bps round trip is unexplainable
     against a 5 bps floor without knowing whether the Corwin-Schultz estimate
     or the impact model produced it."""
-    half_spread = 0.0 if passive else max(
-        spread_bps / 2.0 if np.isfinite(spread_bps) else 0.0, spread_floor_bps)
-    impact = hydrodynamic_slippage_bps(
-        notional, vol_minute if np.isfinite(vol_minute) else 0.0,
-        max(bar_dollar_vol, 1.0), constant=slippage_constant)
+    # Spread: the MEASURED NBBO half-spread when the quote vault covers this
+    # name-month, else the Corwin-Schultz fallback (~4x biased on small caps).
+    if np.isfinite(measured_half_bps):
+        half_spread = 0.0 if passive else max(measured_half_bps, 0.0)
+    else:
+        half_spread = 0.0 if passive else max(
+            spread_bps / 2.0 if np.isfinite(spread_bps) else 0.0, spread_floor_bps)
+    # Impact: book-walking beyond the DISPLAYED touch — what a marketable order
+    # actually eats. A minute bar's traded volume never described resting size,
+    # which is why the old term charged ~2bps where reality was 10-20. Passive
+    # legs add liquidity and never walk. Falls back to the hydrodynamic term
+    # only when depth is unmeasured.
+    if touch_notional > 0:
+        impact = 0.0 if passive else book_walk_impact_bps(
+            notional, measured_half_bps if np.isfinite(measured_half_bps) else half_spread,
+            touch_notional)
+    else:
+        impact = hydrodynamic_slippage_bps(
+            notional, vol_minute if np.isfinite(vol_minute) else 0.0,
+            max(bar_dollar_vol, 1.0), constant=slippage_constant)
     return half_spread, min(impact, 250.0)  # cap the model, never negative edge
 
 
@@ -158,12 +175,16 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
         pnl = 0.0
         for ticker, path in admitted:
             per_share_risk = max(path.entry_px - path.stop_px, 1e-9)
+            row = day_stats.get(ticker, {})
+            touch = float(row.get("touch_notional", 0.0) or 0.0)
             shares = int(min(risk_dollars / per_share_risk,
-                             max_notional / path.entry_px))
+                             max_notional / path.entry_px,
+                             max_participation_shares(touch, path.entry_px,
+                                                      icfg.max_touch_participation)))
             if shares < 1:
                 continue
             bars = arrays[ticker]
-            row = day_stats.get(ticker, {})
+            measured_half = float(row.get("half_spread_bps", float("nan")) or float("nan"))
             spread = float(row.get("spread_bps", float("nan")))
             volm = float(row.get("vol_minute", float("nan")))
             entry_notional = shares * path.entry_px
@@ -174,10 +195,12 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
             # spread, impact only. Crossing legs pay the half-spread as before.
             entry_spread, entry_impact = _side_cost_bps(
                 entry_notional, spread, volm, entry_bar_dv, icfg.spread_floor_bps,
-                cfg.features.slippage_constant, passive=path.entry_passive)
+                cfg.features.slippage_constant, passive=path.entry_passive,
+                measured_half_bps=measured_half, touch_notional=touch)
             exit_spread, exit_impact = _side_cost_bps(
                 exit_notional, spread, volm, exit_bar_dv, icfg.spread_floor_bps,
-                cfg.features.slippage_constant, passive=path.exit_passive)
+                cfg.features.slippage_constant, passive=path.exit_passive,
+                measured_half_bps=measured_half, touch_notional=touch)
             entry_bps, exit_bps = entry_spread + entry_impact, exit_spread + exit_impact
             gross = shares * (path.exit_px - path.entry_px)
             cost = (entry_notional * entry_bps + exit_notional * exit_bps) / 1e4
