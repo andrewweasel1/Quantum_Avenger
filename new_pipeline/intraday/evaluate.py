@@ -32,7 +32,8 @@ def _per_period_sharpe(column: np.ndarray) -> float:
 
 def timing_null_margin(minutes_by_day, sessions, picks_by_day, combo, stats,
                        cfg, equity: float, n_iter: int, seed: int,
-                       champion_sharpe: float) -> tuple[float, list[float]]:
+                       champion_sharpe: float,
+                       sizing: str = "uncapped") -> tuple[float, list[float]]:
     """Null for the ENTRY TIMING only: the champion's own scanner picks and
     construction, entered at random in-session minutes."""
     """champion_sharpe - Q95 of the random-entry null Sharpe distribution."""
@@ -47,7 +48,8 @@ def timing_null_margin(minutes_by_day, sessions, picks_by_day, combo, stats,
                 rets.append(0.0)
                 continue
             by_combo, _ = run_session(minutes_by_day[day], sessions[day], picks,
-                                      [combo], stats, cfg, equity, entry_rng=rng)
+                                      [combo], stats, cfg, equity, entry_rng=rng,
+                                      sizing=sizing)
             rets.append(by_combo.get(combo.key, 0.0))
         nulls.append(_per_period_sharpe(np.asarray(rets)))
     return champion_sharpe - float(np.quantile(nulls, 0.95)), nulls
@@ -116,7 +118,8 @@ def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataF
     margin, nulls = timing_null_margin(
         minutes_by_day, sessions, champ_picks, champion.combo, stats, cfg, equity,
         n_iter=cfg.long_short.null_iterations, seed=seed,
-        champion_sharpe=float(per_combo_sr[champ_idx]))
+        champion_sharpe=float(per_combo_sr[champ_idx]),
+        sizing=champion.sizing)
 
     mkt_rets, mkt_vol = market_series(daily, days)
     evaluator = QuantitativeEvaluator(
@@ -149,6 +152,7 @@ def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataF
         "second_half_sharpe": _per_period_sharpe(champ_sessions[half:]),
         "timing_null_sharpes": nulls,
         "scanner_variant": champion.variant,
+        "sizing_model": champion.sizing,
         "gross_bps_mean": (
             float(np.mean([t.gross_pnl / max(t.shares * t.entry_px, 1e-9) * 1e4
                            for t in champ_trades])) if champ_trades else 0.0),

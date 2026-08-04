@@ -399,6 +399,20 @@ class IntradayConfig(BaseModel):
     # notional. meanrev_v1 ran a median 6.77x the touch, so most of its real
     # cost was book-walking the old bar-volume impact term never charged.
     max_touch_participation: float = 1.0
+    # Sizing models, priced as a TRIAL AXIS because the measured touch is far
+    # thinner than assumed (median $150 on traded names, not ~$700), which
+    # makes the constraint strategy-defining rather than a mild guardrail:
+    #   volume_part  work the order over a window, capped at a share of the
+    #                flow — the standard desk practice; no book-walking, but
+    #                the spread is paid on every slice.
+    #   touch_cap    fit inside the instantaneous displayed touch. Honest for
+    #                single-shot execution; positions collapse ~33x.
+    #   uncapped     fire the full position at the touch and pay the whole
+    #                book-walk. Deliberately pessimistic.
+    sizing_models: list[str] = Field(
+        default_factory=lambda: ["volume_part", "touch_cap", "uncapped"])
+    volume_participation_rate: float = 0.10  # share of window flow a worked order takes
+    exec_window_min: int = 5                 # minutes an order is worked over
     # Fall back to Corwin-Schultz where a name-month has no measured cell;
     # runs record the measured-coverage share so a thin vault is visible.
     allow_cs_fallback: bool = True

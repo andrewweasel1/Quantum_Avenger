@@ -122,7 +122,8 @@ def _side_cost_bps(notional: float, spread_bps: float, vol_minute: float,
 def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
                 combos: list[Combo], stats: pl.DataFrame, cfg,
                 equity: float,
-                entry_rng: np.random.Generator | None = None
+                entry_rng: np.random.Generator | None = None,
+                sizing: str = "uncapped"
                 ) -> tuple[dict[str, float], list[Trade]]:
     """One session across all combos. Returns ({combo_key: session_return},
     trade ledger). ``minutes`` is the session-filtered frame for this day.
@@ -177,10 +178,26 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
             per_share_risk = max(path.entry_px - path.stop_px, 1e-9)
             row = day_stats.get(ticker, {})
             touch = float(row.get("touch_notional", 0.0) or 0.0)
+            bars_t = arrays[ticker]
+            # Liquidity budget depends on HOW the order is executed:
+            #   volume_part  worked over a window -> a share of that flow
+            #   touch_cap    single shot inside the displayed touch
+            #   uncapped     single shot of whatever size, book-walk charged
+            if sizing == "volume_part":
+                lo, hi = path.entry_idx, path.entry_idx + icfg.exec_window_min
+                window_dv = float(
+                    (bars_t["volume"][lo:hi] * bars_t["close"][lo:hi]).sum())
+                budget = icfg.volume_participation_rate * window_dv
+                depth_shares = budget / path.entry_px if path.entry_px > 0 else 0.0
+            elif sizing == "touch_cap":
+                budget = touch
+                depth_shares = max_participation_shares(
+                    touch, path.entry_px, icfg.max_touch_participation)
+            else:
+                budget = touch
+                depth_shares = float("inf")
             shares = int(min(risk_dollars / per_share_risk,
-                             max_notional / path.entry_px,
-                             max_participation_shares(touch, path.entry_px,
-                                                      icfg.max_touch_participation)))
+                             max_notional / path.entry_px, depth_shares))
             if shares < 1:
                 continue
             bars = arrays[ticker]
@@ -196,11 +213,11 @@ def run_session(minutes: pl.DataFrame, session: Session, picks: list[str],
             entry_spread, entry_impact = _side_cost_bps(
                 entry_notional, spread, volm, entry_bar_dv, icfg.spread_floor_bps,
                 cfg.features.slippage_constant, passive=path.entry_passive,
-                measured_half_bps=measured_half, touch_notional=touch)
+                measured_half_bps=measured_half, touch_notional=budget)
             exit_spread, exit_impact = _side_cost_bps(
                 exit_notional, spread, volm, exit_bar_dv, icfg.spread_floor_bps,
                 cfg.features.slippage_constant, passive=path.exit_passive,
-                measured_half_bps=measured_half, touch_notional=touch)
+                measured_half_bps=measured_half, touch_notional=budget)
             entry_bps, exit_bps = entry_spread + entry_impact, exit_spread + exit_impact
             gross = shares * (path.exit_px - path.entry_px)
             cost = (entry_notional * entry_bps + exit_notional * exit_bps) / 1e4
@@ -227,22 +244,23 @@ def run_backtest_trials(minutes_by_day, sessions: dict[date, Session],
     days = sorted(d for d in minutes_by_day if d in sessions)
     matrix = np.zeros((len(days), len(trials)))
     ledger: list[Trade] = []
-    by_variant: dict[str, list[Combo]] = {}
+    by_group: dict[tuple[str, str], list[Combo]] = {}
     for trial in trials:
-        by_variant.setdefault(trial.variant, []).append(trial.combo)
+        by_group.setdefault((trial.variant, trial.sizing), []).append(trial.combo)
     column = {t.key: j for j, t in enumerate(trials)}
 
     for i, day in enumerate(days):
-        for variant, combos in by_variant.items():
+        for (variant, sizing), combos in by_group.items():
             picks = picks_by_variant.get(variant, {}).get(day, [])
             if not picks:
                 continue
             rets, trades = run_session(minutes_by_day[day], sessions[day], picks,
-                                       combos, stats, cfg, equity)
+                                       combos, stats, cfg, equity, sizing=sizing)
             for combo in combos:
-                matrix[i, column[f"{variant}|{combo.key}"]] = rets.get(combo.key, 0.0)
+                matrix[i, column[f"{variant}|{sizing}|{combo.key}"]] = rets.get(combo.key, 0.0)
             for trade in trades:
-                ledger.append(replace(trade, combo_key=f"{variant}|{trade.combo_key}"))
+                ledger.append(replace(
+                    trade, combo_key=f"{variant}|{sizing}|{trade.combo_key}"))
     return matrix, days, ledger
 
 

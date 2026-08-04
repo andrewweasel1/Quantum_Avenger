@@ -148,10 +148,11 @@ class Trial:
 
     variant: str
     combo: Combo
+    sizing: str = "uncapped"
 
     @property
     def key(self) -> str:
-        return f"{self.variant}|{self.combo.key}"
+        return f"{self.variant}|{self.sizing}|{self.combo.key}"
 
 
 def constructions_from_config(cfg) -> list:
@@ -164,6 +165,7 @@ def constructions_from_config(cfg) -> list:
 
 
 def trials_from_config(cfg) -> list[Trial]:
-    return [Trial(variant, combo)
+    return [Trial(variant, combo, sizing)
             for variant in cfg.intraday.scanner_variants
+            for sizing in cfg.intraday.sizing_models
             for combo in constructions_from_config(cfg)]

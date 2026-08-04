@@ -87,7 +87,7 @@ def test_evaluate_orb_planted_edge_and_registry_row(tmp_path):
                           sessions, picks, stats, cfg, equity=100_000.0, seed=0)
     assert result["report"].dsr > 0.9  # planted edge survives deflation
     # a bare combo list rides the compat path as a single "default" variant
-    assert result["champion"].key == "default|k5|or_low|none"
+    assert result["champion"].key == "default|uncapped|k5|or_low|none"
     assert result["champion"].combo.k_minutes == 5
     diag = result["diagnostics"]
     assert diag["n_trades"] == 90 and 0 < diag["cost_share_of_gross"] < 1
@@ -178,14 +178,18 @@ def test_trial_family_crosses_scanners_and_constructions():
     assert matrix.shape == (6, 2)
     assert not np.allclose(matrix[:, 0], matrix[:, 1])  # different picks, different P&L
     tagged = {t.combo_key for t in ledger}
-    assert tagged == {"attention|k5|or_low|none", "tradable|k5|or_low|none"}
+    assert tagged == {"attention|uncapped|k5|or_low|none", "tradable|uncapped|k5|or_low|none"}
     assert {t.ticker for t in ledger if t.combo_key.startswith("attention")} == {"AAA"}
     # the config cross is the full family, and it follows the strategy family
     cfg.intraday.scanner_variants = ["attention", "tradable"]
+    cfg.intraday.sizing_models = ["uncapped"]
     cfg.intraday.strategy = "orb"
     assert len(trials_from_config(cfg)) == 24   # 2 scanners x 12 ORB combos
     cfg.intraday.strategy = "meanrev"
     assert len(trials_from_config(cfg)) == 32   # 2 scanners x 16 MR combos
+    # the sizing axis multiplies whatever family it is crossed with
+    cfg.intraday.sizing_models = ["volume_part", "touch_cap", "uncapped"]
+    assert len(trials_from_config(cfg)) == 96
     assert all(t.combo.key.count("|") == 3 for t in trials_from_config(cfg))
 
 
@@ -212,17 +216,17 @@ def test_activity_floor_blocks_a_thin_trial_from_being_champion():
                           "spread_bps": [30.0] * len(days),
                           "vol_minute": [0.0] * len(days),
                           "atr_pct": [0.02] * len(days)})
-    trials = [Trial("thin", Combo(5, "or_low", 0.0)),
-              Trial("busy", Combo(15, "or_low", 0.0))]
+    trials = [Trial("thin", Combo(5, "or_low", 0.0), "uncapped"),
+              Trial("busy", Combo(15, "or_low", 0.0), "uncapped")]
     # thin: 3 huge wins, otherwise flat -> a spectacular but meaningless Sharpe
     matrix = np.zeros((len(days), 2))
     matrix[:3, 0] = 0.02
     # busy: trades most sessions, modestly negative
     rng = np.random.default_rng(0)
     matrix[:, 1] = rng.normal(-0.0002, 0.004, len(days))
-    ledger = [Trade(days[i], "AAA", "thin|k5|or_low|none", None, None, 10.0, 10.2,
+    ledger = [Trade(days[i], "AAA", "thin|uncapped|k5|or_low|none", None, None, 10.0, 10.2,
                     10, "target", 2.0, 0.1, 1.9) for i in range(3)]
-    ledger += [Trade(days[i], "AAA", "busy|k15|or_low|none", None, None, 10.0, 9.9,
+    ledger += [Trade(days[i], "AAA", "busy|uncapped|k15|or_low|none", None, None, 10.0, 9.9,
                      10, "close", -1.0, 0.1, -1.1) for i in range(len(days))]
     result = evaluate_orb(matrix, days, trials, ledger, daily, minutes_by_day,
                           sessions, {"thin": picks, "busy": picks}, stats, cfg,
@@ -232,7 +236,7 @@ def test_activity_floor_blocks_a_thin_trial_from_being_champion():
     assert result["champion"].variant == "busy"
     diag = result["diagnostics"]
     assert diag["n_eligible_trials"] == 1
-    assert diag["trial_activity"]["thin|k5|or_low|none"]["n_trades"] == 3
+    assert diag["trial_activity"]["thin|uncapped|k5|or_low|none"]["n_trades"] == 3
     # with NO eligible trial the run is vetoed outright, not crowned
     cfg.intraday.min_trades = 500
     none_ok = evaluate_orb(matrix, days, trials, ledger, daily, minutes_by_day,

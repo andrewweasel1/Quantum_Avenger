@@ -257,6 +257,7 @@ def test_measured_spread_beats_the_corwin_schultz_fallback():
     reload_config()
     cfg = base.get_config()
     cfg.intraday.max_touch_participation = 100.0  # isolate the spread term
+    # sizing defaults to "uncapped" in run_session; touch depth is huge below
     combo = [MRCombo("open", 1.5, "marketable", "anchor")]
     base_stats = {"date": [SESSION.day], "ticker": ["AAA"], "spread_bps": [80.0],
                   "vol_minute": [0.0], "atr_pct": [ATR]}
@@ -292,15 +293,47 @@ def test_impact_charges_book_walking_and_the_cap_prevents_it():
                           "spread_bps": [float("nan")], "vol_minute": [0.0],
                           "atr_pct": [ATR], "half_spread_bps": [5.0],
                           "touch_notional": [400.0]})
-    cfg.intraday.max_touch_participation = 100.0   # allow a huge order
     _, big = run_session(_mr_frame(), SESSION, ["AAA"], combo, stats, cfg,
-                         equity=100_000.0)
+                         equity=100_000.0, sizing="uncapped")
     assert big[0].impact_bps > 0.0                 # it walked the book
     cfg.intraday.max_touch_participation = 1.0     # size back inside the touch
     _, capped = run_session(_mr_frame(), SESSION, ["AAA"], combo, stats, cfg,
-                            equity=100_000.0)
+                            equity=100_000.0, sizing="touch_cap")
     assert capped[0].impact_bps == 0.0
     assert capped[0].shares < big[0].shares
     # gross bps is size-invariant, so the capped trade is strictly better per $
     assert (capped[0].cost_dollars / (capped[0].shares * capped[0].entry_px)
             < big[0].cost_dollars / (big[0].shares * big[0].entry_px))
+
+
+def test_sizing_models_are_priced_as_distinct_trials():
+    """The three execution assumptions size the SAME signal differently and
+    are judged side by side: working the order over a window, fitting inside
+    the displayed touch, or firing it all and paying the book-walk."""
+    import polars as pl
+    from new_pipeline.intraday.simulate import run_session
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.volume_participation_rate = 0.10
+    cfg.intraday.exec_window_min = 5
+    cfg.intraday.max_touch_participation = 1.0
+    combo = [MRCombo("open", 1.5, "marketable", "anchor")]
+    stats = pl.DataFrame({"date": [SESSION.day], "ticker": ["AAA"],
+                          "spread_bps": [float("nan")], "vol_minute": [0.0],
+                          "atr_pct": [ATR], "half_spread_bps": [5.0],
+                          "touch_notional": [150.0]})  # the measured reality
+    out = {}
+    for sizing in ("volume_part", "touch_cap", "uncapped"):
+        _, led = run_session(_mr_frame(), SESSION, ["AAA"], combo, stats, cfg,
+                             equity=100_000.0, sizing=sizing)
+        out[sizing] = led[0]
+    # touch_cap fits inside $150 of displayed depth -> tiny, and pays no walk
+    assert out["touch_cap"].shares * out["touch_cap"].entry_px <= 160
+    assert out["touch_cap"].impact_bps == 0.0
+    # uncapped takes the full position and pays the book-walk for it
+    assert out["uncapped"].shares > out["touch_cap"].shares
+    assert out["uncapped"].impact_bps > 0.0
+    # working the order sits between: real size, no walking
+    assert out["volume_part"].shares > out["touch_cap"].shares
+    assert out["volume_part"].impact_bps == 0.0
