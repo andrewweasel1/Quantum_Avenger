@@ -233,6 +233,16 @@ def scan_day_union_v2(signals: pl.DataFrame, day, top_n: int,
     ranker outright, so it can only ever hold consensus names plus attention's
     own picks.
 
+    REJECTED by meanrev_v6, though the fix worked: v2 beat v1 on 30/32
+    constructions (25.5 -> 33.4 net bps) and still lost to plain `attention`
+    (43.1), winning 4/32. Net edge tracks how much of attention's book a
+    scanner keeps almost linearly (60.7% -> 25.5, 71.6% -> 33.4, 100% -> 43.1),
+    and the 78 attention events v2 dropped for failing unanimity were worth
+    42.9 net bps — indistinguishable from the 43.1 average of the book they
+    were cut from. Consensus does not identify which attention picks are bad;
+    it removes good ones at the same rate as a random cut, so the best
+    consensus rule is the one that cuts nothing.
+
     Consensus is unanimity within each member's top ``pool_n`` (default
     ``UNION_V2_POOL_MULT * top_n``), NOT within top_n. Unanimity at top_n would
     be a subset of the primary's top_n, making the whole rule a no-op that
