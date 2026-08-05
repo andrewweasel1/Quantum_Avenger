@@ -1,0 +1,259 @@
+{
+ "kind": "intraday_orb",
+ "key": "Intraday ORB",
+ "best_params": {
+  "trial": "attention|touch_cap|open|z2.5|marketable|anchor",
+  "scanner_variant": "attention",
+  "scanner_variants_priced": [
+   "attention"
+  ],
+  "entry_buffer_bps": 5.0,
+  "risk_bps": 25.0,
+  "max_position_pct": 5.0,
+  "max_concurrent": 15,
+  "flatten_buffer_min": 5,
+  "spread_floor_bps": 5.0,
+  "scanner_top_n": 50,
+  "min_adv_dollars": 5000000.0,
+  "min_price": 3.0
+ },
+ "diagnostics": {
+  "combo": "attention|touch_cap|open|z2.5|marketable|anchor",
+  "session_sharpe": 0.05751553330902998,
+  "sr_annual_display": 0.9130307859536713,
+  "n_sessions": 1232,
+  "n_trades": 551,
+  "win_rate": 0.4882032667876588,
+  "avg_cost_dollars": 1.934654830372167,
+  "cost_share_of_gross": 0.07109555118499943,
+  "first_half_sharpe": -0.03777494999029614,
+  "second_half_sharpe": 0.08324625125776389,
+  "timing_null_sharpes": [
+   -0.07204114409507507,
+   -0.07768963718966959,
+   -0.09549430148481346,
+   -0.11026024327173457,
+   -0.11101853419122856,
+   -0.10419406834967972,
+   -0.10335863045712197,
+   -0.11743834650898353,
+   -0.09146962525367389,
+   -0.09180329789637336,
+   -0.08967293016292241,
+   -0.0902912454147536,
+   -0.09392234255095089,
+   -0.09851799120057946,
+   -0.0789311666666066,
+   -0.10256093337438402,
+   -0.11371491902993609,
+   -0.08820421036388518,
+   -0.08947132994403885,
+   -0.07379875993844802
+  ],
+  "scanner_variant": "attention",
+  "sizing_model": "touch_cap",
+  "gross_bps_mean": 37.18859957406015,
+  "trial_sharpes": {
+   "attention|touch_cap|vwap|z0.5|marketable|anchor": -0.07157130078661893,
+   "attention|touch_cap|vwap|z0.5|marketable|half": -0.09006380179615275,
+   "attention|touch_cap|vwap|z0.5|passive|anchor": -0.0959483264829102,
+   "attention|touch_cap|vwap|z0.5|passive|half": -0.11385303722627213,
+   "attention|touch_cap|vwap|z1|marketable|anchor": 0.028983227199478243,
+   "attention|touch_cap|vwap|z1|marketable|half": 0.006188682030322956,
+   "attention|touch_cap|vwap|z1|passive|anchor": 0.001056330128594577,
+   "attention|touch_cap|vwap|z1|passive|half": -0.015648864647499153,
+   "attention|touch_cap|vwap|z1.5|marketable|anchor": 0.03444251887980191,
+   "attention|touch_cap|vwap|z1.5|marketable|half": 0.04361359585556565,
+   "attention|touch_cap|vwap|z1.5|passive|anchor": 0.012470320329870721,
+   "attention|touch_cap|vwap|z1.5|passive|half": 0.018799449013606837,
+   "attention|touch_cap|vwap|z2.5|marketable|anchor": 0.01937783865148617,
+   "attention|touch_cap|vwap|z2.5|marketable|half": 0.006003875218618177,
+   "attention|touch_cap|vwap|z2.5|passive|anchor": -0.013921270966228019,
+   "attention|touch_cap|vwap|z2.5|passive|half": -0.022482361924575082,
+   "attention|touch_cap|open|z0.5|marketable|anchor": -0.0925591929444829,
+   "attention|touch_cap|open|z0.5|marketable|half": -0.13311548691681585,
+   "attention|touch_cap|open|z0.5|passive|anchor": -0.10691884980738968,
+   "attention|touch_cap|open|z0.5|passive|half": -0.1405680544448394,
+   "attention|touch_cap|open|z1|marketable|anchor": -0.03265047497748903,
+   "attention|touch_cap|open|z1|marketable|half": -0.04104693825452896,
+   "attention|touch_cap|open|z1|passive|anchor": -0.05020320285360316,
+   "attention|touch_cap|open|z1|passive|half": -0.057604380004210635,
+   "attention|touch_cap|open|z1.5|marketable|anchor": 0.00909908361545403,
+   "attention|touch_cap|open|z1.5|marketable|half": 0.014970951000589533,
+   "attention|touch_cap|open|z1.5|passive|anchor": -0.016344009850173716,
+   "attention|touch_cap|open|z1.5|passive|half": -0.009310792232859062,
+   "attention|touch_cap|open|z2.5|marketable|anchor": 0.05751553330902998,
+   "attention|touch_cap|open|z2.5|marketable|half": 0.05568052915508396,
+   "attention|touch_cap|open|z2.5|passive|anchor": 0.039776990306079035,
+   "attention|touch_cap|open|z2.5|passive|half": 0.04005561588336551
+  },
+  "regime_promoted": false,
+  "n_eligible_trials": 28,
+  "activity_floor": {
+   "min_trades": 50,
+   "min_active_session_frac": 0.1
+  },
+  "trial_activity": {
+   "attention|touch_cap|vwap|z0.5|marketable|anchor": {
+    "n_trades": 10156,
+    "active_frac": 0.9748
+   },
+   "attention|touch_cap|vwap|z0.5|marketable|half": {
+    "n_trades": 10156,
+    "active_frac": 0.9748
+   },
+   "attention|touch_cap|vwap|z0.5|passive|anchor": {
+    "n_trades": 8737,
+    "active_frac": 0.9513
+   },
+   "attention|touch_cap|vwap|z0.5|passive|half": {
+    "n_trades": 8737,
+    "active_frac": 0.9513
+   },
+   "attention|touch_cap|vwap|z1|marketable|anchor": {
+    "n_trades": 1521,
+    "active_frac": 0.5219
+   },
+   "attention|touch_cap|vwap|z1|marketable|half": {
+    "n_trades": 1521,
+    "active_frac": 0.5219
+   },
+   "attention|touch_cap|vwap|z1|passive|anchor": {
+    "n_trades": 1261,
+    "active_frac": 0.4724
+   },
+   "attention|touch_cap|vwap|z1|passive|half": {
+    "n_trades": 1261,
+    "active_frac": 0.4724
+   },
+   "attention|touch_cap|vwap|z1.5|marketable|anchor": {
+    "n_trades": 315,
+    "active_frac": 0.1769
+   },
+   "attention|touch_cap|vwap|z1.5|marketable|half": {
+    "n_trades": 315,
+    "active_frac": 0.1769
+   },
+   "attention|touch_cap|vwap|z1.5|passive|anchor": {
+    "n_trades": 269,
+    "active_frac": 0.1583
+   },
+   "attention|touch_cap|vwap|z1.5|passive|half": {
+    "n_trades": 269,
+    "active_frac": 0.1583
+   },
+   "attention|touch_cap|vwap|z2.5|marketable|anchor": {
+    "n_trades": 49,
+    "active_frac": 0.0373
+   },
+   "attention|touch_cap|vwap|z2.5|marketable|half": {
+    "n_trades": 49,
+    "active_frac": 0.0373
+   },
+   "attention|touch_cap|vwap|z2.5|passive|anchor": {
+    "n_trades": 41,
+    "active_frac": 0.0325
+   },
+   "attention|touch_cap|vwap|z2.5|passive|half": {
+    "n_trades": 41,
+    "active_frac": 0.0325
+   },
+   "attention|touch_cap|open|z0.5|marketable|anchor": {
+    "n_trades": 14442,
+    "active_frac": 0.9992
+   },
+   "attention|touch_cap|open|z0.5|marketable|half": {
+    "n_trades": 14442,
+    "active_frac": 0.9992
+   },
+   "attention|touch_cap|open|z0.5|passive|anchor": {
+    "n_trades": 13284,
+    "active_frac": 0.9959
+   },
+   "attention|touch_cap|open|z0.5|passive|half": {
+    "n_trades": 13284,
+    "active_frac": 0.9959
+   },
+   "attention|touch_cap|open|z1|marketable|anchor": {
+    "n_trades": 7355,
+    "active_frac": 0.9375
+   },
+   "attention|touch_cap|open|z1|marketable|half": {
+    "n_trades": 7355,
+    "active_frac": 0.9375
+   },
+   "attention|touch_cap|open|z1|passive|anchor": {
+    "n_trades": 6240,
+    "active_frac": 0.9091
+   },
+   "attention|touch_cap|open|z1|passive|half": {
+    "n_trades": 6240,
+    "active_frac": 0.9091
+   },
+   "attention|touch_cap|open|z1.5|marketable|anchor": {
+    "n_trades": 2912,
+    "active_frac": 0.7013
+   },
+   "attention|touch_cap|open|z1.5|marketable|half": {
+    "n_trades": 2912,
+    "active_frac": 0.7013
+   },
+   "attention|touch_cap|open|z1.5|passive|anchor": {
+    "n_trades": 2439,
+    "active_frac": 0.655
+   },
+   "attention|touch_cap|open|z1.5|passive|half": {
+    "n_trades": 2439,
+    "active_frac": 0.655
+   },
+   "attention|touch_cap|open|z2.5|marketable|anchor": {
+    "n_trades": 551,
+    "active_frac": 0.2752
+   },
+   "attention|touch_cap|open|z2.5|marketable|half": {
+    "n_trades": 551,
+    "active_frac": 0.2752
+   },
+   "attention|touch_cap|open|z2.5|passive|anchor": {
+    "n_trades": 469,
+    "active_frac": 0.2419
+   },
+   "attention|touch_cap|open|z2.5|passive|half": {
+    "n_trades": 469,
+    "active_frac": 0.2419
+   }
+  }
+ },
+ "regime_breakdown": {
+  "effective_threshold": 0.8573749999999999,
+  "per_regime": {
+   "0": {
+    "dsr": 0.8485,
+    "sr_period": 0.0947,
+    "n_obs": 342
+   },
+   "1": {
+    "dsr": 0.3875,
+    "sr_period": 0.0526,
+    "n_obs": 536
+   },
+   "2": {
+    "dsr": 0.4634,
+    "sr_period": 0.0558,
+    "n_obs": 354
+   }
+  }
+ },
+ "window": {
+  "start": "2021-09-01",
+  "end": "2026-07-31",
+  "equity": 100000.0,
+  "seed": 0
+ },
+ "cost_model": {
+  "measured_spread_coverage": 0.9443,
+  "quote_vault_cells": 108765,
+  "max_touch_participation": 1.0,
+  "cs_fallback_allowed": true
+ }
+}
