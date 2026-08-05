@@ -1,14 +1,34 @@
 """The honest gauntlet on SESSION returns: same gates, intraday axis.
 
 One return per session per combo is the native shape the daily gauntlet
-already consumes — deflated DSR with N_eff over the 12-combo family (all
-per-period units; nothing annualized except display), PBO via CSCV, the
-family-wise per-regime HMM gate decoded on the DAILY market series (bar
-T^K = 0.95^3), and the ORB analog of the permutation null: a TIMING null
-that re-runs the same picks with random entry minutes and identical
-range-derived exits/costs, recorded in the standard ``synthetic_sharpe``
-slot with its verbatim <=0 veto. No CPCV path gate: there is no trained
-model and no OOS-probability path axis in a rule-based book (disclosed).
+already consumes — deflated DSR with N_eff over the combo family (all
+per-period units; nothing annualized except display), PBO via CSCV, PSR,
+the Harvey-Liu multiple-testing HAIRCUT, White's REALITY CHECK over the
+whole trial matrix, the family-wise per-regime HMM gate decoded on the
+DAILY market series (bar T^K = 0.95^3), and the ORB analog of the
+permutation null: a TIMING null that re-runs the same picks with random
+entry minutes and identical range-derived exits/costs, recorded in the
+standard ``synthetic_sharpe`` slot with its verbatim <=0 veto.
+
+Two deliberate divergences from the daily stack, both disclosed:
+
+* **No CPCV path gate.** It needs per-fold OOS probability paths from a
+  trained model; a rule-based book has neither a model nor probabilities,
+  so there is nothing to reconstruct paths from. Left None rather than
+  faked.
+* **Reality Check is always COMPUTED here** (it is cheap on a
+  sessions x trials matrix and its absence was a real reporting gap),
+  while the daily stack computes it only when enabled. Gating still
+  honours ``reality_check_gate_enabled`` exactly as the daily stack does,
+  so this changes what is recorded, never what is promoted.
+
+The haircut prices ``len(trials) + intraday.prior_trials_searched``. The
+second term exists because each run deflates only its OWN trials, while a
+champion is the product of a search spanning runs: touch_cap was chosen in
+v3, z2.5 in v3's sweep, top-50 in v4, the attention scanner in v5/v6.
+Leaving it at 0 understates the real search — v7 priced 32 trials against
+776 actually searched — so it is an explicit, recorded number rather than
+a silent default.
 """
 
 from __future__ import annotations
@@ -17,8 +37,10 @@ import numpy as np
 import polars as pl
 
 from new_pipeline.evaluation.dsr import deflated_sharpe_report, effective_number_of_trials
+from new_pipeline.evaluation.haircut import haircut_sharpe_ratio
 from new_pipeline.evaluation.pbo import evaluate_cscv
 from new_pipeline.evaluation.promotion import PromotionRegistry, assess_promotion
+from new_pipeline.evaluation.reality_check import whites_reality_check
 from new_pipeline.evaluation.regime_dsr import QuantitativeEvaluator, ThinRegimePolicy
 from new_pipeline.intraday.simulate import run_session
 
@@ -121,6 +143,20 @@ def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataF
         champion_sharpe=float(per_combo_sr[champ_idx]),
         sizing=champion.sizing)
 
+    # Harvey-Liu haircut: what survives once the champion is discounted for
+    # having been the best of the search. sr_annual matches the daily stack's
+    # convention (it passes an annualized Sharpe with periods_per_year=252).
+    # prior_trials_searched prices the axes fixed by EARLIER runs, which this
+    # run's own trial count cannot see.
+    priced_trials = len(trials) + max(int(getattr(icfg, "prior_trials_searched", 0)), 0)
+    haircut = haircut_sharpe_ratio(
+        report.sr_annual, len(days), priced_trials, cfg.evaluation.mt_method)
+    # White's Reality Check over the FULL trial matrix: is the best column's
+    # edge real, or the luckiest draw from the search? Always computed here.
+    reality_p = float(whites_reality_check(
+        matrix, cfg.evaluation.reality_check_bootstrap,
+        cfg.evaluation.reality_check_block, seed=seed))
+
     mkt_rets, mkt_vol = market_series(daily, days)
     evaluator = QuantitativeEvaluator(
         cfg.evaluation.dsr_promotion_threshold, cfg.evaluation.hmm_states,
@@ -159,6 +195,13 @@ def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataF
         "trial_sharpes": {t.key: float(s)
                           for t, s in zip(trials, per_combo_sr, strict=True)},
         "regime_promoted": bool(verdict.promoted),
+        "haircut_sharpe": haircut.adjusted_sharpe,
+        "haircut_fraction": haircut.haircut_fraction,
+        "haircut_adjusted_pvalue": haircut.adjusted_pvalue,
+        "haircut_observed_tstat": haircut.observed_tstat,
+        "reality_check_pvalue": reality_p,
+        "trials_priced_for_haircut": priced_trials,
+        "prior_trials_searched": priced_trials - len(trials),
         "n_eligible_trials": len(eligible),
         "activity_floor": {"min_trades": icfg.min_trades,
                            "min_active_session_frac": icfg.min_active_session_frac},
@@ -174,7 +217,10 @@ def evaluate_orb(matrix: np.ndarray, days: list, trials, ledger, daily: pl.DataF
         pbo=cscv.pbo,
         pbo_threshold=cfg.evaluation.pbo_threshold,
         psr=report.psr_vs_zero,
-        haircut_sharpe=None,
+        haircut_sharpe=haircut.adjusted_sharpe,
+        reality_check_pvalue=reality_p,
+        reality_check_gate_enabled=cfg.evaluation.reality_check_gate_enabled,
+        reality_check_threshold=cfg.evaluation.reality_check_threshold,
         n_trades=len(champ_trades),
         n_obs=len(days),
     )

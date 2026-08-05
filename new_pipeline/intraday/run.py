@@ -161,6 +161,7 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
         "best_params": {"trial": result["champion"].key,
                         "scanner_variant": result["champion"].variant,
                         "scanner_variants_priced": cfg.intraday.scanner_variants,
+                        "prior_trials_searched": cfg.intraday.prior_trials_searched,
                         **{f: getattr(cfg.intraday, f) for f in
                            ("entry_buffer_bps", "risk_bps", "max_position_pct",
                             "max_concurrent", "flatten_buffer_min", "spread_floor_bps",

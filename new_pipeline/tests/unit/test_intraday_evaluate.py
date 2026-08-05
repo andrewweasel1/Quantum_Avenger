@@ -254,3 +254,90 @@ def test_activity_floor_blocks_a_thin_trial_from_being_champion():
 
 def _sr(a):
     return float(a.mean() / a.std(ddof=1))
+
+
+def _gauntlet_fixture(n_sessions=120):
+    """Shared setup for the multiple-testing gates: a small trial matrix with a
+    clearly-best column, plus enough ledger activity to clear the floor."""
+    from new_pipeline.intraday.orb import Trial
+    from new_pipeline.intraday.simulate import Trade
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.min_trades = 10
+    cfg.intraday.min_active_session_frac = 0.10
+    cfg.evaluation.min_regime_obs = 10
+    cfg.long_short.null_iterations = 2
+    cfg.evaluation.reality_check_bootstrap = 40
+    sessions = _sessions(n_sessions)
+    days = sorted(sessions)
+    minutes_by_day = {d: _session_minutes(d, "AAA", 0.05) for d in sessions}
+    daily = _daily_from(minutes_by_day)
+    picks = {d: ["AAA"] for d in sessions}
+    stats = pl.DataFrame({"date": days, "ticker": ["AAA"] * len(days),
+                          "spread_bps": [30.0] * len(days),
+                          "vol_minute": [0.0] * len(days),
+                          "atr_pct": [0.02] * len(days)})
+    trials = [Trial("a", Combo(5, "or_low", 0.0), "uncapped"),
+              Trial("b", Combo(15, "or_low", 0.0), "uncapped")]
+    rng = np.random.default_rng(0)
+    matrix = np.column_stack([rng.normal(0.0012, 0.004, len(days)),
+                              rng.normal(-0.0002, 0.004, len(days))])
+    ledger = [Trade(days[i], "AAA", t.key, None, None, 10.0, 10.2, 10,
+                    "target", 2.0, 0.1, 1.9)
+              for t in trials for i in range(len(days))]
+    return (cfg, matrix, days, trials, ledger, daily, minutes_by_day, sessions,
+            {"a": picks, "b": picks}, stats)
+
+
+def test_haircut_and_reality_check_are_computed_and_recorded():
+    """Both were silently absent (haircut hardcoded None, RC never called), so
+    intraday runs reported a gauntlet they were not actually running."""
+    cfg, matrix, days, trials, ledger, daily, mins, sess, picks, stats = _gauntlet_fixture()
+    r = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks, stats,
+                     cfg, equity=100_000.0, seed=0)
+    d = r["diagnostics"]
+    assert d["haircut_sharpe"] is not None and d["haircut_sharpe"] >= 0.0
+    assert 0.0 <= d["haircut_fraction"] <= 1.0
+    assert 0.0 < d["reality_check_pvalue"] <= 1.0
+    # the haircut can only discount, never inflate
+    assert d["haircut_sharpe"] <= max(d["sr_annual_display"], 0.0) + 1e-9
+    # and both reach the registry row rather than staying in diagnostics
+    assert r["decision"].haircut_sharpe == d["haircut_sharpe"]
+
+
+def test_prior_trials_searched_deepens_the_haircut():
+    """A run deflates only its OWN trials, but the champion inherits axes fixed
+    by earlier runs. Declaring that prior search must discount MORE, never less
+    — v7 priced 32 trials against 776 actually searched."""
+    cfg, matrix, days, trials, ledger, daily, mins, sess, picks, stats = _gauntlet_fixture()
+    cfg.intraday.prior_trials_searched = 0
+    base_r = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks,
+                          stats, cfg, equity=100_000.0, seed=0)["diagnostics"]
+    cfg.intraday.prior_trials_searched = 744
+    deep = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks,
+                        stats, cfg, equity=100_000.0, seed=0)["diagnostics"]
+    assert base_r["trials_priced_for_haircut"] == len(trials)
+    assert deep["trials_priced_for_haircut"] == len(trials) + 744
+    assert deep["prior_trials_searched"] == 744
+    assert deep["haircut_sharpe"] < base_r["haircut_sharpe"]
+    assert deep["haircut_fraction"] > base_r["haircut_fraction"]
+    # the underlying observed t-stat is a property of the returns, not the search
+    assert deep["haircut_observed_tstat"] == base_r["haircut_observed_tstat"]
+
+
+def test_reality_check_gates_only_when_enabled():
+    """RC is always COMPUTED for intraday (its absence was a reporting gap) but
+    gating stays opt-in, exactly as in the daily stack: recording a number must
+    not silently change what gets promoted."""
+    cfg, matrix, days, trials, ledger, daily, mins, sess, picks, stats = _gauntlet_fixture()
+    cfg.evaluation.reality_check_gate_enabled = False
+    off = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks,
+                       stats, cfg, equity=100_000.0, seed=0)
+    assert off["diagnostics"]["reality_check_pvalue"] > 0.0
+    cfg.evaluation.reality_check_gate_enabled = True
+    cfg.evaluation.reality_check_threshold = 0.0  # nothing can clear this
+    on = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks,
+                      stats, cfg, equity=100_000.0, seed=0)
+    assert on["decision"].promoted is False
+    assert on["diagnostics"]["reality_check_pvalue"] == off["diagnostics"]["reality_check_pvalue"]

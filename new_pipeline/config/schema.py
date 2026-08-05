@@ -360,6 +360,14 @@ class IntradayConfig(BaseModel):
     # bought a 4x trial family and no champion. Re-add an entry only with
     # evidence, never to widen a search.
     scanner_variants: list[str] = Field(default_factory=lambda: ["attention"])
+    # Trials searched in EARLIER runs whose outcomes fixed this run's spec.
+    # A run's DSR/haircut deflate only that run's own trials, but the champion
+    # is the product of a search spanning runs — touch_cap was chosen in v3,
+    # z2.5 in v3's sweep, top-50 in v4, the attention scanner in v5/v6. v7
+    # priced 32 trials against 776 actually searched across the programme.
+    # Set this explicitly per run and record it; 0 means "this run is the whole
+    # search", which is true only of a genuinely first look at an axis.
+    prior_trials_searched: int = 0
     # ORB trial family (deflation-priced together; every axis value is a trial).
     range_minutes: list[int] = Field(default_factory=lambda: [5, 15, 30])
     stop_styles: list[str] = Field(default_factory=lambda: ["or_low", "or_mid"])
