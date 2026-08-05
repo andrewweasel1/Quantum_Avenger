@@ -114,3 +114,31 @@ gauntlet exists to prevent.
 - It does not say 2026 was fake. It says 87 trades in one partial year cannot
   distinguish a real regime-specific edge from luck, and the other 464 trades
   across five years say the base rate is roughly zero.
+
+## Addendum: the two gates that were missing
+
+The intraday evaluator had `haircut_sharpe=None` hardcoded and never called
+`whites_reality_check`, so every intraday registry row to date carried null for
+two gates the daily stack runs. Both are now wired. Scored against v7:
+
+| gate | value | verdict |
+|---|---|---|
+| observed t-stat | 2.019 | — |
+| haircut SR, 32 trials (this run) | **0.0000** (100% discount) | fails |
+| haircut SR, 776 trials (programme) | **0.0000** (100% discount) | fails |
+| White's Reality Check p | **0.6248** | fails (needs < 0.05) |
+
+Two things worth recording:
+
+1. **The haircut is a total discount already at 32 trials.** A t-stat of 2.02
+   does not survive BHY adjustment for a 32-way search at all, so the
+   cross-run multiplicity (776 vs 32) never becomes the binding constraint —
+   the run fails on its own trial count. The `prior_trials_searched` knob
+   matters for future runs, not for rescuing or worsening this verdict.
+2. **Reality Check rejects harder than DSR did.** p = 0.6248 says the best of
+   32 columns is entirely consistent with the null that none beats zero. DSR
+   0.4349 said "not enough"; RC says "indistinguishable from luck". They agree
+   in direction, and RC is the blunter statement.
+
+These gates would have caught this result independently of the sample-size
+work — which is the argument for having wired them before, not after.
