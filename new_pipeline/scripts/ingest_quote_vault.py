@@ -96,6 +96,13 @@ def main() -> None:
     parser.add_argument("--windows", type=int, default=4, help="sample windows per month")
     parser.add_argument("--window-seconds", type=int, default=10)
     parser.add_argument("--sleep", type=float, default=0.15)
+    parser.add_argument("--min-symbols", type=int, default=-1,
+                        help="abort rather than write a month yielding fewer than "
+                             "this many symbols (-1 = auto: 25%% of requested, "
+                             "only when >50 requested). Guards the silent failure "
+                             "mode where a network outage makes every batch fail, "
+                             "writes a thin/empty cell, and skip-if-exists then "
+                             "never refetches it.")
     args = parser.parse_args()
 
     cfg = get_config()
@@ -113,7 +120,10 @@ def main() -> None:
     sy, sm = map(int, args.start.split("-"))
     ey, em = map(int, args.end.split("-"))
     months = months_between(date(sy, sm, 1), date(ey, em, 1))
-    print(f"quote vault: {len(symbols)} symbols, {len(months)} months -> {vault}")
+    floor = (args.min_symbols if args.min_symbols >= 0
+             else (len(symbols) // 4 if len(symbols) > 50 else 0))
+    print(f"quote vault: {len(symbols)} symbols, {len(months)} months -> {vault} "
+          f"(min-symbols floor {floor})")
 
     for idx, (year, month) in enumerate(months, 1):
         out = cell_file(vault, year, month)
@@ -122,6 +132,14 @@ def main() -> None:
             continue
         frame = build_month(client, symbols, year, month, sessions,
                             args.window_seconds, args.windows, args.sleep)
+        # A cell is written ONCE and skipped forever after, so a month thinned by
+        # an outage would silently price that month's costs off a handful of
+        # names. Abort instead: resume refetches it.
+        if frame.height < floor:
+            raise SystemExit(
+                f"{year}-{month:02d}: only {frame.height} symbols (floor {floor}) — "
+                "refusing to write a degraded cell. Check connectivity and re-run; "
+                "completed months are cached and will be skipped.")
         out.parent.mkdir(parents=True, exist_ok=True)
         (frame if not frame.is_empty() else pl.DataFrame(schema={
             "symbol": pl.Utf8, "year": pl.Int64, "month": pl.Int64,
