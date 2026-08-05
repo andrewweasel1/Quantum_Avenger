@@ -18,6 +18,16 @@ like a paper key (``PK…``) and always constructs the broker with
         --key "Universe Long Short" --all-sectors
     # then daily (cron ~30 min before the close):
     python -m new_pipeline.scripts.paper_trade_book --execute
+
+RUNTIME: ~14 minutes end to end (measured 2026-08-05: 13m52s), almost all of
+it in ``build_training_frame`` over the 420-day lookback for ~2,000 tickers.
+Orders are submitted only AFTER that frame is built, so START BY 15:30 ET at
+the latest for a 16:00 close, and run it detached — a 10-minute foreground
+timeout kills it mid-frame, before it writes state or submits anything (that
+failure is clean, but it costs the session's window).
+
+Do NOT shorten --lookback-days to make it fit: under 252 trading days the
+momentum/seasonality features starve and the scored universe collapses.
 """
 
 import argparse
