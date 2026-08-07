@@ -99,6 +99,16 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
     # long_short.build_long_short_book.
     unit_held = dict(state.get("unit_held", {}))
     unit_returns = list(state.get("unit_returns", []))
+    if not unit_held and state.get("held"):
+        # Migration: a state file written before the shadow book existed has
+        # `held` but no `unit_held`. Without this the shadow book stays empty
+        # until the next rebalance and every hold day until then appends a
+        # spurious 0.0, understating trailing vol exactly when the estimator
+        # is filling. Renormalizing `held` to unit gross recovers the unscaled
+        # book whatever scalar was in force when it was written.
+        gross = sum(abs(w) for w in state["held"].values())
+        if gross > 0:
+            unit_held = {t: w / gross for t, w in state["held"].items()}
     if name_returns:
         for name in [t for t in unit_held if t not in name_returns]:
             unit_held.pop(name)

@@ -5,6 +5,7 @@ import json
 
 import numpy as np
 import polars as pl
+import pytest
 from new_pipeline.evaluation.promotion import PromotionRegistry
 from new_pipeline.scripts.paper_trade_book import compute_targets, diff_orders
 from new_pipeline.scripts.promote_candidates import manual_promote
@@ -282,3 +283,38 @@ def test_unit_returns_history_is_bounded():
     _, out = compute_targets(panel, params, state, mkt, 252,
                              name_returns={t: 0.0 for t in names})
     assert len(out["unit_returns"]) == _UNIT_RETURN_HISTORY
+
+
+def test_shadow_book_migrates_from_a_pre_fix_state_file():
+    """A state file written before the shadow book existed carries `held` but
+    no `unit_held`. Without a migration the shadow book stays empty until the
+    next rebalance and every hold day until then appends a spurious 0.0 —
+    understating trailing vol exactly while the estimator is filling."""
+    from datetime import date
+    days = [date(2021, 1, 4), date(2021, 1, 5)]
+    names = [f"T{i}" for i in range(8)]
+    panel = _panel(days, names, [[8, 7, 6, 5, 4, 3, 2, 1]] * 2)
+    mkt = {d: 0.001 for d in days}
+    params = {"quantile": 0.25, "rebalance_days": 5, "min_names_per_day": 4,
+              "score_smoothing_days": 1, "vol_target_annual": 0.05,
+              "vol_lookback_days": 3}
+    legacy = {"held": {"T0": 0.25, "T1": 0.25, "T6": -0.25, "T7": -0.25},
+              "prev_longs": ["T0", "T1"], "prev_shorts": ["T6", "T7"],
+              "last_rebalance_date": str(days[0])}
+    # longs up, shorts down: a dollar-neutral book earns exactly zero on
+    # UNIFORM returns, so the returns must differ for this to test anything.
+    rets = {t: 0.0 for t in names}
+    rets.update({"T0": 0.03, "T1": 0.03, "T6": -0.01, "T7": -0.01})
+    _, state = compute_targets(panel, params, legacy, mkt, 252, name_returns=rets)
+    assert set(state["unit_held"]) == set(legacy["held"])
+    assert abs(sum(abs(w) for w in state["unit_held"].values()) - 1.0) < 1e-12
+    # the first appended return is the REAL book's, not a zero from an empty one
+    assert state["unit_returns"] == [pytest.approx(0.02)]
+
+    # a genuinely flat book has nothing to migrate, so it appends a TRUE zero
+    # before the rebalance seats a fresh shadow book (no last_rebalance_date
+    # means this call rebalances).
+    _, flat = compute_targets(panel, params, {"held": {}}, mkt, 252,
+                              name_returns=rets)
+    assert flat["unit_returns"] == [0.0]
+    assert abs(sum(abs(w) for w in flat["unit_held"].values()) - 1.0) < 1e-12
