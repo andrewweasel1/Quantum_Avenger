@@ -197,3 +197,88 @@ def test_diff_orders_side_flip_closes_then_opens():
         {"symbol": "FLIP", "qty": 3, "side": "buy", "tif": "day", "flip": "close"},
         {"symbol": "FLIP", "qty": 3.0, "side": "buy", "tif": "day", "flip": "open"},
     ]
+
+
+def test_reducing_orders_never_exceed_the_held_quantity():
+    """31 of 38 skips on the 2026-08-07 rebalance were the broker rejecting
+    'insufficient qty available': a 1.732-share holding int-rounds UP to 2, the
+    order is refused, and because the refusal is only logged the position
+    silently survives the rebalance. A reduction can only ever sell what is
+    there."""
+    prices = {"AAA": 100.0, "BBB": 100.0, "CCC": 100.0}
+    # full exit of a fractional long on a NON-fractionable symbol
+    orders = diff_orders({}, {"AAA": 1.732}, prices, capital=10_000, fractionable=set())
+    aaa = [o for o in orders if o["symbol"] == "AAA"]
+    assert aaa and aaa[0]["side"] == "sell"
+    assert aaa[0]["qty"] == 1.732        # exact holding, never 2
+    # full exit of a fractional SHORT buys back exactly what is owed
+    orders = diff_orders({}, {"BBB": -2.4}, prices, capital=10_000, fractionable=set())
+    bbb = [o for o in orders if o["symbol"] == "BBB"]
+    assert bbb and bbb[0]["side"] == "buy" and bbb[0]["qty"] == 2.4
+    # partial reduction stays within the holding
+    orders = diff_orders({"CCC": 0.005}, {"CCC": 1.2}, prices, capital=10_000,
+                         fractionable=set())
+    ccc = [o for o in orders if o["symbol"] == "CCC"]
+    if ccc:
+        assert ccc[0]["qty"] <= 1.2
+    # a position-INCREASING order is untouched by the clamp
+    grow = diff_orders({"AAA": 0.05}, {"AAA": 1.0}, prices, capital=10_000,
+                       fractionable={"AAA"})
+    a = [o for o in grow if o["symbol"] == "AAA"]
+    assert a and a[0]["side"] == "buy" and a[0]["qty"] == 4.0
+
+
+def test_unit_returns_accumulate_every_session_and_drive_the_vol_target():
+    """vol_target_annual was silently inert live: unit_returns was read but
+    never written, so it stayed [] forever and the book ran UNSCALED while the
+    backtest scaled to 5% annualized. The shadow book must advance on hold days
+    too, or the estimator never fills."""
+    from datetime import date, timedelta
+    days = [date(2021, 1, 4) + timedelta(days=i) for i in range(6)]
+    names = [f"T{i}" for i in range(8)]
+    panel = _panel(days, names, [[8, 7, 6, 5, 4, 3, 2, 1]] * len(days))
+    mkt = {d: 0.001 for d in days}
+    params = {"quantile": 0.25, "rebalance_days": 5, "min_names_per_day": 4,
+              "score_smoothing_days": 1, "vol_target_annual": 0.05,
+              "vol_lookback_days": 3}
+    rets = {t: 0.01 for t in names}
+
+    # day 1 rebalances and seats the unscaled shadow book
+    _, state = compute_targets(panel, params, {}, mkt, 252, name_returns=rets)
+    assert state["unit_held"]
+    assert abs(sum(abs(w) for w in state["unit_held"].values()) - 1.0) < 1e-12
+    first = len(state["unit_returns"])
+
+    # subsequent HOLD days still append — this is what was broken
+    for _ in range(3):
+        _, state = compute_targets(panel, params, state, mkt, 252, name_returns=rets)
+    assert len(state["unit_returns"]) == first + 3
+
+    # with a filled estimator and high trailing vol the book DE-RISKS
+    noisy = {**state, "last_rebalance_date": None,
+             "unit_returns": [0.05, -0.05, 0.05, -0.05, 0.05]}
+    scaled, _ = compute_targets(panel, params, noisy, mkt, 252, name_returns=rets)
+    gross = sum(abs(w) for w in scaled.values())
+    assert gross < 1.0, f"vol target should shrink gross, got {gross}"
+
+    # and never LEVERS above unit gross when trailing vol is tiny
+    calm = {**state, "last_rebalance_date": None,
+            "unit_returns": [1e-6, -1e-6, 1e-6, -1e-6, 1e-6]}
+    unlevered, _ = compute_targets(panel, params, calm, mkt, 252, name_returns=rets)
+    assert abs(sum(abs(w) for w in unlevered.values()) - 1.0) < 1e-9
+
+
+def test_unit_returns_history_is_bounded():
+    from datetime import date
+
+    from new_pipeline.scripts.paper_trade_book import _UNIT_RETURN_HISTORY
+    days = [date(2021, 1, 4), date(2021, 1, 5)]
+    names = [f"T{i}" for i in range(8)]
+    panel = _panel(days, names, [[8, 7, 6, 5, 4, 3, 2, 1]] * 2)
+    mkt = {d: 0.001 for d in days}
+    params = {"quantile": 0.25, "rebalance_days": 1, "min_names_per_day": 4,
+              "score_smoothing_days": 1}
+    state = {"unit_returns": [0.0] * (_UNIT_RETURN_HISTORY + 50), "unit_held": {}}
+    _, out = compute_targets(panel, params, state, mkt, 252,
+                             name_returns={t: 0.0 for t in names})
+    assert len(out["unit_returns"]) == _UNIT_RETURN_HISTORY

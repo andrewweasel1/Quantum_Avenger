@@ -51,17 +51,34 @@ from new_pipeline.tournament.trainer import load_booster, predict_proba
 
 _logger = logging.getLogger(__name__)
 
+# Unit-return history retained in the state file: enough for the vol
+# lookback many times over, bounded so the file cannot grow forever.
+_UNIT_RETURN_HISTORY = 260
+
 
 def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
-                    market_by_date: dict, causal_span: int | None = 252) -> tuple[dict, dict]:
+                    market_by_date: dict, causal_span: int | None = 252,
+                    name_returns: dict | None = None) -> tuple[dict, dict]:
     """Target weights for the LAST date in ``panel`` under the champion
     mechanics, plus the evolved state file content.
 
     ``panel``: (date, ticker, sector, score, next-day scoring rows may carry
     null next_ret — realization is not needed to WEIGH). ``state`` carries
-    ``held`` weights, ``unit_returns`` (trailing unit-book realized returns for
-    the causal vol target), ``prev_longs``/``prev_shorts`` (band hysteresis)
-    and ``last_rebalance_date``. Pure function — no I/O, no broker."""
+    ``held`` weights, ``unit_held`` (the UNSCALED shadow book), ``unit_returns``
+    (trailing unit-book realized returns for the causal vol target),
+    ``prev_longs``/``prev_shorts`` (band hysteresis) and
+    ``last_rebalance_date``. Pure function — no I/O, no broker.
+
+    ``name_returns`` maps ticker -> the return just realized over the most
+    recent completed session. It advances the unscaled shadow book, which is
+    what the vol target measures. The backtest appends a unit return on EVERY
+    day using the forward ``next_ret`` of the book it just set; live we cannot
+    see forward, so the causal translation is to append the return the
+    PREVIOUS book just earned, before re-targeting. Same series, shifted one
+    period — and it must happen on hold days too, or the estimator never
+    fills and ``vol_target_annual`` is silently inert (it was: unit_returns
+    stayed [] indefinitely, so the live book ran unscaled while the backtest
+    scaled to 5% annualized)."""
     quantile = params["quantile"]
     band = params.get("rebalance_band", 0.0)
     calm_band = params.get("calm_rebalance_band")
@@ -75,6 +92,20 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
     panel = sector_neutral_scores(panel.drop_nulls(["score"]))
     day = panel.filter(pl.col("date") == panel["date"].max())
     today = day["date"][0]
+
+    # Advance the unscaled shadow book BEFORE deciding today's action, so the
+    # vol estimator gets one observation per session rather than one per
+    # rebalance. Names with no return today are forced exits, mirroring
+    # long_short.build_long_short_book.
+    unit_held = dict(state.get("unit_held", {}))
+    unit_returns = list(state.get("unit_returns", []))
+    if name_returns:
+        for name in [t for t in unit_held if t not in name_returns]:
+            unit_held.pop(name)
+        unit_returns.append(
+            float(sum(w * name_returns[t] for t, w in unit_held.items())))
+        unit_returns = unit_returns[-_UNIT_RETURN_HISTORY:]
+    state = {**state, "unit_held": unit_held, "unit_returns": unit_returns}
 
     all_days = sorted(market_by_date)
     states = causal_states_from_series(
@@ -96,8 +127,8 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
     n = day.height
     if n < min_names:
         _logger.warning("thin day (%d names < %d) -> flat", n, min_names)
-        new_state = {**state, "held": {}, "prev_longs": [], "prev_shorts": [],
-                     "last_rebalance_date": str(today)}
+        new_state = {**state, "held": {}, "unit_held": {}, "prev_longs": [],
+                     "prev_shorts": [], "last_rebalance_date": str(today)}
         return {}, new_state
 
     ranked = day.sort("score", descending=True)["ticker"].to_list()
@@ -112,16 +143,18 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
         longs, shorts = ranked[:k], ranked[n - k:]
 
     scalar = 1.0
-    unit_returns = state.get("unit_returns", [])
     if vol_target > 0.0 and len(unit_returns) >= vol_lookback:
         trailing = float(np.std(unit_returns[-vol_lookback:], ddof=1)) * np.sqrt(252.0)
         if trailing > 0.0:
             scalar = min(1.0, vol_target / trailing)
 
-    weights = {t: scalar / (2 * k) for t in longs}
+    base = {t: 1.0 / (2 * k) for t in longs}
     for t in shorts:
-        weights[t] = weights.get(t, 0.0) - scalar / (2 * k)
-    new_state = {**state, "held": weights, "prev_longs": longs, "prev_shorts": shorts,
+        base[t] = base.get(t, 0.0) - 1.0 / (2 * k)
+    weights = {t: w * scalar for t, w in base.items()}
+    # unit_held is the shadow book at scalar 1: what the vol target measures.
+    new_state = {**state, "held": weights, "unit_held": base,
+                 "prev_longs": longs, "prev_shorts": shorts,
                  "last_rebalance_date": str(today)}
     return weights, new_state
 
@@ -174,6 +207,18 @@ def diff_orders(targets: dict, positions: dict, prices: dict, capital: float,
         # rounds to zero shares is unfillable dust — suppress, don't submit.
         frac_ok = can_fraction and held >= 0
         qty = round(abs(delta), 3) if frac_ok else int(round(abs(delta)))
+        # A REDUCING order can never ask for more than the position holds.
+        # int-rounding a fractional 1.732-share holding UP to 2 is rejected
+        # outright ("insufficient qty available for order"), and because the
+        # rejection is only logged the position silently survives the
+        # rebalance — 31 of 38 skips on 2026-08-07 were exactly this. A full
+        # exit therefore sells the EXACT holding (closing a fractional
+        # position is always permitted, even on a non-fractionable symbol);
+        # a partial reduce is clamped to what is there.
+        reducing = held != 0.0 and (delta > 0.0) != (held > 0.0)
+        if reducing:
+            available = round(abs(held), 3)
+            qty = available if target_shares == 0 else min(qty, available)
         if qty <= 0:
             continue
         orders.append({"symbol": symbol, "qty": qty,
@@ -285,10 +330,23 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     if args.force_rebalance:
         _logger.warning("--force-rebalance: ignoring grid spacing, full re-target")
         state.pop("last_rebalance_date", None)
+    # Per-name return just realized over the most recent completed session:
+    # what advances the unscaled shadow book behind the vol target.
+    latest_date = frame["date"].max()
+    name_returns = dict(
+        frame.select("date", "ticker", "close").sort(["ticker", "date"])
+        .with_columns((pl.col("close") / pl.col("close").shift(1).over("ticker") - 1.0)
+                      .alias("ret"))
+        .filter(pl.col("date") == latest_date)
+        .drop_nulls("ret").select("ticker", "ret").iter_rows())
     targets, new_state = compute_targets(panel, params, state, market_by_date,
-                                         causal_span=params.get("causal_window_days", 252))
+                                         causal_span=params.get("causal_window_days", 252),
+                                         name_returns=name_returns)
+    _logger.info("shadow book: %d unit names, %d unit returns (vol target needs %d)",
+                 len(new_state.get("unit_held", {})), len(new_state.get("unit_returns", [])),
+                 params.get("vol_lookback_days", 20))
 
-    latest = frame.filter(pl.col("date") == frame["date"].max())
+    latest = frame.filter(pl.col("date") == latest_date)
     prices = dict(latest.select("ticker", "close").iter_rows())
     capital = args.capital or cfg.execution.account_capital
     broker = AlpacaBroker(os.environ["QA_ALPACA__API_KEY"],
