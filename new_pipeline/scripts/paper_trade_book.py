@@ -34,6 +34,7 @@ import argparse
 import json
 import logging
 import os
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -55,10 +56,45 @@ _logger = logging.getLogger(__name__)
 # lookback many times over, bounded so the file cannot grow forever.
 _UNIT_RETURN_HISTORY = 260
 
+# Calendar span of per-session returns handed to compute_targets so a gap
+# between runs can be caught up. Comfortably longer than any realistic
+# outage, and bounded so the frame scan stays cheap.
+_BACKFILL_WINDOW_DAYS = 120
+
+# A flip submits a close then an open on the SAME symbol. Alpaca reserves the
+# position against the pending close (held_for_orders == existing_qty), so an
+# open fired immediately behind it sees available: 0 and is rejected — 22 of
+# the 31 skips on the 2026-08-17 rebalance, every one of them a short leg that
+# failed to open, which biases a dollar-neutral book long. Wait for the close
+# to leave the pending states before releasing its open.
+_FLIP_FILL_TIMEOUT_S = 20.0
+_FLIP_POLL_S = 0.4
+_TERMINAL_ORDER_STATES = {"filled", "canceled", "cancelled", "expired", "rejected"}
+
+
+def await_close_fill(broker, order_id: str, timeout_s: float = _FLIP_FILL_TIMEOUT_S,
+                     poll_s: float = _FLIP_POLL_S, now=time.monotonic,
+                     sleep=time.sleep) -> str:
+    """Block until ``order_id`` reaches a terminal state; returns that state.
+
+    Returns "timeout" if it never settles — the caller must treat anything
+    other than "filled" as "the shares are still reserved", because releasing
+    the paired open then would simply be rejected again."""
+    if not order_id:
+        return "unknown"
+    deadline = now() + timeout_s
+    status = broker.order_status(order_id)
+    while status not in _TERMINAL_ORDER_STATES:
+        if now() >= deadline:
+            return "timeout"
+        sleep(poll_s)
+        status = broker.order_status(order_id)
+    return status
+
 
 def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
                     market_by_date: dict, causal_span: int | None = 252,
-                    name_returns: dict | None = None) -> tuple[dict, dict]:
+                    returns_by_date: dict | None = None) -> tuple[dict, dict]:
     """Target weights for the LAST date in ``panel`` under the champion
     mechanics, plus the evolved state file content.
 
@@ -69,16 +105,21 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
     ``prev_longs``/``prev_shorts`` (band hysteresis) and
     ``last_rebalance_date``. Pure function — no I/O, no broker.
 
-    ``name_returns`` maps ticker -> the return just realized over the most
-    recent completed session. It advances the unscaled shadow book, which is
-    what the vol target measures. The backtest appends a unit return on EVERY
-    day using the forward ``next_ret`` of the book it just set; live we cannot
-    see forward, so the causal translation is to append the return the
-    PREVIOUS book just earned, before re-targeting. Same series, shifted one
-    period — and it must happen on hold days too, or the estimator never
-    fills and ``vol_target_annual`` is silently inert (it was: unit_returns
-    stayed [] indefinitely, so the live book ran unscaled while the backtest
-    scaled to 5% annualized)."""
+    ``returns_by_date`` maps session date -> {ticker: realized return}. Every
+    session after ``last_return_date`` up to today is appended, one unit
+    observation each, which is what the vol target measures. The backtest
+    appends on EVERY day using the forward ``next_ret`` of the book it just
+    set; live we cannot see forward, so the causal translation appends what
+    the PREVIOUS book earned, before re-targeting — the same series shifted
+    one period.
+
+    Backfilling the gap is sound precisely because the book is STATIC between
+    runs: no trades happen unless this script runs, so the weights held on a
+    skipped session are the ones still in ``unit_held``. Without the backfill
+    the estimator advances once per RUN rather than once per session — on
+    2026-08-17 six sessions had elapsed and the series held two observations,
+    so a 20-observation lookback would have taken months of calendar time and
+    sampled the tape irregularly."""
     quantile = params["quantile"]
     band = params.get("rebalance_band", 0.0)
     calm_band = params.get("calm_rebalance_band")
@@ -109,13 +150,24 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
         gross = sum(abs(w) for w in state["held"].values())
         if gross > 0:
             unit_held = {t: w / gross for t, w in state["held"].items()}
-    if name_returns:
-        for name in [t for t in unit_held if t not in name_returns]:
-            unit_held.pop(name)
-        unit_returns.append(
-            float(sum(w * name_returns[t] for t, w in unit_held.items())))
+    last_ret_date = state.get("last_return_date")
+    if returns_by_date:
+        sessions = sorted(d for d in returns_by_date if str(d) <= str(today))
+        # No recorded cursor means no history to reconstruct: take only the
+        # latest session rather than inventing returns for a book whose
+        # holdings on those days are unknown.
+        pending = ([d for d in sessions if str(d) > str(last_ret_date)]
+                   if last_ret_date else sessions[-1:])
+        for session in pending:
+            rets = returns_by_date[session]
+            for name in [t for t in unit_held if t not in rets]:
+                unit_held.pop(name)
+            unit_returns.append(
+                float(sum(w * rets[t] for t, w in unit_held.items())))
+            last_ret_date = str(session)
         unit_returns = unit_returns[-_UNIT_RETURN_HISTORY:]
-    state = {**state, "unit_held": unit_held, "unit_returns": unit_returns}
+    state = {**state, "unit_held": unit_held, "unit_returns": unit_returns,
+             "last_return_date": last_ret_date}
 
     all_days = sorted(market_by_date)
     states = causal_states_from_series(
@@ -340,21 +392,26 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     if args.force_rebalance:
         _logger.warning("--force-rebalance: ignoring grid spacing, full re-target")
         state.pop("last_rebalance_date", None)
-    # Per-name return just realized over the most recent completed session:
-    # what advances the unscaled shadow book behind the vol target.
+    # Per-name returns for every recent session, so the shadow book can catch
+    # up on sessions where this script did not run (it advances per SESSION,
+    # not per run). Bounded to the trailing window the vol target can use.
     latest_date = frame["date"].max()
-    name_returns = dict(
+    recent = (
         frame.select("date", "ticker", "close").sort(["ticker", "date"])
         .with_columns((pl.col("close") / pl.col("close").shift(1).over("ticker") - 1.0)
                       .alias("ret"))
-        .filter(pl.col("date") == latest_date)
-        .drop_nulls("ret").select("ticker", "ret").iter_rows())
+        .drop_nulls("ret")
+        .filter(pl.col("date") > latest_date - timedelta(days=_BACKFILL_WINDOW_DAYS))
+    )
+    returns_by_date: dict = {}
+    for row in recent.select("date", "ticker", "ret").iter_rows():
+        returns_by_date.setdefault(row[0], {})[row[1]] = row[2]
     targets, new_state = compute_targets(panel, params, state, market_by_date,
                                          causal_span=params.get("causal_window_days", 252),
-                                         name_returns=name_returns)
-    _logger.info("shadow book: %d unit names, %d unit returns (vol target needs %d)",
+                                         returns_by_date=returns_by_date)
+    _logger.info("shadow book: %d unit names, %d unit returns through %s (vol target needs %d)",
                  len(new_state.get("unit_held", {})), len(new_state.get("unit_returns", [])),
-                 params.get("vol_lookback_days", 20))
+                 new_state.get("last_return_date"), params.get("vol_lookback_days", 20))
 
     latest = frame.filter(pl.col("date") == latest_date)
     prices = dict(latest.select("ticker", "close").iter_rows())
@@ -417,6 +474,13 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
             submitted += 1
             _logger.info("submitted %s %s x%s -> %s", order['side'], order['symbol'],
                          order['qty'], receipt['status'])
+            if order.get("flip") == "close" and receipt.get("status") not in ("filled",):
+                # Hold the paired open until the close actually settles.
+                state_ = await_close_fill(broker, receipt.get("order_id"))
+                if state_ != "filled":
+                    failed_closes.add(order["symbol"])
+                    _logger.warning("flip close %s ended %s; holding its open leg",
+                                    order["symbol"], state_)
         except Exception as exc:  # not-shortable / halted / rejected: skip, keep going
             if order.get("flip") == "close":
                 failed_closes.add(order["symbol"])

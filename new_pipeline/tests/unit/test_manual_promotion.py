@@ -245,27 +245,37 @@ def test_unit_returns_accumulate_every_session_and_drive_the_vol_target():
     rets = {t: 0.01 for t in names}
 
     # day 1 rebalances and seats the unscaled shadow book
-    _, state = compute_targets(panel, params, {}, mkt, 252, name_returns=rets)
+    _, state = compute_targets(panel, params, {}, mkt, 252, returns_by_date={days[-1]: rets})
     assert state["unit_held"]
     assert abs(sum(abs(w) for w in state["unit_held"].values()) - 1.0) < 1e-12
     first = len(state["unit_returns"])
 
-    # subsequent HOLD days still append — this is what was broken
-    for _ in range(3):
-        _, state = compute_targets(panel, params, state, mkt, 252, name_returns=rets)
-    assert len(state["unit_returns"]) == first + 3
+    # re-running on the SAME session must not double-count it
+    _, state = compute_targets(panel, params, state, mkt, 252,
+                               returns_by_date={days[-1]: rets})
+    assert len(state["unit_returns"]) == first
+
+    # and a run that arrives after a GAP backfills every missed session: the
+    # book is static between runs, so those weights really were held.
+    gap = {d: rets for d in days}
+    _, state = compute_targets(panel, params, state, mkt, 252, returns_by_date=gap)
+    assert len(state["unit_returns"]) == first  # days[-1] already recorded
+    fresh = {**state, "last_return_date": str(days[0])}
+    _, caught_up = compute_targets(panel, params, fresh, mkt, 252, returns_by_date=gap)
+    assert len(caught_up["unit_returns"]) == first + (len(days) - 1)
+    assert caught_up["last_return_date"] == str(days[-1])
 
     # with a filled estimator and high trailing vol the book DE-RISKS
     noisy = {**state, "last_rebalance_date": None,
              "unit_returns": [0.05, -0.05, 0.05, -0.05, 0.05]}
-    scaled, _ = compute_targets(panel, params, noisy, mkt, 252, name_returns=rets)
+    scaled, _ = compute_targets(panel, params, noisy, mkt, 252, returns_by_date={days[-1]: rets})
     gross = sum(abs(w) for w in scaled.values())
     assert gross < 1.0, f"vol target should shrink gross, got {gross}"
 
     # and never LEVERS above unit gross when trailing vol is tiny
     calm = {**state, "last_rebalance_date": None,
             "unit_returns": [1e-6, -1e-6, 1e-6, -1e-6, 1e-6]}
-    unlevered, _ = compute_targets(panel, params, calm, mkt, 252, name_returns=rets)
+    unlevered, _ = compute_targets(panel, params, calm, mkt, 252, returns_by_date={days[-1]: rets})
     assert abs(sum(abs(w) for w in unlevered.values()) - 1.0) < 1e-9
 
 
@@ -281,7 +291,7 @@ def test_unit_returns_history_is_bounded():
               "score_smoothing_days": 1}
     state = {"unit_returns": [0.0] * (_UNIT_RETURN_HISTORY + 50), "unit_held": {}}
     _, out = compute_targets(panel, params, state, mkt, 252,
-                             name_returns={t: 0.0 for t in names})
+                             returns_by_date={days[-1]: {t: 0.0 for t in names}})
     assert len(out["unit_returns"]) == _UNIT_RETURN_HISTORY
 
 
@@ -305,7 +315,7 @@ def test_shadow_book_migrates_from_a_pre_fix_state_file():
     # UNIFORM returns, so the returns must differ for this to test anything.
     rets = {t: 0.0 for t in names}
     rets.update({"T0": 0.03, "T1": 0.03, "T6": -0.01, "T7": -0.01})
-    _, state = compute_targets(panel, params, legacy, mkt, 252, name_returns=rets)
+    _, state = compute_targets(panel, params, legacy, mkt, 252, returns_by_date={days[-1]: rets})
     assert set(state["unit_held"]) == set(legacy["held"])
     assert abs(sum(abs(w) for w in state["unit_held"].values()) - 1.0) < 1e-12
     # the first appended return is the REAL book's, not a zero from an empty one
@@ -315,6 +325,72 @@ def test_shadow_book_migrates_from_a_pre_fix_state_file():
     # before the rebalance seats a fresh shadow book (no last_rebalance_date
     # means this call rebalances).
     _, flat = compute_targets(panel, params, {"held": {}}, mkt, 252,
-                              name_returns=rets)
+                              returns_by_date={days[-1]: rets})
     assert flat["unit_returns"] == [0.0]
     assert abs(sum(abs(w) for w in flat["unit_held"].values()) - 1.0) < 1e-12
+
+
+class _StubBroker:
+    """Broker whose orders settle only after N status polls."""
+
+    def __init__(self, polls_to_fill=2, final="filled"):
+        self.polls = {}
+        self.polls_to_fill = polls_to_fill
+        self.final = final
+        self.submitted = []
+
+    def submit_order(self, order):
+        oid = f"o{len(self.submitted) + 1}"
+        self.submitted.append(order)
+        self.polls[oid] = 0
+        return {"status": "pending_new", "order_id": oid}
+
+    def order_status(self, order_id):
+        self.polls[order_id] = self.polls.get(order_id, 0) + 1
+        return self.final if self.polls[order_id] >= self.polls_to_fill else "pending_new"
+
+
+def test_await_close_fill_blocks_until_the_close_settles():
+    """A flip submits close-then-open on the same symbol. Alpaca reserves the
+    position against the pending close (held_for_orders == existing_qty), so an
+    open fired immediately behind it sees available: 0 — 22 of the 31 skips on
+    the 2026-08-17 rebalance, every one a short leg that failed to open, which
+    biases a dollar-neutral book long."""
+    from new_pipeline.scripts.paper_trade_book import await_close_fill
+
+    slept = []
+    b = _StubBroker(polls_to_fill=3)
+    receipt = b.submit_order({"symbol": "AAA"})
+    got = await_close_fill(b, receipt["order_id"], now=lambda: 0.0,
+                           sleep=slept.append)
+    assert got == "filled"
+    assert len(slept) == 2  # polled until settled rather than returning at once
+
+
+def test_await_close_fill_reports_timeout_rather_than_assuming_a_fill():
+    """Anything other than 'filled' must read as 'shares still reserved':
+    releasing the paired open then would simply be rejected again."""
+    from new_pipeline.scripts.paper_trade_book import await_close_fill
+
+    clock = iter([0.0, 0.0, 5.0, 30.0, 60.0, 90.0])
+    b = _StubBroker(polls_to_fill=999)  # never settles
+    receipt = b.submit_order({"symbol": "AAA"})
+    got = await_close_fill(b, receipt["order_id"], timeout_s=10.0,
+                           now=lambda: next(clock), sleep=lambda _s: None)
+    assert got == "timeout"
+    # a rejected close is terminal but still not a fill
+    b2 = _StubBroker(polls_to_fill=1, final="rejected")
+    r2 = b2.submit_order({"symbol": "BBB"})
+    assert await_close_fill(b2, r2["order_id"], now=lambda: 0.0,
+                            sleep=lambda _s: None) == "rejected"
+    # a missing id cannot be confirmed and must not read as filled
+    assert await_close_fill(b2, "", now=lambda: 0.0, sleep=lambda _s: None) != "filled"
+
+
+def test_fake_broker_exposes_order_status_for_the_flip_wait():
+    from new_pipeline.adapters.fakes import FakeBroker
+
+    b = FakeBroker()
+    r = b.submit_order({"symbol": "AAA", "qty": 1, "side": "buy"})
+    assert b.order_status(r["order_id"]) == "filled"
+    assert b.order_status("nonexistent") == "unknown"

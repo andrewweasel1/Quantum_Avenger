@@ -211,6 +211,12 @@ class FakeBroker(BrokerAdapter):
         self._orders.append(receipt)
         return receipt
 
+    def order_status(self, order_id: str) -> str:
+        for receipt in self._orders:
+            if receipt.get("order_id") == order_id:
+                return str(receipt.get("status", "unknown"))
+        return "unknown"
+
     def get_positions(self) -> dict[str, float]:
         return dict(self._positions)
 

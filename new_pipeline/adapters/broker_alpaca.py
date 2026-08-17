@@ -76,6 +76,12 @@ class AlpacaBroker(BrokerAdapter):
             "filled_avg_price": float(placed.filled_avg_price) if placed.filled_avg_price else 0.0,
         }
 
+    def order_status(self, order_id: str) -> str:
+        try:
+            return _value(self._client.get_order_by_id(order_id).status)
+        except Exception:  # transient lookup failure must not read as filled
+            return "unknown"
+
     def get_positions(self) -> dict[str, float]:
         positions: dict[str, float] = {}
         for pos in self._client.get_all_positions():
