@@ -105,3 +105,119 @@ sessions at a third of its intended breadth.
    keep trading it.
 3. **Only then** consider remedies (rank hysteresis, wider quantile, slower
    cadence) — each is a spec change that must clear the gauntlet, not a patch.
+
+---
+
+# Follow-up: the turnover cause is confirmed, but it does NOT explain the drawdown
+
+## Step 1 could not be run as written
+
+The champion's run directory holds only the 12 sector boosters and their
+manifests. There is **no `oos_proba` artifact, no returns matrix, no
+reconstructed paths** — the backtest's per-name scores were never persisted, so
+there is no record of what it believed about any individual name, only the
+aggregate diagnostics. The plan file's Phase 1 (persist per-fold OOS
+probabilities) existed to make exactly this check possible and was never built.
+
+Substitute, and a sharper test: rebuild the **live** score panel under the
+champion's own mechanics and simulate its rebalance. That isolates cause
+instead of comparing two things that differ in several ways at once.
+
+## The live scoring path is the turnover driver — confirmed
+
+Live panel: 197,313 rows, 236 sessions, 1,800 tickers, 5-day smoothing and
+within-(date, sector) z-scores exactly as the champion specifies.
+
+| | turnover/day | vs backtest |
+|---|---|---|
+| backtest `avg_daily_turnover` | 0.0406 | — |
+| **simulated on LIVE scores** | **0.0785** | **1.9x** |
+| observed live, ex incident | 0.0913 | 2.2x |
+| observed live, all days | 0.1273 | 3.1x |
+
+Simulating the identical mechanics on live scores reproduces **0.0785 of the
+0.0913 observed** — roughly **86% of the excess turnover is the scores
+themselves**, not execution, universe churn or position drift. The residual
+~0.013/day is everything else.
+
+Live score day-over-day rank autocorrelation is **0.9595** (median 0.9696).
+That sounds high, and it is still not high enough: a hard 20% quantile cliff
+rotates a large share of a 284-name leg every 5 days at that persistence. The
+train/serve approximation is confirmed as the mechanism.
+
+## Re-pricing the champion at live turnover
+
+Backing the backtest's daily moments out of the manifest (gross SR 1.307, net
+SR 1.010, cost 10 bps at turnover 0.0406): **gross +1.783 bps/day, sd 21.65
+bps/day**.
+
+Net Sharpe re-priced at live turnover, holding gross and sd at backtest values:
+
+| turnover | 10 bps | 20 bps | 30 bps | |
+|---|---|---|---|---|
+| 0.0406 | **1.01** | 0.71 | 0.41 | backtest |
+| 0.0785 | 0.73 | 0.16 | -0.42 | live scores |
+| 0.0913 | 0.64 | **-0.03** | -0.70 | live ex-incident |
+| 0.1273 | 0.37 | -0.56 | -1.49 | live all days |
+
+Breakeven cost, which scales inversely with turnover: **54.3 bps at backtest
+turnover becomes 28.1 / 24.1 / 17.3 bps** at the three live rates. Measured
+half-spreads on this universe are 8-11 bps, so 16-22 bps round trip — i.e. the
+book is near or past breakeven, and at live turnover with realistic spreads
+the promoted net Sharpe of 1.01 re-prices to roughly **zero**.
+
+## But costs are NOT the drawdown — correcting my earlier framing
+
+The previous note said the book "may be at or past its cost breakeven", and let
+that stand too close to an explanation of the -3.44%. The arithmetic does not
+support that, and the distinction matters:
+
+| | bps/day |
+|---|---|
+| backtest gross mean | +1.78 |
+| backtest cost | -0.41 |
+| **live observed mean** | **-11.06** |
+| gross-to-live shortfall | **12.84** |
+
+| extra cost vs backtest, at live turnover | bps/day | share of shortfall |
+|---|---|---|
+| 10 bps | 0.51 | 3.9% |
+| 20 bps | 1.42 | 11.1% |
+| 30 bps | 2.33 | 18.2% |
+
+Explaining the whole shortfall through costs would need **141 bps per unit
+turnover** — an order of magnitude beyond any plausible spread on these names.
+So turnover re-prices the strategy's *expected* Sharpe materially, but it
+accounts for only ~4-18% of what actually happened.
+
+The rest is gross underperformance plus excess volatility: **live sd is 47.1
+bps/day against 21.65 modelled — 2.2x**. A book running at twice its modelled
+volatility and a negative gross mean is not a cost problem.
+
+## What this establishes
+
+1. **Confirmed:** the live scoring path drives ~86% of the excess turnover, via
+   the documented train/serve approximation. Measured, not inferred.
+2. **Confirmed:** at live turnover the champion's net Sharpe re-prices from
+   1.01 to 0.64 (spec cost) or ~0.00 (measured spreads). The promotion rested
+   on a turnover assumption live trading does not reproduce.
+3. **Refuted (my own earlier framing):** costs do not explain the drawdown.
+   They are 4-18% of it.
+4. **Still inside noise:** t = -1.39 on 35 sessions. The drawdown itself
+   remains unremarkable for a net-Sharpe-1.01 book and refutes nothing.
+5. **New and unexplained:** live volatility is 2.2x modelled. That is the
+   largest single discrepancy in the whole comparison and nothing here accounts
+   for it.
+
+## Next
+
+The honest next step is **not** a turnover remedy. It is to explain the 2.2x
+volatility gap, because a book at twice its modelled risk invalidates every
+Sharpe figure above — including the re-pricing table. Candidates, cheapest
+first: the eight sessions at a third of intended breadth (fewer names, more
+idiosyncratic variance); the ~7% net exposure interacting with the size split;
+and whether `sd` backed out of two manifest Sharpes is even the right
+comparison, since it is a derived quantity rather than a recorded one.
+
+Only after that is the re-pricing worth acting on — and acting on it means
+re-running the gauntlet with honest turnover, not patching the live book.
