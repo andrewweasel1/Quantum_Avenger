@@ -2,6 +2,7 @@
 paper book executor's pure target/order math."""
 
 import json
+from datetime import date
 
 import numpy as np
 import polars as pl
@@ -449,3 +450,42 @@ def test_stranded_positions_become_exitable_via_broker_marks():
     assert by["ETFLEFT"]["side"] == "buy" and by["ETFLEFT"]["qty"] == 3.0
     # and an unpriced name we do NOT hold still cannot be entered
     assert "NEVERHELD" not in by
+
+
+def test_fixture_rule_floor_finds_the_coverage_cliff_not_the_max_end_date():
+    """max(end_date) fails SILENTLY. On 2026-10-02 one row ended 2026-11-01
+    while 1,005 ended 2026-10-01, so the floor landed a month past the real
+    cliff, membership_intervals clamped away the October months it needed to
+    regenerate, and the extension reported {'extended': 0, 'appended': 0} —
+    a no-op that reads as success while the live universe sits collapsed on
+    its open-ended rows."""
+    from new_pipeline.scripts.extend_liquid_universe import fixture_rule_floor
+
+    # 20 rule rows covering through Sep, 5 open-ended, and ONE outlier that
+    # runs a month long — exactly the shape that broke the max.
+    rows = [{"ticker": f"R{i}", "gics_sector": "Small Cap Extended",
+             "start_date": "2026-08-01", "end_date": "2026-10-01"}
+            for i in range(20)]
+    rows += [{"ticker": f"S{i}", "gics_sector": "Industrials",
+              "start_date": "2020-01-01", "end_date": ""} for i in range(5)]
+    rows.append({"ticker": "OUTLIER", "gics_sector": "Industrials",
+                 "start_date": "2026-08-01", "end_date": "2026-11-01"})
+    assert fixture_rule_floor(rows) == date(2026, 10, 1)   # not 2026-11-01
+
+    # A UNIFORM fixture: intervals are end-exclusive, so rows ending
+    # 2026-11-01 cover through Oct 31 and 2026-11-01 is genuinely the first
+    # uncovered month. Here the cliff COINCIDES with max(end_date) — which is
+    # the point: the fix only diverges from the max when an outlier row runs
+    # past the bulk, and then the max is the wrong answer.
+    healthy = [{"ticker": f"R{i}", "gics_sector": "Small Cap Extended",
+                "start_date": "2026-08-01", "end_date": "2026-11-01"}
+               for i in range(20)]
+    healthy += [{"ticker": f"S{i}", "gics_sector": "Industrials",
+                 "start_date": "2020-01-01", "end_date": ""} for i in range(5)]
+    assert fixture_rule_floor(healthy) == date(2026, 11, 1)
+
+    # the real fixture's cliff must be a month boundary at or after today's
+    import csv as _csv
+    real = list(_csv.DictReader(open("new_pipeline/data/universe/liquid1500_pit.csv")))
+    cliff = fixture_rule_floor(real)
+    assert cliff.day == 1 and cliff >= date(2026, 10, 1)

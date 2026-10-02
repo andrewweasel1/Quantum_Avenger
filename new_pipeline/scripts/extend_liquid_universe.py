@@ -42,11 +42,45 @@ from new_pipeline.scripts.build_liquid_universe import (
 
 
 def fixture_rule_floor(rows: list[dict]) -> date:
-    """First month the fixture does NOT cover: max end_date over closed rows."""
-    ends = [date.fromisoformat(r["end_date"]) for r in rows if r["end_date"]]
-    if not ends:
+    """First month the fixture does not MEANINGFULLY cover: the coverage cliff.
+
+    ``max(end_date)`` is wrong and fails silently. On 2026-10-02 a single row
+    ended 2026-11-01 while 1,005 ended 2026-10-01, so the max put the floor a
+    month past the real cliff; ``membership_intervals`` then clamped away
+    exactly the October months it needed to regenerate and the extension
+    reported ``{'extended': 0, 'appended': 0}`` — a no-op that looks like
+    success while the live universe sits collapsed at its open-ended rows.
+
+    The cliff is where rule coverage stops and only the open-ended external
+    rows remain. Walk months BACKWARD from the last closed end_date while live
+    membership is within 20% of the open-ended count, and return the earliest
+    month of that collapsed run. Scanning forward instead would catch an
+    unrelated dip in early history and regenerate months that must stay
+    frozen. A fixture with no collapsed tail returns the month after its last
+    closed end_date, which is what the max used to give."""
+    closed = [date.fromisoformat(r["end_date"]) for r in rows if r["end_date"]]
+    if not closed:
         raise ValueError("fixture has no closed intervals; nothing to extend")
-    return max(ends)
+    spans = [(date.fromisoformat(r["start_date"]),
+              date.fromisoformat(r["end_date"]) if r["end_date"] else None)
+             for r in rows]
+    open_n = sum(1 for _, e in spans if e is None)
+
+    def live(day: date) -> int:
+        return sum(1 for s, e in spans if s <= day and (e is None or e > day))
+
+    def prev_month(d: date) -> date:
+        return date(d.year - (d.month == 1), (d.month - 2) % 12 + 1, 1)
+
+    last = max(closed)
+    month = date(last.year, last.month, 1)
+    cliff = None
+    while live(month) <= open_n * 1.2:
+        cliff = month
+        month = prev_month(month)
+    if cliff is not None:
+        return cliff
+    return date(last.year + (last.month == 12), last.month % 12 + 1, 1)
 
 
 def merge_extend(rows: list[dict], new_intervals: dict, labels: dict,
