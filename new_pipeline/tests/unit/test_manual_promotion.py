@@ -489,3 +489,48 @@ def test_fixture_rule_floor_finds_the_coverage_cliff_not_the_max_end_date():
     real = list(_csv.DictReader(open("new_pipeline/data/universe/liquid1500_pit.csv")))
     cliff = fixture_rule_floor(real)
     assert cliff.day == 1 and cliff >= date(2026, 10, 1)
+
+
+def test_redistribute_unsizeable_shorts_restores_the_leg_and_neutrality():
+    """Alpaca forbids fractional short opens, so diff_orders sizes shorts in
+    whole shares — and the bottom quantile by model score is not the bottom
+    quantile by PRICE. On 2026-10-02, 66 of 592 targets rounded to zero shares
+    and every one was a short (MELI $1,692, LLY $1,146) against a $158 ideal
+    position. The long leg keeps those names because longs can go fractional,
+    so the book silently fails to establish 0.1115 of short exposure and runs
+    net LONG by it."""
+    from new_pipeline.scripts.paper_trade_book import redistribute_unsizeable_shorts
+
+    cap = 100_000.0
+    # 4 longs and 4 shorts at 0.125 each: gross 1.0, net 0.0.
+    targets = {f"L{i}": 0.125 for i in range(4)}
+    targets.update({f"S{i}": -0.125 for i in range(4)})
+    # S0 is absurdly expensive: 0.125*100000/500000 = 0.025 shares -> 0
+    prices = {f"L{i}": 50.0 for i in range(4)}
+    prices.update({f"S{i}": 50.0 for i in range(4)})
+    prices["S0"] = 500_000.0
+
+    out, st = redistribute_unsizeable_shorts(targets, prices, cap)
+    assert st["dropped"] == 1 and "S0" not in out
+    assert abs(st["weight_moved"] - 0.125) < 1e-9
+    # the leg is whole again and the book is neutral at unit gross
+    assert abs(sum(w for w in out.values() if w < 0) + 0.5) < 1e-9
+    assert abs(sum(abs(w) for w in out.values()) - 1.0) < 1e-9
+    assert abs(sum(out.values())) < 1e-9
+    # longs are untouched
+    assert all(out[f"L{i}"] == 0.125 for i in range(4))
+    # the surviving shorts absorbed it evenly
+    assert all(abs(out[f"S{i}"] + 0.5/3) < 1e-9 for i in (1, 2, 3))
+
+    # a book with no unsizeable short is returned unchanged
+    same, st2 = redistribute_unsizeable_shorts(targets, {**prices, "S0": 50.0}, cap)
+    assert st2["dropped"] == 0 and same == targets
+
+    # all-unsizeable shorts must NOT loop forever or invent exposure
+    allbad = {**{f"L{i}": 0.125 for i in range(4)},
+              **{f"S{i}": -0.125 for i in range(4)}}
+    pbad = {**{f"L{i}": 50.0 for i in range(4)},
+            **{f"S{i}": 500_000.0 for i in range(4)}}
+    out3, st3 = redistribute_unsizeable_shorts(allbad, pbad, cap)
+    assert st3["passes"] <= 8
+    assert sum(1 for w in out3.values() if w < 0) in (0, 4)

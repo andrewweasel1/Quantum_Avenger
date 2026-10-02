@@ -245,6 +245,65 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
     return weights, new_state
 
 
+def redistribute_unsizeable_shorts(targets: dict, prices: dict, capital: float,
+                                   fractionable: set | None = None,
+                                   max_passes: int = 8) -> tuple[dict, dict]:
+    """Move weight off short targets too expensive to express, onto ones that fit.
+
+    Alpaca forbids fractional short OPENS, so ``diff_orders`` sizes every short
+    in whole shares. The original note assumed that was harmless because "cheap
+    losers round finely anyway" — but the bottom quantile by model score is not
+    the bottom quantile by PRICE. On 2026-10-02, 66 of 592 targets rounded to
+    zero shares and every one was a short: MELI at $1,692, LLY at $1,146, BLK
+    at $1,062, against an ideal position of $158. Anything above ~2x the
+    position size rounds away.
+
+    The long leg keeps those names (longs can go fractional), so the book
+    silently fails to establish 0.1115 of short exposure — gross lands under
+    target and the book runs net LONG by that amount, which is the bulk of the
+    observed +4.85% tilt on a dollar-neutral spec.
+
+    Dropping the weight entirely (status quo) breaks both gross and net.
+    Forcing one share instead would put $1,692 of MELI against a $158 budget,
+    a 10x concentration — worse. So redistribute: drop what cannot be sized and
+    spread its weight across the shorts that can, keeping the leg's total at
+    target. Iterate, because a raised weight can make a previously-unsizeable
+    name expressible. Longs are untouched and the set of NAMES the model chose
+    is unchanged — only the dollars move, within the short leg."""
+    fractionable = fractionable or set()
+    leg_total = sum(w for w in targets.values() if w < 0.0)
+    shorts = {s: w for s, w in targets.items() if w < 0.0}
+    if not shorts or leg_total == 0.0:
+        return dict(targets), {"dropped": 0, "weight_moved": 0.0, "passes": 0}
+
+    def sizeable(sym: str, weight: float) -> bool:
+        price = prices.get(sym)
+        if not price or price <= 0:
+            return False
+        return int(round(abs(weight) * capital / price)) >= 1
+
+    keep = dict(shorts)
+    dropped: dict[str, float] = {}
+    passes = 0
+    while passes < max_passes:
+        passes += 1
+        bad = [s for s, w in keep.items() if not sizeable(s, w)]
+        if not bad or len(bad) == len(keep):
+            break
+        for s in bad:
+            dropped[s] = keep.pop(s)
+        share = leg_total / len(keep)
+        keep = {s: share for s in keep}
+
+    out = {s: w for s, w in targets.items() if w >= 0.0}
+    out.update(keep)
+    return out, {"dropped": len(dropped),
+                 "weight_moved": round(abs(sum(dropped.values())), 6),
+                 "short_gross": round(abs(sum(keep.values())), 6),
+                 "target_short_gross": round(abs(leg_total), 6),
+                 "passes": passes}
+
+
 def diff_orders(targets: dict, positions: dict, prices: dict, capital: float,
                 min_order_notional: float = 25.0,
                 fractionable: set | None = None) -> list[dict]:
@@ -485,6 +544,17 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     except Exception as exc:
         _logger.warning("fractionable lookup failed (%s); integer sizing", exc)
         fractionable = set()
+    # Whole-share short sizing silently drops expensive names (66 of 592 on
+    # 2026-10-02, every one a short), so the short leg lands under target and
+    # the book runs net long by the shortfall. Move that weight onto shorts
+    # that can be expressed, keeping gross and neutrality at spec.
+    targets, shortfix = redistribute_unsizeable_shorts(
+        targets, prices, capital, fractionable=fractionable)
+    if shortfix["dropped"]:
+        _logger.warning("short leg: %d names unsizeable in whole shares, %.4f weight "
+                        "redistributed over the rest (short gross %.4f of %.4f target)",
+                        shortfix["dropped"], shortfix["weight_moved"],
+                        shortfix["short_gross"], shortfix["target_short_gross"])
     orders = diff_orders(targets, positions, prices, capital, fractionable=fractionable)
 
     print(f"book: {len([w for w in targets.values() if w > 0])} longs / "
