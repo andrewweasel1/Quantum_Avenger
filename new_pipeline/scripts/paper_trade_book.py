@@ -92,6 +92,30 @@ def await_close_fill(broker, order_id: str, timeout_s: float = _FLIP_FILL_TIMEOU
     return status
 
 
+def select_price_date(frame, min_coverage: float = 0.8):
+    """Latest frame date whose cross-section is COMPLETE enough to price from.
+
+    ``frame["date"].max()`` is the current session, and intraday that bar
+    exists for only a fraction of the universe — 499 of 1,420 names at 12:43
+    ET on 2026-10-01 against 1,420 the day before. ``diff_orders`` skips any
+    symbol absent from ``prices``, so pricing off a partial day silently
+    reduces the book to whatever happens to have printed: 122 of a 637-name
+    target-plus-position union, 19%. Every live run to date fired midday and
+    acted on roughly a third of its own book, which is the bulk of the 36%
+    tracking error and the reason orphan positions accumulate.
+
+    Walks back to the newest date holding at least ``min_coverage`` of the
+    median recent cross-section."""
+    counts = (frame.group_by("date").agg(pl.col("ticker").n_unique().alias("n"))
+              .sort("date"))
+    if counts.is_empty():
+        return None
+    recent = counts.tail(20)
+    floor = float(recent["n"].median() or 0) * min_coverage
+    ok = counts.filter(pl.col("n") >= floor)
+    return (ok["date"][-1] if not ok.is_empty() else counts["date"][-1])
+
+
 def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
                     market_by_date: dict, causal_span: int | None = 252,
                     returns_by_date: dict | None = None) -> tuple[dict, dict]:
@@ -413,8 +437,13 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
                  len(new_state.get("unit_held", {})), len(new_state.get("unit_returns", [])),
                  new_state.get("last_return_date"), params.get("vol_lookback_days", 20))
 
-    latest = frame.filter(pl.col("date") == latest_date)
+    price_date = select_price_date(frame)
+    latest = frame.filter(pl.col("date") == price_date)
     prices = dict(latest.select("ticker", "close").iter_rows())
+    if price_date != latest_date:
+        _logger.warning("pricing off %s, not the partial current session %s "
+                        "(%d names vs %d)", price_date, latest_date, len(prices),
+                        frame.filter(pl.col("date") == latest_date).height)
     capital = args.capital or cfg.execution.account_capital
     broker = AlpacaBroker(os.environ["QA_ALPACA__API_KEY"],
                          os.environ["QA_ALPACA__SECRET_KEY"], paper=True)
@@ -427,6 +456,21 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
              for p in broker._client.get_all_positions() if float(p.current_price) > 0}
     checked = [(s, prices[s] / marks[s]) for s in marks if prices.get(s)]
     bad = [(s, r) for s, r in checked if not 0.5 <= r <= 2.0]
+    # STRANDED POSITIONS. diff_orders skips any symbol with no price, so a
+    # holding whose name has left the scored universe (delisted, dropped from
+    # PIT membership, an ETF that is no longer a candidate) can never be
+    # exited: the frame has no close for it, no order is emitted, and it sits
+    # in the book forever with no target and no risk control. On 2026-10-02
+    # that was 69 positions, $12,090 — 12.84% of capital and +5.67% net, i.e.
+    # 91% of the book's entire net-long tilt. The broker always knows what it
+    # holds, so fall its mark in for names we hold but cannot price; targets
+    # still require a frame price, so this only ever enables EXITS.
+    stranded = {s: m for s, m in marks.items() if s not in prices}
+    if stranded:
+        prices.update(stranded)
+        gross = sum(abs(positions.get(s, 0.0)) * m for s, m in stranded.items())
+        _logger.warning("%d held names have no frame price; using broker marks so "
+                        "they can be exited (~$%.0f gross)", len(stranded), gross)
     if checked and len(bad) > max(2, 0.02 * len(checked)):
         worst = sorted(bad, key=lambda x: abs(x[1] - 1.0), reverse=True)[:5]
         raise SystemExit(

@@ -394,3 +394,58 @@ def test_fake_broker_exposes_order_status_for_the_flip_wait():
     r = b.submit_order({"symbol": "AAA", "qty": 1, "side": "buy"})
     assert b.order_status(r["order_id"]) == "filled"
     assert b.order_status("nonexistent") == "unknown"
+
+
+def test_select_price_date_skips_a_partial_current_session():
+    """`frame["date"].max()` is the CURRENT session, and intraday that bar
+    exists for a fraction of the universe — 499 of 1,420 names at 12:43 ET on
+    2026-10-01. diff_orders skips any symbol absent from `prices`, so pricing
+    off a partial day silently shrinks the book to whatever printed: 122 of a
+    637-name target-plus-position union. Every live run fired midday."""
+    from datetime import date, timedelta
+
+    from new_pipeline.scripts.paper_trade_book import select_price_date
+
+    days = [date(2026, 9, 1) + timedelta(days=i) for i in range(10)]
+    rows = []
+    for i, d in enumerate(days):
+        n = 1420 if i < len(days) - 1 else 499      # last day partial
+        rows += [{"date": d, "ticker": f"T{j}"} for j in range(n)]
+    frame = pl.DataFrame(rows)
+    assert select_price_date(frame) == days[-2]      # steps back one session
+    # a COMPLETE latest session is used as-is
+    full = pl.DataFrame([{"date": d, "ticker": f"T{j}"} for d in days
+                         for j in range(1420)])
+    assert select_price_date(full) == days[-1]
+    # a mild shortfall is tolerated rather than over-triggering
+    mild = [r for r in rows if r["date"] != days[-1]]
+    mild += [{"date": days[-1], "ticker": f"T{j}"} for j in range(1300)]
+    assert select_price_date(pl.DataFrame(mild)) == days[-1]
+    assert select_price_date(pl.DataFrame({"date": [], "ticker": []})) is None
+
+
+def test_stranded_positions_become_exitable_via_broker_marks():
+    """A holding whose name left the scored universe has no frame close, so
+    diff_orders never emits an order for it and it sits in the book forever
+    with no target and no risk control — 69 positions and 12.84% of capital on
+    2026-10-02, carrying 91% of the net-long tilt. Overlaying the broker's own
+    mark makes the exit expressible; targets still need a frame price, so this
+    can only ever close positions."""
+    prices = {"INUNIVERSE": 50.0}                    # the only frame-priced name
+    marks = {"DELISTED": 10.0, "ETFLEFT": 20.0}      # held, no frame price
+    positions = {"INUNIVERSE": 2.0, "DELISTED": 5.0, "ETFLEFT": -3.0}
+    targets = {"INUNIVERSE": 0.002}                  # wants 4 shares, holds 2
+
+    # before: the stranded names produce NO orders at all
+    before = diff_orders(targets, positions, prices, capital=100_000)
+    assert {o["symbol"] for o in before} == {"INUNIVERSE"}
+
+    # after: overlay marks for held-but-unpriced names, exactly as main() does
+    merged = {**prices, **{s: m for s, m in marks.items() if s not in prices}}
+    after = diff_orders(targets, positions, merged, capital=100_000)
+    by = {o["symbol"]: o for o in after}
+    assert {"DELISTED", "ETFLEFT"} <= set(by)
+    assert by["DELISTED"]["side"] == "sell" and by["DELISTED"]["qty"] == 5.0
+    assert by["ETFLEFT"]["side"] == "buy" and by["ETFLEFT"]["qty"] == 3.0
+    # and an unpriced name we do NOT hold still cannot be entered
+    assert "NEVERHELD" not in by
