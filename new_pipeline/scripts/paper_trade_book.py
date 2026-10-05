@@ -31,6 +31,7 @@ momentum/seasonality features starve and the scored universe collapses.
 """
 
 import argparse
+import csv
 import json
 import logging
 import os
@@ -371,6 +372,61 @@ def diff_orders(targets: dict, positions: dict, prices: dict, capital: float,
     return orders
 
 
+def universe_health(universe_path: str, today: date, horizon: int = 90) -> dict:
+    """Live PIT membership today, and the date coverage falls off.
+
+    The fixture stamps its build horizon as ``end_date`` on every still-active
+    name, so when that horizon passes the investable universe drops to the
+    handful of open-ended external rows. It has happened twice: 1,472 -> 502 on
+    2026-09-02 (undetected for eight sessions, and the 2026-09-14 book spent
+    255 orders re-targeting onto it) and 1,508 -> 503 on 2026-10-01.
+
+    ``max(end_date)`` is NOT the horizon — one outlier row pushed it a month
+    past the real cliff both times, which is how the collapse hid. Count live
+    membership per day instead, end-EXCLUSIVE, and call it collapsed when it
+    falls to within 20% of the open-ended count."""
+    rows = list(csv.DictReader(open(universe_path, encoding="utf-8")))
+    spans = [(date.fromisoformat(r["start_date"]),
+              date.fromisoformat(r["end_date"]) if r["end_date"] else None)
+             for r in rows]
+    open_n = sum(1 for _, e in spans if e is None)
+
+    def live(day: date) -> int:
+        return sum(1 for s, e in spans if s <= day and (e is None or e > day))
+
+    live_today = live(today)
+    collapsed = live_today <= open_n * 1.2
+    cliff = None
+    for offset in range(horizon + 1):
+        day = today + timedelta(days=offset)
+        if live(day) <= open_n * 1.2:
+            cliff = day
+            break
+    return {"live": live_today, "open_ended": open_n,
+            "collapsed": collapsed, "cliff": cliff}
+
+
+def assert_universe_live(universe_path: str, today: date, warn_days: int = 10) -> dict:
+    """Refuse to trade a collapsed universe; warn when the cliff is near.
+
+    A scheduled, unattended run is exactly where this matters: the 2026-09-14
+    book re-targeted to 99/99 on an expired fixture with nobody watching the
+    membership count."""
+    h = universe_health(universe_path, today)
+    if h["collapsed"]:
+        raise SystemExit(
+            f"refusing to trade: PIT universe has only {h['live']} live names "
+            f"({h['open_ended']} of them open-ended rows) — the fixture's rule "
+            f"coverage has lapsed. Refresh it with "
+            f"scripts.extend_liquid_universe before trading.")
+    if h["cliff"] is not None and (h["cliff"] - today).days <= warn_days:
+        _logger.warning("universe coverage ends %s (%d days) — refresh soon",
+                        h["cliff"], (h["cliff"] - today).days)
+    else:
+        _logger.info("universe: %d live names, coverage to %s", h["live"], h["cliff"])
+    return h
+
+
 def _assert_paper(cfg) -> None:
     key = os.environ.get("QA_ALPACA__API_KEY", "")
     if not key.startswith("PK"):
@@ -413,6 +469,9 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     overrides.setdefault("system", {})["run_mode"] = "paper"
     cfg = build_overridden_config(overrides)
     _assert_paper(cfg)
+    assert_universe_live(cfg.data.universe_path or
+                         "new_pipeline/data/universe/liquid1500_pit.csv",
+                         date.today())
     registry = PromotionRegistry(args.registry)
     champions = registry.active_champions()
     if LONG_SHORT_KEY not in champions:

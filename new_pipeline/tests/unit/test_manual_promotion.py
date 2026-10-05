@@ -534,3 +534,46 @@ def test_redistribute_unsizeable_shorts_restores_the_leg_and_neutrality():
     out3, st3 = redistribute_unsizeable_shorts(allbad, pbad, cap)
     assert st3["passes"] <= 8
     assert sum(1 for w in out3.values() if w < 0) in (0, 4)
+
+
+def test_universe_guard_refuses_a_collapsed_fixture():
+    """The fixture stamps its build horizon as end_date on every still-active
+    name, so when that horizon passes the universe drops to its open-ended
+    rows. It happened twice — 1,472 -> 502 on 2026-09-02 (undetected for eight
+    sessions; the 2026-09-14 book spent 255 orders re-targeting onto it) and
+    1,508 -> 503 on 2026-10-01. A scheduled unattended run is exactly where
+    that must stop the run rather than trade."""
+    import csv as _csv
+
+    from new_pipeline.scripts.paper_trade_book import assert_universe_live, universe_health
+
+    def write(tmp, rule_end):
+        rows = [{"ticker": f"R{i}", "gics_sector": "Small Cap Extended",
+                 "start_date": "2026-08-01", "end_date": rule_end}
+                for i in range(100)]
+        rows += [{"ticker": f"S{i}", "gics_sector": "Industrials",
+                  "start_date": "2020-01-01", "end_date": ""} for i in range(10)]
+        # the outlier that made max(end_date) the wrong check both times
+        rows.append({"ticker": "OUTLIER", "gics_sector": "Industrials",
+                     "start_date": "2026-08-01", "end_date": "2026-12-01"})
+        with open(tmp, "w", newline="", encoding="utf-8") as fh:
+            w = _csv.DictWriter(fh, ["ticker", "gics_sector", "start_date", "end_date"])
+            w.writeheader()
+            w.writerows(rows)
+        return tmp
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        healthy = write(f"{d}/u.csv", "2026-11-01")
+        h = universe_health(healthy, date(2026, 10, 5))
+        assert h["live"] == 111 and not h["collapsed"]
+        assert h["cliff"] == date(2026, 11, 1)
+        assert assert_universe_live(healthy, date(2026, 10, 5))["live"] == 111
+
+        # one day past the cliff: 10 open-ended + the outlier = collapsed
+        with pytest.raises(SystemExit, match="refusing to trade"):
+            assert_universe_live(healthy, date(2026, 11, 2))
+
+        # and the real fixture must pass today
+        real = "new_pipeline/data/universe/liquid1500_pit.csv"
+        assert not universe_health(real, date.today())["collapsed"]
