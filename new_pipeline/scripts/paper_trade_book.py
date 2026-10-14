@@ -35,6 +35,7 @@ import csv
 import json
 import logging
 import os
+import subprocess
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -458,6 +459,50 @@ def assert_universe_live(universe_path: str, today: date, warn_days: int = 10) -
     return h
 
 
+_BOOK_BRANCH = "claude/zen-davinci-sH7mS"
+
+
+def current_branch(repo_root: str = ".") -> str | None:
+    """HEAD's branch name; None when git is unavailable or HEAD is detached."""
+    try:
+        done = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                              cwd=repo_root, capture_output=True, text=True,
+                              timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    name = done.stdout.strip()
+    return name if done.returncode == 0 and name and name != "HEAD" else None
+
+
+def assert_book_branch(expected: str = _BOOK_BRANCH,
+                       branch: str | None = None) -> str | None:
+    """Refuse to trade from any branch but the book's own.
+
+    models/prod/book_state.json is TRACKED, so every branch carries its own
+    snapshot of the ledger. A sibling branch cut for other work keeps a valid
+    promotion registry beside a ledger frozen on the day it was cut, and the
+    state read is a silent ``{} if not exists`` — so the book would diff the
+    live account against a stale baseline and trade the difference. That fails
+    OPEN. A missing registry fails CLOSED (the champion check exits), which is
+    why `main` is harmless and a sibling branch is not; the checked-out branch
+    is the only thing separating the two.
+    """
+    name = current_branch() if branch is None else branch
+    if name is None:
+        _logger.warning("cannot determine the git branch — book-branch guard "
+                        "skipped; confirm the ledger matches this account")
+        return None
+    if name != expected:
+        raise SystemExit(
+            f"refusing to trade: on branch {name!r}, but the book's ledger "
+            f"lives on {expected!r}. models/prod/book_state.json is tracked, "
+            f"so this branch holds a stale copy and the book would diff the "
+            f"live account against it. Run `git checkout {expected}` first, or "
+            f"pass --ignore-branch-guard if this branch really does carry the "
+            f"current ledger.")
+    return name
+
+
 def _assert_paper(cfg) -> None:
     key = os.environ.get("QA_ALPACA__API_KEY", "")
     if not key.startswith("PK"):
@@ -480,6 +525,10 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
                              "the scored universe)")
     parser.add_argument("--execute", action="store_true",
                         help="actually submit orders (default: dry-run print)")
+    parser.add_argument("--ignore-branch-guard", action="store_true",
+                        help="trade even when HEAD is not the book's branch "
+                             "(recovery tool; the ledger is tracked, so the "
+                             "wrong branch means a stale baseline)")
     parser.add_argument("--force-rebalance", action="store_true",
                         help="ignore the grid spacing and re-target the full book "
                              "today (recovery tool, e.g. after a mis-scored book)")
@@ -500,6 +549,8 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     overrides.setdefault("system", {})["run_mode"] = "paper"
     cfg = build_overridden_config(overrides)
     _assert_paper(cfg)
+    if not args.ignore_branch_guard:
+        assert_book_branch()
     assert_universe_live(cfg.data.universe_path or
                          "new_pipeline/data/universe/liquid1500_pit.csv",
                          date.today())

@@ -8,7 +8,12 @@ import numpy as np
 import polars as pl
 import pytest
 from new_pipeline.evaluation.promotion import PromotionRegistry
-from new_pipeline.scripts.paper_trade_book import compute_targets, diff_orders
+from new_pipeline.scripts import paper_trade_book as ptb
+from new_pipeline.scripts.paper_trade_book import (
+    assert_book_branch,
+    compute_targets,
+    diff_orders,
+)
 from new_pipeline.scripts.promote_candidates import manual_promote
 
 
@@ -584,3 +589,44 @@ def test_short_share_solver_trades_exact_fill_for_equal_weight():
     assert st2["dropped"] == 1 and st2["sized"] == 3
     assert st2["fill"] > 0.998, f"top-up should close most of the gap: {st2}"
     assert st2["fill"] <= 1.0
+
+
+def test_book_branch_guard_refuses_a_sibling_branch():
+    """A branch cut for other work carries a ledger frozen on the day it was
+    cut, so the book would diff the live account against a stale baseline."""
+    with pytest.raises(SystemExit) as err:
+        assert_book_branch(expected="claude/book", branch="claude/intraday")
+    msg = str(err.value)
+    assert "claude/intraday" in msg and "claude/book" in msg
+    assert "git checkout" in msg, "the refusal must name the fix"
+
+
+def test_book_branch_guard_allows_the_books_own_branch():
+    assert assert_book_branch(expected="claude/book",
+                              branch="claude/book") == "claude/book"
+
+
+def test_book_branch_guard_degrades_to_a_warning_without_git(monkeypatch):
+    """Outside a checkout the guard cannot know the branch. It must not block
+    a legitimate run — the paper-key and universe refusals still stand."""
+    monkeypatch.setattr(ptb, "current_branch", lambda *a, **k: None)
+    assert assert_book_branch(expected="claude/book") is None
+
+
+def test_current_branch_reports_detached_head_as_unknown(monkeypatch):
+    """A reclaim can leave HEAD detached; `rev-parse --abbrev-ref` then prints
+    the literal 'HEAD', which must not be mistaken for a branch name."""
+    class _Done:
+        returncode = 0
+        stdout = "HEAD\n"
+
+    monkeypatch.setattr(ptb.subprocess, "run", lambda *a, **k: _Done())
+    assert ptb.current_branch() is None
+
+
+def test_current_branch_survives_a_missing_git_binary(monkeypatch):
+    def _boom(*a, **k):
+        raise OSError("git: not found")
+
+    monkeypatch.setattr(ptb.subprocess, "run", _boom)
+    assert ptb.current_branch() is None
