@@ -65,3 +65,11 @@ You must read the following files in the `/docs/` directory to understand the pr
 - **Secrets**: Alpaca credentials live only in environment variables
   (`QA_ALPACA__API_KEY` / `QA_ALPACA__SECRET_KEY`), never in files or commits;
   secret-scan the staged diff before every commit.
+- **Questions**: ask with `AskUserQuestion` option cards — that is the preferred
+  form, including on mobile. A skip or `[No preference]` is NOT an answer; it is
+  a by-product of reaching the chat box to reply outside the offered options. The
+  user always answers the question actually asked, so treat a skip as "a message
+  is coming": hold, change nothing, and never read it as permission, as deference
+  to the recommended option, or as licence to proceed on a default. This binds
+  hardest on a question already flagged as needing explicit permission — there,
+  the absence of an answer is the one thing that must never be read as a yes.
