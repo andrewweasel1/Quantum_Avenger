@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from new_pipeline.adapters.broker_alpaca import AlpacaBroker
 from new_pipeline.scripts.intraday_paper_session import _champion_combo, _intraday_keys
 
 
@@ -16,6 +15,9 @@ def _receipt():
 
 
 def test_bracket_order_attaches_legs_and_daily_path_unchanged():
+    pytest.importorskip("alpaca")  # live SDK; skipped in the offline CI image
+    from new_pipeline.adapters.broker_alpaca import AlpacaBroker
+
     client = MagicMock()
     client.submit_order.return_value = _receipt()
     broker = AlpacaBroker("k", "s", client=client)

@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
-from new_pipeline.adapters.market_alpaca import AlpacaIntradayDataSource
+import pytest
 from new_pipeline.intraday.calendar import Session, load_sessions, write_fixture
 from new_pipeline.intraday.data import filter_to_sessions, load_minutes, months_between, vault_file
 from new_pipeline.scripts.ingest_minute_vault import _write_symbol_month, ingest
@@ -31,6 +31,9 @@ class _FakeClient:
 
 
 def test_intraday_source_maps_bars_and_batches():
+    pytest.importorskip("alpaca")  # live SDK; skipped in the offline CI image
+    from new_pipeline.adapters.market_alpaca import AlpacaIntradayDataSource
+
     client = _FakeClient()
     src = AlpacaIntradayDataSource("k", "s", client=client)
     src.BATCH_SIZE = 2
