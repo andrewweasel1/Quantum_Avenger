@@ -10,4 +10,4 @@ alpaca-py>=0.33
 # SEC EDGAR filings for the point-in-time news feed (EdgarFilingSource). GDELT
 # needs no package (stdlib urllib). edgartools requires egress to sec.gov and a
 # "Name email" identity via QA_NEWS__EDGAR_IDENTITY.
-edgartools>=3.0
+edgartools>=5.62.0
