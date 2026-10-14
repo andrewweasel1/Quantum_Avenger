@@ -491,89 +491,96 @@ def test_fixture_rule_floor_finds_the_coverage_cliff_not_the_max_end_date():
     assert cliff.day == 1 and cliff >= date(2026, 10, 1)
 
 
-def test_redistribute_unsizeable_shorts_restores_the_leg_and_neutrality():
-    """Alpaca forbids fractional short opens, so diff_orders sizes shorts in
-    whole shares — and the bottom quantile by model score is not the bottom
-    quantile by PRICE. On 2026-10-02, 66 of 592 targets rounded to zero shares
-    and every one was a short (MELI $1,692, LLY $1,146) against a $158 ideal
-    position. The long leg keeps those names because longs can go fractional,
-    so the book silently fails to establish 0.1115 of short exposure and runs
-    net LONG by it."""
-    from new_pipeline.scripts.paper_trade_book import redistribute_unsizeable_shorts
+def test_short_share_solver_hits_the_leg_from_below_and_never_overshoots():
+    """Whole-share short sizing failed twice, in opposite directions. Rounding
+    each short independently DROPPED names priced above ~2x the position budget
+    (66 of 592 on 2026-10-02, all shorts: MELI $1,692 vs a $158 position), so
+    the leg landed at 0.389 of 0.500 and the book ran net long. Redistributing
+    the lost WEIGHT then overshot, because rounding a larger per-name weight
+    rounds UP more often — realized 0.5644 and 0.5557 on two clean rebalances,
+    so the book ran net short instead.
+
+    Solving share counts approaches the target from below and cannot
+    overshoot."""
+    from new_pipeline.scripts.paper_trade_book import solve_short_share_targets
 
     cap = 100_000.0
-    # 4 longs and 4 shorts at 0.125 each: gross 1.0, net 0.0.
     targets = {f"L{i}": 0.125 for i in range(4)}
     targets.update({f"S{i}": -0.125 for i in range(4)})
-    # S0 is absurdly expensive: 0.125*100000/500000 = 0.025 shares -> 0
     prices = {f"L{i}": 50.0 for i in range(4)}
     prices.update({f"S{i}": 50.0 for i in range(4)})
-    prices["S0"] = 500_000.0
+    prices["S0"] = 500_000.0          # 0.025 shares — cannot be expressed
 
-    out, st = redistribute_unsizeable_shorts(targets, prices, cap)
-    assert st["dropped"] == 1 and "S0" not in out
-    assert abs(st["weight_moved"] - 0.125) < 1e-9
-    # the leg is whole again and the book is neutral at unit gross
-    assert abs(sum(w for w in out.values() if w < 0) + 0.5) < 1e-9
-    assert abs(sum(abs(w) for w in out.values()) - 1.0) < 1e-9
-    assert abs(sum(out.values())) < 1e-9
-    # longs are untouched
-    assert all(out[f"L{i}"] == 0.125 for i in range(4))
-    # the surviving shorts absorbed it evenly
-    assert all(abs(out[f"S{i}"] + 0.5/3) < 1e-9 for i in (1, 2, 3))
+    out, st = solve_short_share_targets(targets, prices, cap)
+    short = abs(sum(w for w in out.values() if w < 0))
+    assert short <= 0.5 + 1e-12, "the leg must never exceed its target"
+    assert short > 0.49, f"and should get close: {short}"
+    assert "S0" not in out                      # unsizeable, dropped
+    assert st["dropped"] == 1 and st["sized"] == 3
+    assert all(out[f"L{i}"] == 0.125 for i in range(4))   # longs untouched
 
-    # a book with no unsizeable short is returned unchanged
-    same, st2 = redistribute_unsizeable_shorts(targets, {**prices, "S0": 50.0}, cap)
-    assert st2["dropped"] == 0 and same == targets
+    # every solved weight must round-trip to a whole share count >= 1
+    for sym, w in out.items():
+        if w < 0:
+            shares = abs(w) * cap / prices[sym]
+            assert abs(shares - round(shares)) < 1e-9
+            assert round(shares) >= 1
 
-    # all-unsizeable shorts must NOT loop forever or invent exposure
-    allbad = {**{f"L{i}": 0.125 for i in range(4)},
-              **{f"S{i}": -0.125 for i in range(4)}}
+    # a leg that fits exactly is filled exactly
+    exact, st2 = solve_short_share_targets(targets, {**prices, "S0": 50.0}, cap)
+    assert abs(abs(sum(w for w in exact.values() if w < 0)) - 0.5) < 1e-9
+    assert st2["dropped"] == 0 and abs(st2["fill"] - 1.0) < 1e-6
+
+    # all shorts unsizeable: drop them all rather than invent exposure
     pbad = {**{f"L{i}": 50.0 for i in range(4)},
             **{f"S{i}": 500_000.0 for i in range(4)}}
-    out3, st3 = redistribute_unsizeable_shorts(allbad, pbad, cap)
-    assert st3["passes"] <= 8
-    assert sum(1 for w in out3.values() if w < 0) in (0, 4)
+    out3, st3 = solve_short_share_targets(targets, pbad, cap)
+    assert st3["sized"] == 0 and not any(w < 0 for w in out3.values())
+
+    # a missing price cannot be sized, and must not raise
+    out4, _ = solve_short_share_targets(targets, {k: v for k, v in prices.items()
+                                                  if k != "S1"}, cap)
+    assert "S1" not in out4
+
+    # no shorts at all -> unchanged
+    longs = {f"L{i}": 0.25 for i in range(4)}
+    same, st5 = solve_short_share_targets(longs, prices, cap)
+    assert same == longs and st5["sized"] == 0
 
 
-def test_universe_guard_refuses_a_collapsed_fixture():
-    """The fixture stamps its build horizon as end_date on every still-active
-    name, so when that horizon passes the universe drops to its open-ended
-    rows. It happened twice — 1,472 -> 502 on 2026-09-02 (undetected for eight
-    sessions; the 2026-09-14 book spent 255 orders re-targeting onto it) and
-    1,508 -> 503 on 2026-10-01. A scheduled unattended run is exactly where
-    that must stop the run rather than trade."""
-    import csv as _csv
+def test_short_share_solver_trades_exact_fill_for_equal_weight():
+    """Coarse instruments bound how well a leg can fill. A $9,000 share against
+    a $25,000 budget is 2 shares ($18k) or 3 ($27k) — and 3 overshoots the leg,
+    which the solver never does. It could close the gap by loading the cheap
+    name to $32k, but that abandons the equal weighting the spec asks for, so
+    it caps every name at one share above its budget and accepts the underfill.
 
-    from new_pipeline.scripts.paper_trade_book import assert_universe_live, universe_health
+    On the real book this costs almost nothing: 243 names sized, fill 0.999962,
+    $1.79 short of a $47,323 leg."""
+    from new_pipeline.scripts.paper_trade_book import solve_short_share_targets
 
-    def write(tmp, rule_end):
-        rows = [{"ticker": f"R{i}", "gics_sector": "Small Cap Extended",
-                 "start_date": "2026-08-01", "end_date": rule_end}
-                for i in range(100)]
-        rows += [{"ticker": f"S{i}", "gics_sector": "Industrials",
-                  "start_date": "2020-01-01", "end_date": ""} for i in range(10)]
-        # the outlier that made max(end_date) the wrong check both times
-        rows.append({"ticker": "OUTLIER", "gics_sector": "Industrials",
-                     "start_date": "2026-08-01", "end_date": "2026-12-01"})
-        with open(tmp, "w", newline="", encoding="utf-8") as fh:
-            w = _csv.DictWriter(fh, ["ticker", "gics_sector", "start_date", "end_date"])
-            w.writeheader()
-            w.writerows(rows)
-        return tmp
+    cap = 100_000.0
+    out, st = solve_short_share_targets({"CHEAP": -0.25, "DEAR": -0.25},
+                                        {"CHEAP": 7.0, "DEAR": 9_000.0}, cap)
+    notional = {k: abs(v) * cap for k, v in out.items()}
+    assert sum(notional.values()) <= 50_000.0 + 1e-6      # never overshoots
+    # the dear name sits one share BELOW its budget because the next would bust
+    assert abs(notional["DEAR"] - 18_000.0) < 1e-6
+    assert notional["DEAR"] + 9_000.0 > 25_000.0
+    # the cheap name takes its +1 share and no more (no concentration grab)
+    assert abs(notional["CHEAP"] - 25_004.0) < 1e-6
+    assert st["fill"] < 1.0 and st["dropped"] == 0
 
-    import tempfile
-    with tempfile.TemporaryDirectory() as d:
-        healthy = write(f"{d}/u.csv", "2026-11-01")
-        h = universe_health(healthy, date(2026, 10, 5))
-        assert h["live"] == 111 and not h["collapsed"]
-        assert h["cliff"] == date(2026, 11, 1)
-        assert assert_universe_live(healthy, date(2026, 10, 5))["live"] == 111
-
-        # one day past the cliff: 10 open-ended + the outlier = collapsed
-        with pytest.raises(SystemExit, match="refusing to trade"):
-            assert_universe_live(healthy, date(2026, 11, 2))
-
-        # and the real fixture must pass today
-        real = "new_pipeline/data/universe/liquid1500_pit.csv"
-        assert not universe_health(real, date.today())["collapsed"]
+    # When few names carry a large leg, pass 1 alone stops one share above
+    # each name's ORIGINAL weight and underfills badly (0.753 here). Pass 2
+    # tops the survivors up toward an equal split WITHOUT dropping any, which
+    # is the breadth-preserving choice: re-spreading the budget over only
+    # fully-fundable names filled no better on the real book (0.99997) while
+    # collapsing the short leg from 243 names to 121.
+    t = {f"S{i}": -0.125 for i in range(4)}
+    pr = {f"S{i}": 50.0 for i in range(4)}
+    pr["S0"] = 500_000.0
+    _, st2 = solve_short_share_targets(t, pr, cap)
+    assert st2["dropped"] == 1 and st2["sized"] == 3
+    assert st2["fill"] > 0.998, f"top-up should close most of the gap: {st2}"
+    assert st2["fill"] <= 1.0

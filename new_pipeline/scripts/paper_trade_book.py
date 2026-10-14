@@ -246,63 +246,94 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
     return weights, new_state
 
 
-def redistribute_unsizeable_shorts(targets: dict, prices: dict, capital: float,
-                                   fractionable: set | None = None,
-                                   max_passes: int = 8) -> tuple[dict, dict]:
-    """Move weight off short targets too expensive to express, onto ones that fit.
+def solve_short_share_targets(targets: dict, prices: dict, capital: float) -> tuple[dict, dict]:
+    """Integer-share short targets whose NOTIONAL hits the leg's target gross.
 
-    Alpaca forbids fractional short OPENS, so ``diff_orders`` sizes every short
-    in whole shares. The original note assumed that was harmless because "cheap
-    losers round finely anyway" — but the bottom quantile by model score is not
-    the bottom quantile by PRICE. On 2026-10-02, 66 of 592 targets rounded to
-    zero shares and every one was a short: MELI at $1,692, LLY at $1,146, BLK
-    at $1,062, against an ideal position of $158. Anything above ~2x the
-    position size rounds away.
+    Alpaca forbids fractional short opens, so every short is sized in whole
+    shares. Two failures follow from that, and the first fix traded one for
+    the other:
 
-    The long leg keeps those names (longs can go fractional), so the book
-    silently fails to establish 0.1115 of short exposure — gross lands under
-    target and the book runs net LONG by that amount, which is the bulk of the
-    observed +4.85% tilt on a dollar-neutral spec.
+    * Sizing each short independently and rounding to nearest DROPS names
+      priced above ~2x the position budget — 66 of 592 targets on 2026-10-02,
+      every one a short (MELI $1,692, LLY $1,146 against a $158 position). The
+      leg landed at 0.389 of 0.500 and the book ran net LONG by the shortfall.
+    * Redistributing the lost WEIGHT over the survivors restored the target
+      weights, but rounding a larger per-name weight overshoots more often
+      than it undershoots: the realized leg hit 0.5644 (2026-10-05) and 0.5557
+      (2026-10-12) against 0.500, so the book ran net SHORT instead. Two clean
+      rebalances reproduced it, which is what ruled out a transition artifact.
 
-    Dropping the weight entirely (status quo) breaks both gross and net.
-    Forcing one share instead would put $1,692 of MELI against a $158 budget,
-    a 10x concentration — worse. So redistribute: drop what cannot be sized and
-    spread its weight across the shorts that can, keeping the leg's total at
-    target. Iterate, because a raised weight can make a previously-unsizeable
-    name expressible. Longs are untouched and the set of NAMES the model chose
-    is unchanged — only the dollars move, within the short leg."""
-    fractionable = fractionable or set()
-    leg_total = sum(w for w in targets.values() if w < 0.0)
+    Solve the share counts directly instead. Floor every name to whole shares
+    (deliberately under-filling), then spend the remaining notional one share
+    at a time on the largest fractional remainders, skipping any share that
+    would not fit. The leg therefore approaches its target FROM BELOW and can
+    never overshoot. Cheap names carry the fine adjustment because a $10 share
+    is a smaller increment than a $1,692 one, so the fit is tight.
+
+    Returned weights are ``shares * price / capital``, which round-trips
+    exactly: ``int(round(w * capital / price)) == shares``. So ``diff_orders``
+    needs no change and derives precisely the share counts solved here."""
+    import math
+
+    leg_notional = abs(sum(w for w in targets.values() if w < 0.0)) * capital
     shorts = {s: w for s, w in targets.items() if w < 0.0}
-    if not shorts or leg_total == 0.0:
-        return dict(targets), {"dropped": 0, "weight_moved": 0.0, "passes": 0}
+    if not shorts or leg_notional <= 0.0:
+        return dict(targets), {"sized": 0, "dropped": 0, "fill": 1.0}
 
-    def sizeable(sym: str, weight: float) -> bool:
+    # PASS 1 — breadth first. Floor each name at its OWN target weight, then
+    # hand out one extra share by largest fractional remainder while it fits.
+    # Most names floor to zero (a $160 budget against a $300 share) and pick up
+    # their single share here, so the leg spreads across as many names as the
+    # budget allows. An earlier attempt re-spread the budget over only the
+    # names that could hold a full share first; it filled identically (0.99997)
+    # but collapsed the leg from 243 names to 121, and breadth is the sleeve's
+    # whole thesis — so weight-first, not budget-first.
+    plan, frac, spent = {}, [], 0.0
+    for sym, weight in shorts.items():
         price = prices.get(sym)
         if not price or price <= 0:
-            return False
-        return int(round(abs(weight) * capital / price)) >= 1
+            continue
+        ideal = abs(weight) * capital / price
+        whole = int(math.floor(ideal))
+        plan[sym] = whole
+        spent += whole * price
+        frac.append((ideal - whole, sym))
+    for _, sym in sorted(frac, reverse=True):
+        price = prices[sym]
+        if spent + price <= leg_notional:
+            plan[sym] += 1
+            spent += price
 
-    keep = dict(shorts)
-    dropped: dict[str, float] = {}
-    passes = 0
-    while passes < max_passes:
-        passes += 1
-        bad = [s for s, w in keep.items() if not sizeable(s, w)]
-        if not bad or len(bad) == len(keep):
-            break
-        for s in bad:
-            dropped[s] = keep.pop(s)
-        share = leg_total / len(keep)
-        keep = {s: share for s in keep}
+    # PASS 2 — top up toward an equal split WITHOUT dropping anyone. Pass 1
+    # underfills when few names carry a large leg (3 names at $50 against a
+    # $50k leg stop at 251 shares each, 0.753 of target), because its cap is
+    # one share above each name's ORIGINAL weight rather than its fair share
+    # of the leg. Give the shortest-funded name a share at a time, capped at
+    # its fair budget, while the leg has room.
+    held = [s for s, n in plan.items() if n > 0]
+    if held and spent < leg_notional:
+        fair = leg_notional / len(held)
+        for _ in range(10_000):
+            gaps = [(fair - plan[s] * prices[s], s) for s in held
+                    if (plan[s] + 1) * prices[s] <= fair
+                    and spent + prices[s] <= leg_notional]
+            if not gaps:
+                break
+            _, sym = max(gaps)
+            plan[sym] += 1
+            spent += prices[sym]
 
     out = {s: w for s, w in targets.items() if w >= 0.0}
-    out.update(keep)
-    return out, {"dropped": len(dropped),
-                 "weight_moved": round(abs(sum(dropped.values())), 6),
-                 "short_gross": round(abs(sum(keep.values())), 6),
-                 "target_short_gross": round(abs(leg_total), 6),
-                 "passes": passes}
+    sized = 0
+    for sym, shares in plan.items():
+        if shares > 0:
+            out[sym] = -(shares * prices[sym]) / capital
+            sized += 1
+    return out, {"sized": sized,
+                 "dropped": len(shorts) - sized,
+                 "notional": round(spent, 2),
+                 "target_notional": round(leg_notional, 2),
+                 "fill": round(spent / leg_notional, 6)}
 
 
 def diff_orders(targets: dict, positions: dict, prices: dict, capital: float,
@@ -607,13 +638,12 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
     # 2026-10-02, every one a short), so the short leg lands under target and
     # the book runs net long by the shortfall. Move that weight onto shorts
     # that can be expressed, keeping gross and neutrality at spec.
-    targets, shortfix = redistribute_unsizeable_shorts(
-        targets, prices, capital, fractionable=fractionable)
-    if shortfix["dropped"]:
-        _logger.warning("short leg: %d names unsizeable in whole shares, %.4f weight "
-                        "redistributed over the rest (short gross %.4f of %.4f target)",
-                        shortfix["dropped"], shortfix["weight_moved"],
-                        shortfix["short_gross"], shortfix["target_short_gross"])
+    targets, shortfix = solve_short_share_targets(targets, prices, capital)
+    if shortfix["dropped"] or shortfix["fill"] < 0.999:
+        _logger.warning("short leg: solved %d names in whole shares, %d unsizeable; "
+                        "notional $%.0f of $%.0f target (fill %.4f)",
+                        shortfix["sized"], shortfix["dropped"], shortfix["notional"],
+                        shortfix["target_notional"], shortfix["fill"])
     orders = diff_orders(targets, positions, prices, capital, fractionable=fractionable)
 
     print(f"book: {len([w for w in targets.values() if w > 0])} longs / "
