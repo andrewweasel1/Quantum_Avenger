@@ -2,5 +2,5 @@
 # NOT in the SessionStart hook's requirements.txt — install on the host that
 # serves the dashboard:  pip install -r new_pipeline/requirements-api.txt
 fastapi>=0.110
-uvicorn>=0.27
+uvicorn>=0.54.0
 # httpx is pulled in transitively (Starlette TestClient) and used by the tests.
