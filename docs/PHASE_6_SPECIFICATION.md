@@ -1,5 +1,7 @@
 # Phase 6: Dashboard & Monitoring - Detailed Specification
 
+> **Implementation status: ◐ OFFLINE‑COMPLETE, backends deferred.** The Streamlit multipage dashboard (live monitor, veto analysis, trade log, model registry, risk, settings) renders from veto‑ledger / trade‑log Parquet, with KPI cards, in `new_pipeline/monitoring/`. **Remaining:** a real time‑series `MetricsCollector` + non‑trivial health checks, `telemetry.py` → Prometheus, **alert‑delivery backends** (email/Slack/webhook in `notifications.py` are stubbed), and optional live streaming. See IMPLEMENTATION_STATUS §4. *Original build spec; current state in `ARCHITECTURE_ROADMAP.md`.*
+
 **Duration**: 2 weeks  
 **Target Date**: Complete by mid-August (after Phase 5)  
 **Success Criteria**: Real-time dashboard live; KPI updates streaming; veto ledger displayed; trade log queryable; 85%+ test coverage

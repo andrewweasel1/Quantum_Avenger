@@ -1,0 +1,749 @@
+ticker,gics_sector,start_date,end_date
+A,Health Care,2000-06-05,
+AABA,Communication Services,1999-12-08,2017-06-19
+AAL,Industrials,2015-03-23,2024-09-23
+AAP,Consumer Discretionary,2015-07-09,2023-08-25
+AAPL,Information Technology,1996-01-02,
+ABBV,Health Care,2013-01-02,
+ABMD,Health Care,2018-05-31,2022-12-22
+ABNB,Consumer Discretionary,2023-09-18,
+ABT,Health Care,1996-01-02,
+ACGL,Financials,2022-11-01,
+ACN,Information Technology,2011-07-06,
+ADBE,Information Technology,1997-05-06,
+ADI,Information Technology,1999-10-12,
+ADM,Consumer Staples,1996-01-02,
+ADP,Industrials,1996-01-02,
+ADS,Financials,2013-12-23,2020-06-22
+ADSK,Information Technology,1996-01-02,
+ADT,Industrials,2012-10-02,2016-05-02
+AEE,Utilities,1996-01-02,
+AEP,Utilities,1996-01-02,
+AES,Utilities,1998-10-02,
+AET,Health Care,1996-01-02,2018-11-29
+AFL,Financials,1999-05-28,
+AGN,Health Care,1996-01-02,2020-05-12
+AIG,Financials,1996-01-02,
+AIV,Real Estate,2003-03-14,2020-12-21
+AIZ,Financials,2007-04-10,
+AJG,Financials,2016-05-31,
+AKAM,Information Technology,2007-07-12,
+ALB,Materials,2016-07-01,
+ALGN,Health Care,2017-06-19,
+ALK,Industrials,2016-05-13,2023-12-18
+ALL,Financials,1996-01-02,
+ALLE,Industrials,2013-12-02,
+ALTR,Information Technology,2000-04-18,2015-12-28
+ALXN,Health Care,2012-05-25,2021-07-21
+AMAT,Information Technology,1996-01-02,
+AMCR,Materials,2019-06-07,
+AMD,Information Technology,2017-03-20,
+AME,Industrials,2013-09-23,
+AMG,Financials,2014-07-01,2019-12-23
+AMGN,Health Care,1996-01-02,
+AMP,Financials,2005-10-03,
+AMT,Real Estate,2007-11-19,
+AMTM,Industrials,2024-09-30,2024-12-23
+AMZN,Consumer Discretionary,2005-11-21,
+AN,Consumer Discretionary,2003-02-24,2017-08-08
+ANDV,Energy,2007-09-27,2018-10-01
+ANET,Information Technology,2018-08-28,
+ANSS,Information Technology,2017-06-19,2025-07-18
+AON,Financials,1996-04-23,
+AOS,Industrials,2017-07-26,
+APA,Energy,1997-07-28,
+APC,Energy,1997-07-28,2019-08-09
+APD,Materials,1996-01-02,
+APH,Information Technology,2008-09-30,
+APO,Financials,2024-12-23,
+APP,Information Technology,2025-09-22,
+APTV,Consumer Discretionary,2012-12-24,
+ARE,Real Estate,2017-03-20,
+ARES,Financials,2025-12-11,
+ARG,Materials,2009-09-09,2016-05-23
+ARNC,Industrials,1996-01-02,2020-04-06
+ATI,Materials,1996-01-02,2015-07-02
+ATO,Utilities,2019-02-15,
+ATVI,Communication Services,2015-08-31,2023-10-18
+AVB,Real Estate,2007-01-10,
+AVGO,Information Technology,2014-05-08,
+AVP,Consumer Staples,1996-01-02,2015-03-23
+AVY,Materials,1996-01-02,
+AWK,Utilities,2016-03-04,
+AXON,Industrials,2023-05-04,
+AXP,Financials,1996-01-02,
+AYI,Industrials,2016-05-03,2018-06-18
+AZO,Consumer Discretionary,1997-01-02,
+BA,Industrials,1996-01-02,
+BAC,Financials,1996-01-02,
+BALL,Materials,1996-01-02,
+BAX,Health Care,1996-01-02,
+BBBY,Consumer Discretionary,1999-10-01,2017-07-26
+BBT,Financials,1997-12-04,2019-12-09
+BBWI,Consumer Discretionary,1996-01-02,2024-10-01
+BBY,Consumer Discretionary,1999-06-30,
+BCR,Health Care,1996-01-02,2017-12-29
+BDX,Health Care,1996-01-02,
+BEN,Financials,1998-04-29,
+BF.B,Consumer Staples,1996-01-02,
+BG,Consumer Staples,2023-03-15,
+BHF,Financials,2017-08-07,2019-04-02
+BIIB,Health Care,2003-11-13,
+BIO,Health Care,2020-06-22,2024-09-23
+BKNG,Consumer Discretionary,2009-11-06,
+BKR,Energy,1996-01-02,
+BLDR,Industrials,2023-12-18,
+BLK,Financials,2011-04-04,
+BMY,Health Care,1996-01-02,
+BNY,Financials,1996-01-02,
+BR,Industrials,2018-06-18,
+BRCM,Information Technology,2000-07-03,2016-02-01
+BRK.B,Financials,2010-02-16,
+BRO,Financials,2021-09-20,
+BSX,Health Care,1996-01-02,
+BWA,Consumer Discretionary,2011-12-19,2025-03-24
+BX,Financials,2023-09-18,
+BXLT,Health Care,2015-07-01,2016-06-03
+BXP,Real Estate,2006-04-03,
+C,Financials,1996-01-02,
+CA,Information Technology,1996-01-02,2018-11-06
+CAG,Consumer Staples,1996-01-02,2026-06-30
+CAH,Health Care,1997-05-27,
+CAM,Energy,2008-01-29,2016-04-04
+CARR,Industrials,2020-04-03,
+CASY,Consumer Staples,2026-04-09,
+CAT,Industrials,1996-01-02,
+CB,Financials,1996-01-02,
+CBOE,Financials,2017-03-01,
+CBRE,Real Estate,2006-11-10,
+CBS,Communication Services,1996-01-02,2019-12-05
+CCE,Consumer Staples,1998-10-08,2016-05-31
+CCEP,Consumer Staples,2016-01-04,2016-05-31
+CCI,Real Estate,2012-03-13,
+CCL,Consumer Discretionary,1998-12-22,
+CDNS,Information Technology,2017-09-18,
+CDW,Information Technology,2019-09-23,
+CE,Materials,2018-12-24,2025-03-24
+CEG,Utilities,2022-02-02,
+CELG,Health Care,2006-11-06,2019-11-21
+CERN,Health Care,2010-04-30,2022-06-08
+CF,Materials,2008-08-27,
+CFG,Financials,2016-02-01,
+CFN,Health Care,2009-09-01,2015-03-17
+CHD,Consumer Staples,2015-12-29,
+CHRW,Industrials,2007-03-02,
+CHTR,Communication Services,2016-09-08,
+CI,Health Care,1996-01-02,
+CIEN,Information Technology,2026-02-09,
+CINF,Financials,1997-12-18,
+CL,Consumer Staples,1996-01-02,
+CLX,Consumer Staples,1996-01-02,
+CMA,Financials,1996-01-02,2024-06-24
+CMCSA,Communication Services,1996-01-02,
+CME,Financials,2006-08-11,
+CMG,Consumer Discretionary,2011-04-28,
+CMI,Industrials,1996-01-02,
+CMS,Utilities,1999-05-03,
+CNC,Health Care,2016-03-30,
+CNP,Utilities,1996-01-02,
+CNX,Energy,2006-06-28,2016-03-04
+COF,Financials,1998-07-01,
+COHR,Information Technology,2026-03-23,
+COIN,Financials,2025-05-19,
+COL,Industrials,2001-07-02,2018-11-27
+COO,Health Care,2016-09-23,
+COP,Energy,1996-01-02,
+COR,Health Care,2001-08-30,
+COST,Consumer Staples,1996-01-02,
+COTY,Consumer Staples,2016-10-03,2020-09-21
+COV,Health Care,2011-03-01,2015-01-27
+CPAY,Financials,2018-06-20,
+CPB,Consumer Staples,1996-01-02,2026-06-22
+CPGX,Energy,2015-07-02,2016-07-01
+CPRI,Consumer Discretionary,2013-11-13,2020-05-12
+CPRT,Industrials,2018-07-02,
+CPT,Real Estate,2022-04-04,
+CRH,Materials,2025-12-22,
+CRL,Health Care,2021-05-14,
+CRM,Information Technology,2008-09-15,
+CRWD,Information Technology,2024-06-24,
+CSCO,Information Technology,1996-01-02,
+CSGP,Real Estate,2022-09-19,
+CSRA,Information Technology,2015-11-30,2018-04-04
+CSX,Industrials,1996-01-02,
+CTAS,Industrials,2001-03-01,
+CTLT,Health Care,2020-09-21,2024-12-23
+CTRA,Energy,2008-06-23,2026-05-07
+CTSH,Information Technology,2006-11-17,
+CTVA,Materials,2019-06-03,
+CTXS,Information Technology,1999-12-01,2022-10-03
+CVC,Communication Services,2010-12-20,2016-06-21
+CVNA,Consumer Discretionary,2025-12-22,
+CVS,Health Care,1996-01-02,
+CVX,Energy,1996-01-02,
+CXO,Energy,2016-02-22,2021-01-21
+CZR,Consumer Discretionary,2021-03-22,2025-09-22
+D,Utilities,1996-01-02,
+DAL,Industrials,2013-09-11,
+DASH,Communication Services,2025-03-24,
+DAY,Industrials,2021-09-20,2026-02-09
+DD,Materials,1996-01-02,2017-09-01
+DD,Materials,2019-06-03,
+DDOG,Information Technology,2025-07-09,
+DE,Industrials,1996-01-02,
+DECK,Consumer Discretionary,2024-03-18,
+DELL,Information Technology,2024-09-23,
+DFS,Financials,2007-07-02,2025-05-19
+DG,Consumer Staples,2012-12-03,
+DGX,Health Care,2002-12-12,
+DHI,Consumer Discretionary,2005-07-05,
+DHR,Health Care,1998-11-18,
+DIS,Communication Services,1996-01-02,
+DISCA,Communication Services,2010-03-01,2022-04-11
+DISH,Communication Services,2017-03-13,2023-06-20
+DLR,Real Estate,2016-05-18,
+DLTR,Consumer Staples,2011-12-19,
+DNB,Industrials,2008-12-02,2017-04-05
+DNR,Energy,2009-04-02,2015-03-23
+DO,Energy,2009-02-26,2016-10-03
+DOC,Real Estate,2008-03-31,
+DOV,Industrials,1996-01-02,
+DOW,Materials,1996-01-02,2017-09-01
+DOW,Materials,2019-04-02,
+DPZ,Consumer Discretionary,2020-05-12,
+DRE,Real Estate,2017-07-26,2022-10-03
+DRI,Consumer Discretionary,1996-01-02,
+DTE,Utilities,1996-01-02,
+DTV,Communication Services,2006-12-04,2015-07-27
+DUK,Utilities,1996-01-02,
+DVA,Health Care,2008-07-31,
+DVN,Energy,2000-08-30,
+DWDP,Materials,2017-09-01,2019-06-03
+DXC,Information Technology,1996-01-02,2015-12-01
+DXC,Information Technology,2017-04-04,2023-10-02
+DXCM,Health Care,2020-05-12,
+EA,Communication Services,2002-07-22,
+EBAY,Consumer Discretionary,2002-07-22,
+ECHO,Communication Services,2026-06-24,
+ECL,Materials,1996-01-02,
+ED,Utilities,1996-01-02,
+EFX,Industrials,1997-06-19,
+EG,Financials,2017-06-19,
+EIX,Utilities,1996-01-02,
+EL,Consumer Staples,2006-01-05,
+ELV,Health Care,2002-07-25,
+EMC,Information Technology,1996-03-28,2016-09-07
+EME,Industrials,2025-09-22,
+EMN,Materials,1996-01-02,2025-11-04
+EMR,Industrials,1996-01-02,
+ENDP,Health Care,2015-01-27,2017-03-02
+ENPH,Information Technology,2021-01-07,2025-09-22
+EOG,Energy,2000-11-02,
+EPAM,Information Technology,2021-12-14,2026-06-02
+EQIX,Real Estate,2015-03-23,
+EQR,Real Estate,2001-12-03,
+EQT,Energy,2008-12-19,2018-11-13
+EQT,Energy,2022-10-03,
+ERIE,Financials,2024-09-23,
+ES,Utilities,2009-03-17,
+ESRX,Health Care,2003-09-26,2018-12-21
+ESS,Real Estate,2014-04-02,
+ESV,Energy,2012-07-31,2016-03-30
+ETFC,Financials,2004-04-01,2020-10-07
+ETN,Industrials,1996-01-02,
+ETR,Utilities,1996-01-02,
+ETSY,Consumer Discretionary,2020-09-21,2024-09-23
+EVHC,Health Care,2016-12-02,2018-10-11
+EVRG,Utilities,2018-06-05,
+EW,Health Care,2011-04-01,
+EXC,Utilities,1996-01-02,
+EXE,Energy,2006-03-03,2018-03-19
+EXE,Energy,2025-03-24,
+EXPD,Industrials,2007-10-10,
+EXPE,Consumer Discretionary,2007-10-02,
+EXR,Real Estate,2016-01-19,
+F,Consumer Discretionary,1996-01-02,
+FANG,Energy,2018-12-03,
+FAST,Industrials,2008-09-15,
+FBHS,Industrials,2016-06-24,2022-12-19
+FCPT,Real Estate,2015-11-10,2015-11-17
+FCX,Materials,1996-01-02,
+FDO,Consumer Discretionary,2001-08-06,2015-07-07
+FDS,Financials,2021-12-20,
+FDX,Industrials,1996-01-02,
+FDXF,Industrials,2026-06-01,
+FE,Utilities,1996-01-02,
+FFIV,Information Technology,2010-12-20,
+FI,Financials,2001-04-02,
+FICO,Information Technology,2023-03-20,
+FIS,Financials,2006-11-10,
+FITB,Financials,1996-03-08,
+FIX,Industrials,2025-12-22,
+FL,Consumer Discretionary,2016-04-04,2019-08-09
+FLEX,Information Technology,2026-06-22,
+FLIR,Information Technology,2009-01-02,2021-05-14
+FLR,Industrials,2000-12-22,2019-06-03
+FLS,Industrials,2008-10-02,2021-03-22
+FMC,Materials,2009-08-19,2025-03-24
+FOSL,Consumer Discretionary,2012-04-04,2016-01-05
+FOX,Communication Services,2015-09-21,
+FOXA,Communication Services,2004-12-20,
+FRC,Financials,2019-01-02,2023-05-04
+FRT,Real Estate,2016-02-01,
+FSLR,Information Technology,2009-10-16,2017-03-20
+FSLR,Information Technology,2022-12-19,
+FTI,Energy,2009-06-05,2021-02-12
+FTNT,Information Technology,2018-10-11,
+FTR,Communication Services,2001-02-27,2017-03-20
+FTV,Industrials,2016-07-05,
+GAS,Utilities,2011-12-13,2016-07-01
+GD,Industrials,1996-01-02,
+GDDY,Information Technology,2024-06-24,
+GE,Industrials,1996-01-02,
+GEHC,Health Care,2023-01-04,
+GEN,Information Technology,2003-03-31,
+GEV,Industrials,2024-04-02,
+GGP,Real Estate,2013-12-10,2018-08-28
+GILD,Health Care,2004-07-01,
+GIS,Consumer Staples,1996-01-02,
+GL,Financials,1996-01-02,
+GLW,Information Technology,1996-01-02,
+GM,Consumer Discretionary,2013-06-07,
+GMCR,Consumer Staples,2014-03-24,2016-03-03
+GME,Consumer Discretionary,2007-12-14,2016-04-25
+GNRC,Industrials,2021-03-22,
+GNW,Financials,2005-12-02,2015-11-18
+GOOGL,Communication Services,2006-04-03,
+GPC,Consumer Discretionary,1996-01-02,
+GPN,Financials,2016-04-25,
+GPS,Consumer Discretionary,1996-01-02,2022-02-02
+GRMN,Consumer Discretionary,2012-12-12,
+GS,Financials,2002-07-22,
+GT,Consumer Discretionary,1996-01-02,2019-02-27
+GWW,Industrials,1996-01-02,
+HAL,Energy,1996-01-02,
+HAR,Consumer Discretionary,2006-02-01,2017-03-13
+HAS,Consumer Discretionary,1996-01-02,
+HBAN,Financials,1997-08-06,
+HBI,Consumer Discretionary,2015-03-23,2021-12-20
+HCA,Health Care,2015-01-27,
+HCBK,Financials,2007-02-15,2015-11-02
+HD,Consumer Discretionary,1996-01-02,
+HES,Energy,1996-01-02,2025-07-23
+HFC,Energy,2018-06-18,2021-06-04
+HIG,Financials,1996-01-02,
+HII,Industrials,2018-01-03,
+HLT,Consumer Discretionary,2017-06-19,
+HOG,Consumer Discretionary,2000-01-31,2020-06-22
+HOLX,Health Care,2016-03-30,2026-04-09
+HON,Industrials,1996-01-02,
+HONA,Industrials,2026-06-29,
+HOOD,Financials,2025-09-22,
+HOT,Consumer Discretionary,2000-11-17,2016-09-23
+HP,Energy,2010-03-01,2020-05-22
+HPE,Information Technology,2015-11-02,
+HPQ,Information Technology,1996-01-02,
+HRB,Consumer Discretionary,1996-01-02,2020-09-21
+HRL,Consumer Staples,2009-03-04,
+HSIC,Health Care,2015-03-18,
+HSP,Health Care,2004-05-03,2015-09-03
+HST,Real Estate,2007-03-20,
+HSY,Consumer Staples,1996-01-02,
+HUBB,Industrials,2023-10-18,
+HUM,Health Care,1996-01-02,
+HWM,Industrials,2020-04-06,
+IBKR,Financials,2025-08-28,
+IBM,Information Technology,1996-01-02,
+ICE,Financials,2007-09-26,
+IDXX,Health Care,2017-01-05,
+IEX,Industrials,2019-08-09,
+IFF,Materials,1996-01-02,
+ILMN,Health Care,2015-11-19,2024-06-24
+INCY,Health Care,2017-02-28,
+INFO,Industrials,2017-06-02,2022-03-02
+INTC,Information Technology,1996-01-02,
+INTU,Information Technology,2000-12-11,
+INVH,Real Estate,2022-09-19,
+IP,Materials,1996-01-02,
+IPG,Communication Services,1996-01-02,2025-11-28
+IPGP,Information Technology,2018-03-07,2022-06-21
+IQV,Health Care,2017-08-29,
+IR,Industrials,2010-11-17,
+IRM,Real Estate,2009-01-06,
+ISRG,Health Care,2008-06-02,
+IT,Information Technology,2017-04-05,
+ITW,Industrials,1996-01-02,
+IVZ,Financials,2008-08-21,
+J,Industrials,2007-10-26,
+JBHT,Industrials,2015-07-01,
+JBL,Information Technology,2023-12-18,
+JCI,Industrials,1996-01-02,
+JEF,Financials,2007-08-27,2019-09-26
+JKHY,Financials,2018-11-13,
+JNJ,Health Care,1996-01-02,
+JNPR,Information Technology,2006-06-02,2025-07-09
+JOY,Industrials,2011-02-28,2015-10-08
+JPM,Financials,1996-01-02,
+JWN,Consumer Discretionary,1996-01-02,2020-06-22
+K,Consumer Staples,1996-01-02,2025-12-11
+KDP,Consumer Staples,2008-10-07,2018-07-02
+KDP,Consumer Staples,2022-06-21,
+KEY,Financials,1996-01-02,
+KEYS,Information Technology,2018-11-06,
+KHC,Consumer Staples,2015-07-06,
+KIM,Real Estate,2006-04-03,
+KKR,Financials,2024-06-24,
+KLAC,Information Technology,1997-09-15,
+KMB,Consumer Staples,1996-01-02,
+KMI,Energy,2012-05-25,
+KMX,Consumer Discretionary,2010-06-28,2025-10-31
+KO,Consumer Staples,1996-01-02,
+KR,Consumer Staples,1996-01-02,
+KRFT,Consumer Staples,2012-10-02,2015-07-06
+KSS,Consumer Discretionary,1998-08-14,2020-09-21
+KSU,Industrials,2013-05-24,2021-12-14
+KVUE,Consumer Staples,2023-08-25,
+L,Financials,1996-01-02,
+LDOS,Industrials,2019-08-09,
+LEG,Consumer Discretionary,1999-10-18,2021-12-20
+LEN,Consumer Discretionary,2005-10-04,
+LH,Health Care,2004-11-01,
+LHX,Industrials,2008-09-22,
+LII,Industrials,2024-12-23,
+LIN,Materials,2018-11-06,
+LITE,Information Technology,2026-03-23,
+LKQ,Consumer Discretionary,2016-05-23,2025-12-22
+LLL,Industrials,2004-12-01,2019-07-01
+LLTC,Information Technology,2000-04-03,2017-03-13
+LLY,Health Care,1996-01-02,
+LM,Financials,2006-04-24,2016-12-02
+LMT,Industrials,1996-01-02,
+LNC,Financials,1996-01-02,2023-09-18
+LNT,Utilities,2016-07-01,
+LO,Consumer Staples,2008-06-11,2015-06-12
+LOW,Consumer Discretionary,1996-01-02,
+LRCX,Information Technology,2012-06-05,
+LULU,Consumer Discretionary,2023-10-18,
+LUMN,Communication Services,1999-03-25,2023-03-20
+LUV,Industrials,1996-01-02,
+LVLT,Communication Services,2014-11-05,2017-10-13
+LVS,Consumer Discretionary,2019-10-03,
+LW,Consumer Staples,2018-12-03,2026-03-23
+LYB,Materials,2012-09-05,
+LYV,Communication Services,2019-12-23,
+M,Consumer Discretionary,1996-01-02,2020-04-06
+MA,Financials,2008-07-18,
+MAA,Real Estate,2016-12-02,
+MAC,Real Estate,2013-05-09,2019-12-23
+MAR,Consumer Discretionary,1998-05-21,
+MAS,Industrials,1996-01-02,
+MAT,Consumer Discretionary,1996-01-02,2019-06-07
+MCD,Consumer Discretionary,1996-01-02,
+MCHP,Information Technology,2007-09-07,
+MCK,Health Care,1999-01-13,
+MCO,Financials,1996-01-02,
+MDLZ,Consumer Staples,2007-04-02,
+MDT,Health Care,1996-01-02,
+MET,Financials,2000-12-11,
+META,Communication Services,2013-12-23,
+MGM,Consumer Discretionary,2017-07-26,
+MHK,Consumer Discretionary,2013-12-23,2025-12-22
+MJN,Consumer Staples,2009-12-21,2017-06-15
+MKC,Consumer Staples,2003-03-21,
+MKTX,Financials,2019-07-01,2025-09-22
+MLM,Materials,2014-07-02,
+MMC,Financials,1996-01-02,2026-01-14
+MMM,Industrials,1996-01-02,
+MNK,Health Care,2014-08-19,2017-07-26
+MNST,Consumer Staples,2012-06-29,
+MO,Consumer Staples,1996-01-02,
+MOH,Health Care,2022-03-02,2026-03-23
+MON,Materials,2002-08-14,2018-06-07
+MOS,Materials,2011-09-26,
+MPC,Energy,2011-07-01,
+MPWR,Information Technology,2021-02-12,
+MRK,Health Care,1996-01-02,
+MRNA,Health Care,2021-07-21,
+MRO,Energy,1996-01-02,2024-11-26
+MRSH,Financials,2026-01-14,
+MRVL,Information Technology,2026-06-22,
+MS,Financials,1996-01-02,
+MSCI,Financials,2018-04-04,
+MSFT,Information Technology,1996-01-02,
+MSI,Information Technology,1996-01-02,
+MTB,Financials,2004-02-27,
+MTCH,Communication Services,2021-09-20,2026-03-23
+MTD,Health Care,2016-09-06,
+MU,Information Technology,1996-01-02,
+MUR,Energy,2005-08-15,2017-07-26
+MWV,Materials,1996-01-02,2015-07-02
+MXIM,Information Technology,2018-12-03,2021-08-30
+MYL,Health Care,2004-04-23,2020-11-17
+NAVI,Financials,2014-05-01,2018-06-05
+NBL,Energy,2007-10-08,2020-10-12
+NBR,Energy,2000-10-18,2015-03-23
+NCLH,Consumer Discretionary,2017-10-13,
+NDAQ,Financials,2008-10-22,
+NDSN,Industrials,2022-02-15,
+NE,Energy,2011-01-18,2015-07-20
+NEE,Utilities,1996-01-02,
+NEM,Materials,1996-01-02,
+NFLX,Communication Services,2010-12-20,
+NFX,Energy,2010-12-20,2019-02-15
+NI,Utilities,2000-11-02,
+NKE,Consumer Discretionary,1996-01-02,
+NKTR,Health Care,2018-03-19,2019-10-03
+NLSN,Industrials,2013-07-09,2022-10-12
+NOC,Industrials,1996-01-02,
+NOV,Energy,2005-03-14,2021-09-20
+NOW,Information Technology,2019-11-21,
+NRG,Utilities,2010-01-29,
+NSC,Industrials,1996-01-02,
+NTAP,Information Technology,1999-06-25,
+NTRS,Financials,1998-01-30,
+NUE,Materials,1996-01-02,
+NVDA,Information Technology,2001-11-30,
+NVR,Consumer Discretionary,2019-09-26,
+NWL,Consumer Discretionary,1996-01-02,2023-09-18
+NWS,Communication Services,2015-09-21,
+NWSA,Communication Services,2013-07-01,
+NXPI,Information Technology,2021-03-22,
+O,Real Estate,2015-04-07,
+ODFL,Industrials,2019-12-09,
+OGN,Health Care,2021-06-04,2023-10-18
+OI,Materials,2009-01-02,2016-12-02
+OKE,Energy,2010-03-15,
+OMC,Communication Services,1997-12-24,
+ON,Information Technology,2022-06-21,
+ORCL,Information Technology,1996-01-02,
+ORLY,Consumer Discretionary,2009-03-27,
+OTIS,Industrials,2020-04-03,
+OXY,Energy,1996-01-02,
+PANW,Information Technology,2023-06-20,
+PARA,Communication Services,2019-12-05,2025-08-08
+PAYC,Industrials,2020-01-28,2026-03-23
+PAYX,Industrials,1998-10-01,
+PBCT,Financials,2008-11-13,2022-04-04
+PBI,Industrials,1996-01-02,2017-03-01
+PCAR,Industrials,1996-01-02,
+PCG,Utilities,1996-01-02,2019-01-18
+PCG,Utilities,2022-10-03,
+PCL,Real Estate,2002-01-17,2016-02-22
+PCP,Industrials,2007-06-01,2016-02-01
+PDCO,Health Care,2005-10-11,2018-03-19
+PEG,Utilities,1996-01-02,
+PENN,Consumer Discretionary,2021-03-22,2022-09-19
+PEP,Consumer Staples,1996-01-02,
+PETM,Consumer Discretionary,2012-10-05,2015-03-12
+PFE,Health Care,1996-01-02,
+PFG,Financials,2002-07-22,
+PG,Consumer Staples,1996-01-02,
+PGR,Financials,1997-08-04,
+PH,Industrials,1996-01-02,
+PHM,Consumer Discretionary,1996-01-02,
+PKG,Materials,2017-07-26,
+PLD,Real Estate,2003-07-17,
+PLL,Industrials,1996-01-02,2015-08-31
+PLTR,Information Technology,2024-09-23,
+PM,Consumer Staples,2008-03-31,
+PNC,Financials,1996-01-02,
+PNR,Industrials,2012-10-01,
+PNW,Utilities,1999-10-04,
+PODD,Health Care,2023-03-15,
+POM,Utilities,2007-11-09,2016-03-24
+POOL,Consumer Discretionary,2020-10-07,2026-06-22
+PPG,Materials,1996-01-02,
+PPL,Utilities,1996-01-02,
+PRGO,Health Care,2011-12-19,2021-09-20
+PRU,Financials,2002-07-22,
+PSA,Real Estate,2005-08-19,
+PSKY,Communication Services,2025-08-08,
+PSX,Energy,2012-05-01,
+PTC,Information Technology,2021-04-20,
+PVH,Consumer Discretionary,2013-02-14,2022-09-19
+PWR,Industrials,2009-07-01,
+PX,Materials,1996-01-02,2018-10-31
+PXD,Energy,2008-09-24,2024-05-08
+PYPL,Financials,2015-07-20,
+Q,Information Technology,2025-11-03,
+QCOM,Information Technology,1999-07-22,
+QEP,Energy,2010-07-01,2015-07-01
+QRVO,Information Technology,2015-06-12,2024-12-23
+R,Industrials,1996-01-02,2017-06-19
+RAI,Consumer Staples,2002-09-04,2017-07-25
+RCL,Consumer Discretionary,2014-12-05,
+REG,Real Estate,2017-03-02,
+REGN,Health Care,2013-05-01,
+RF,Financials,1998-08-28,
+RHI,Industrials,2000-12-05,2024-06-24
+RHT,Information Technology,2009-07-27,2019-07-15
+RIG,Energy,2013-10-29,2017-07-26
+RJF,Financials,2017-03-20,
+RL,Consumer Discretionary,2007-02-02,
+RMD,Health Care,2017-07-26,
+ROK,Industrials,1996-01-02,
+ROL,Industrials,2018-10-01,
+ROP,Information Technology,2009-12-23,
+ROST,Consumer Discretionary,2009-12-21,
+RRC,Energy,2007-12-21,2018-06-18
+RSG,Industrials,2008-12-05,
+RTN,Industrials,1996-01-02,2020-04-06
+RTX,Industrials,2020-04-03,
+RVTY,Health Care,1996-01-02,
+SATS,Communication Services,2026-03-23,2026-06-24
+SBAC,Real Estate,2017-09-01,
+SBNY,Financials,2021-12-20,2023-03-15
+SBUX,Consumer Discretionary,2000-06-08,
+SCG,Utilities,2009-01-02,2019-01-02
+SCHW,Financials,1997-06-02,
+SE,Energy,2007-01-03,2017-02-27
+SEDG,Information Technology,2021-12-20,2023-12-18
+SEE,Materials,1998-04-01,2023-12-18
+SHW,Materials,1996-01-02,
+SIAL,Materials,1996-01-02,2015-11-18
+SIG,Consumer Discretionary,2015-07-29,2018-03-19
+SIVB,Financials,2018-03-19,2023-03-15
+SJM,Consumer Staples,2008-11-06,
+SLB,Energy,1996-01-02,
+SLG,Real Estate,2015-03-23,2021-03-22
+SMCI,Information Technology,2024-03-18,
+SNA,Industrials,1996-01-02,
+SNDK,Information Technology,2006-04-20,2016-05-12
+SNDK,Information Technology,2025-11-28,
+SNI,Communication Services,2008-07-01,2018-03-07
+SNPS,Information Technology,2017-03-16,
+SO,Utilities,1996-01-02,
+SOLS,Materials,2025-10-30,2025-12-22
+SOLV,Health Care,2024-04-01,
+SPG,Real Estate,2002-06-26,
+SPGI,Financials,1996-01-02,
+SPLS,Consumer Discretionary,1998-10-07,2017-09-13
+SRCL,Industrials,2008-11-19,2018-12-03
+SRE,Utilities,1998-06-29,
+STE,Health Care,2019-12-23,
+STI,Financials,1996-01-02,2019-12-09
+STJ,Health Care,1996-01-02,2017-01-05
+STLD,Materials,2022-12-22,
+STT,Financials,1997-08-18,
+STX,Information Technology,2012-07-02,
+STZ,Consumer Staples,2005-07-05,
+SW,Materials,2024-07-08,
+SWK,Industrials,1996-01-02,
+SWKS,Information Technology,2015-03-12,
+SWN,Energy,2008-06-06,2017-04-04
+SWY,Consumer Staples,1998-11-13,2015-01-27
+SYF,Financials,2015-11-18,
+SYK,Health Care,2000-12-12,
+SYY,Consumer Staples,1996-01-02,
+T,Communication Services,1996-01-02,
+TAP,Consumer Staples,1996-01-02,
+TDC,Information Technology,2007-10-01,2017-06-19
+TDG,Industrials,2016-06-03,
+TDY,Information Technology,2020-06-22,
+TE,Utilities,2001-10-10,2016-07-01
+TECH,Health Care,2021-08-30,
+TEG,Utilities,2007-02-22,2015-06-30
+TEL,Information Technology,2011-10-17,
+TER,Information Technology,2020-09-21,
+TFC,Financials,2019-12-09,
+TFX,Health Care,2019-01-18,2025-03-24
+TGNA,Communication Services,1996-01-02,2017-06-02
+TGT,Consumer Staples,1996-01-02,
+THC,Health Care,1996-01-02,2016-04-18
+TIF,Consumer Discretionary,2000-06-21,2021-01-07
+TJX,Consumer Discretionary,1996-01-02,
+TKO,Communication Services,2025-03-24,
+TMO,Health Care,1997-01-02,
+TMUS,Communication Services,2019-07-15,
+TPL,Energy,2024-11-26,
+TPR,Consumer Discretionary,2004-09-01,
+TRGP,Energy,2022-10-12,
+TRIP,Communication Services,2011-12-21,2019-12-23
+TRMB,Information Technology,2021-01-21,
+TROW,Financials,1999-10-13,
+TRV,Financials,1996-01-02,
+TSCO,Consumer Discretionary,2014-01-24,
+TSLA,Consumer Discretionary,2020-12-21,
+TSN,Consumer Staples,2005-08-11,
+TSS,Information Technology,2008-01-02,2019-09-23
+TT,Industrials,2020-03-03,
+TTD,Communication Services,2025-07-18,
+TTWO,Communication Services,2018-03-19,
+TWC,Communication Services,2009-03-30,2016-05-18
+TWTR,Communication Services,2018-06-07,2022-11-01
+TWX,Communication Services,1996-01-02,2018-06-15
+TXN,Information Technology,1996-01-02,
+TXT,Industrials,1996-01-02,
+TYL,Information Technology,2020-06-22,
+UAA,Consumer Discretionary,2014-05-01,2022-06-21
+UAL,Industrials,2015-09-03,
+UBER,Industrials,2023-12-18,
+UDR,Real Estate,2016-03-07,
+UHS,Health Care,2014-09-22,
+ULTA,Consumer Discretionary,2016-04-18,
+UNH,Health Care,1996-01-02,
+UNM,Financials,1996-01-02,2021-09-20
+UNP,Industrials,1996-01-02,
+UPS,Industrials,2002-07-22,
+URBN,Consumer Discretionary,2010-02-08,2017-03-20
+URI,Industrials,2014-09-22,
+USB,Financials,1996-01-02,
+UTX,Industrials,1996-01-02,2020-04-03
+V,Financials,2009-12-21,
+VAR,Health Care,2007-02-12,2021-04-20
+VEEV,Health Care,2026-05-07,
+VFC,Consumer Discretionary,1996-01-02,2024-04-01
+VIAB,Communication Services,2006-01-03,2019-12-05
+VICI,Real Estate,2022-06-08,
+VLO,Energy,2004-04-29,
+VLTO,Industrials,2023-10-02,
+VMC,Materials,1999-07-01,
+VNO,Real Estate,2005-08-12,2023-01-04
+VNT,Industrials,2020-10-12,2021-03-22
+VRSK,Industrials,2015-10-08,
+VRSN,Information Technology,2006-02-01,
+VRT,Industrials,2026-03-23,
+VRTX,Health Care,2013-09-23,
+VST,Utilities,2024-05-08,
+VTR,Real Estate,2009-03-04,
+VTRS,Health Care,2020-11-17,
+VZ,Communication Services,1996-01-02,
+WAB,Industrials,2019-02-27,
+WAT,Health Care,2002-01-02,
+WBA,Consumer Staples,1996-01-02,2025-08-28
+WBD,Communication Services,2022-04-11,
+WCG,Health Care,2018-09-17,2020-01-28
+WDAY,Information Technology,2024-12-23,
+WDC,Information Technology,2009-07-01,
+WEC,Utilities,2008-10-31,
+WELL,Real Estate,2009-01-30,
+WFC,Financials,1996-01-02,
+WFM,Consumer Staples,2006-01-03,2017-08-28
+WHR,Consumer Discretionary,1996-01-02,2024-03-18
+WIN,Communication Services,2006-07-18,2015-04-07
+WM,Industrials,1998-07-17,
+WMB,Energy,1996-01-02,
+WMT,Consumer Staples,1996-01-02,
+WRB,Financials,2019-12-05,
+WRK,Materials,2015-07-02,2024-07-08
+WSM,Consumer Discretionary,2025-03-24,
+WST,Health Care,2020-05-22,
+WTW,Financials,2016-01-05,
+WU,Financials,2006-10-02,2021-12-20
+WY,Real Estate,1996-01-02,
+WYND,Consumer Discretionary,2006-08-01,2018-05-31
+WYNN,Consumer Discretionary,2008-11-14,
+XEC,Energy,2014-06-20,2020-03-03
+XEL,Utilities,1996-01-02,
+XL,Financials,2001-09-04,2018-09-12
+XLNX,Information Technology,1999-11-08,2022-02-15
+XOM,Energy,1996-01-02,
+XRAY,Health Care,2008-11-14,2024-04-02
+XRX,Information Technology,1996-01-02,2021-03-22
+XYL,Industrials,2011-11-01,
+XYZ,Financials,2025-07-23,
+YUM,Consumer Discretionary,1997-10-07,
+ZBH,Health Care,2001-08-07,
+ZBRA,Information Technology,2019-12-23,
+ZION,Financials,2001-06-25,2024-03-18
+ZTS,Health Care,2013-06-24,

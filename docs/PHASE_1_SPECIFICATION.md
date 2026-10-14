@@ -1,5 +1,7 @@
 # Phase 1: Core Pipeline Infrastructure - Detailed Specification
 
+> **Implementation status: ✅ DONE.** Config (Pydantic schema + `defaults.yaml` + real dev/test/prod overlays under `QA_` env overrides), JSON logging + `trace_id`, the 20+‑leaf exception hierarchy, the CLOSED/OPEN/HALF_OPEN circuit breaker, and deterministic `seed_everything` are all implemented and tested in `new_pipeline/{config,core}/`. *This is the original build spec, kept for reference; current state lives in `ARCHITECTURE_ROADMAP.md` + `IMPLEMENTATION_STATUS.md`.*
+
 **Duration**: 2 weeks  
 **Target Date**: Complete by end of June 1 (if sprint-based), or establish baseline by mid-June  
 **Success Criteria**: Modular foundation ready for feature engineering layer; all tests passing; logging/config infrastructure validated

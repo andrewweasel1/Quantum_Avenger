@@ -27,3 +27,25 @@ def test_unknown_terms_untouched():
     result = EntityAnonymizer(["Apple"]).anonymize("Banana prices rose")
     assert result.text == "Banana prices rose"
     assert result.mapping == {}
+
+
+def test_gazetteer_collapses_aliases_to_one_ticker_token():
+    anon = EntityAnonymizer(gazetteer={"AAPL": ["Apple", "Apple Inc"]})
+    result = anon.anonymize("Apple Inc and Apple and AAPL all rose.")
+    token = result.ticker_to_token["AAPL"]
+    assert result.text.count(token) == 3  # every surface form -> one stable token
+    assert "Apple" not in result.text and "AAPL" not in result.text
+
+
+def test_structural_masking_strips_anchors():
+    result = EntityAnonymizer(mask_structural=True).anonymize(
+        "Up 5% to $12 million via https://x.co and a@b.co"
+    )
+    assert "[PERCENT]" in result.text and "[MONEY]" in result.text
+    assert "[URL]" in result.text and "[EMAIL]" in result.text
+
+
+def test_anonymize_batch_matches_per_item():
+    anon = EntityAnonymizer(["Apple"])
+    texts = ["Apple up", "Banana down"]
+    assert [r.text for r in anon.anonymize_batch(texts)] == [anon.anonymize(t).text for t in texts]

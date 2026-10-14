@@ -4,6 +4,13 @@ data:
   parquet_blocksize: "128MiB"
   row_group_size: 100000
   validation_mode: "strict"
+  # Universe membership CSV; empty -> the packaged 41-name fixture. Real runs
+  # should use the point-in-time fixture new_pipeline/data/universe/sp500_pit.csv
+  # (membership intervals since 2015 incl. departed names; rebuilt with
+  # scripts/build_pit_universe.py). The current-constituent snapshot sp500.csv
+  # remains the GICS sector source for the builder but is survivorship-biased
+  # as a backtest universe.
+  universe_path: ""
 
 features:
   cache_enabled: true
@@ -14,6 +21,33 @@ features:
   regime_percentile: 0.8
   bps_scaler: 10000.0
   max_slippage_bps: 50.0
+  # Triple-barrier target labels (sl_mult mirrors execution.atr_stop_multiplier).
+  label_horizon: 5
+  label_cost_bps: 10.0
+  label_method: "triple_barrier"
+  label_pt_mult: 2.0
+  label_sl_mult: 2.0
+  # Cross-sectional alpha factors (offense roadmap P0). Empty => off. Available:
+  # mom_12_1, reversal_21, low_vol, seasonality. e.g. ["reversal_21", "low_vol"].
+  factor_set: []
+  factor_sector_neutral: true
+  factor_null_policy: "neutral"
+  # Extended per-ticker families: fracdiff, vol_estimators, microstructure,
+  # garch, overnight, residual, flow. Empty => off.
+  extended_features: []
+  # Event-time family: days_since_filing/ret_since_filing (needs fundamental
+  # factors in factor_set) + news_burst_21 (needs fusion.enabled). Default off.
+  event_features: false
+  # Per-date causal market trend/vol percentile features (regime context for
+  # the trees; per-date constants, so their value shows via MDA not IC).
+  # Champion default since runs a4889768320e + fc80f05205b3: the flag carried
+  # the calm-state regime gate over the family-wise bar in both promotions.
+  market_state_features: true
+  fracdiff_d: 0.4
+  fracdiff_threshold: 0.001
+  vol_window: 20
+  micro_window: 20
+  garch_fit_window: 252
 
 models:
   prod_models_dir: "./models/prod"
@@ -23,12 +57,24 @@ models:
 execution:
   max_risk_per_trade: 0.02
   atr_stop_multiplier: 2.0
-  confidence_threshold: 0.65
+  # Entry bar on the model's predicted P(win). Calibrated jointly with
+  # tournament.penalty_fp: with a symmetric loss (penalty_fp 1.0) predicted
+  # probabilities are honest win-rates, so 0.55 demands a modest real edge.
+  # If penalty_fp is raised to w, probabilities compress toward the equilibrium
+  # p/(p + w(1-p)); a threshold t then demands a raw win-rate of
+  # t*w/(t*w + 1 - t) — e.g. the old 0.65 under w=5 required >90% raw
+  # conviction, which real daily equity data never reaches (zero trades).
+  # Raise w only together with a threshold recomputed from that formula.
+  confidence_threshold: 0.55
   max_adv_coverage: 0.25
   ledger_dir: "./data/ledger"
   max_retries: 3
   tif: "day"
   account_capital: 100000.0
+  # Charge dynamic hydrodynamic slippage on simulated t+1 gauntlet returns
+  # (round-trip cost per fill + veto above features.max_slippage_bps). Off keeps
+  # the suite bit-stable; honest net-of-cost validation runs override to true.
+  backtest_slippage_enabled: false
 
 logging:
   level: "INFO"
@@ -45,6 +91,12 @@ fusion:
   sentiment_timeout: 5.0
   semaphore_limit: 20
   verdict_model: "qwen-3"
+  # "finbert" (neural; needs torch + huggingface egress) | "vader" (lexicon
+  # augmented with financial terms; pure-python base dep, no downloads).
+  sentiment_backend: "finbert"
+  # Sentiment-fused rolling HMM regime features; costly (~8s/ticker at 4y daily)
+  # — disable for index-scale universes (sentiment_score still feeds the model).
+  markov_features: true
 
 system:
   run_mode: "backtest"
@@ -62,12 +114,30 @@ tournament:
   test_groups: 2
   purge_days: 5
   embargo_days: 5
-  penalty_fp: 5.0
+  embargo_pct: 0.01
+  # Asymmetric-loss penalties for the XGBoost objective. Symmetric (1.0/1.0)
+  # keeps predicted probabilities calibrated so execution.confidence_threshold
+  # reads as a real win-rate; loss-side asymmetry (fp > 1) double-charges risk
+  # aversion once the threshold also sits above 0.5 — see the note there for
+  # the recalibration formula before raising this.
+  penalty_fp: 1.0
   penalty_fn: 1.0
   num_boost_round: 100
   cache_host_ratio: 0.75
   tree_method: "hist"
   device: "cpu"
+  # Feature selection: "causal" (Granger directional screen + purged-CPCV MDA,
+  # default) | "clustered_permutation" (correlational legacy).
+  feature_selection_method: "causal"
+  causal_alpha: 0.10
+  causal_granger_lags: 3
+  # Down-weight overlapping (non-IID) triple-barrier labels in training:
+  # "uniqueness" (LdP average uniqueness) | "none".
+  sample_weighting: "uniqueness"
+  # Meta-labeling (P3): secondary act/size model on the fired primary signal (default off).
+  enable_meta_labeling: false
+  meta_threshold: 0.5
+  meta_criterion: "f1"
   sectors:
     - "Information Technology"
     - "Health Care"
@@ -84,23 +154,190 @@ tournament:
 evaluation:
   dsr_promotion_threshold: 0.95
   hmm_states: 3
-  hmm_n_iter: 100
   synthetic_sr_min: 0.0
+  # Per-regime DSR gate: an HMM decodes regimes over the champion's CALENDAR-
+  # DAILY return series (calendar-time accounting makes the sequence real —
+  # on pooled ticker-major samples the decoder would see a fake transition at
+  # every ticker boundary) and the champion must clear the DSR threshold in
+  # every testable regime. Regimes with fewer than min_regime_obs days (or
+  # zero variance) follow thin_regime_policy: "skip" excludes them, "veto"
+  # fails the model; if NO regime is testable the model is rejected.
+  regime_gate_enabled: true
+  regime_breakdown_enabled: true
+  min_regime_obs: 60
+  thin_regime_policy: "skip"
+  # Per-state bar is family-wise calibrated: DSR >= threshold**K in each of
+  # the K testable regimes AND every regime Sharpe positive (K conjunctive
+  # 0.95-tests are jointly ~0.95^K, far stricter than the full-sample gate).
+  # false = legacy flat threshold per state.
+  regime_family_wise: true
   registry_path: "./models/prod/promotion_registry.json"
   psr_benchmark_sr: 0.0
   pbo_threshold: 0.5
   pbo_partitions: 10
   mt_method: "bhy"
   enforce_minbtl: false
+  cpcv_path_gate_enabled: true
+  cpcv_path_min_fraction: 0.5
+  gauntlet_block_size: 10
+  alpha_eval_enabled: true
+  alpha_eval_min_names: 5
+  # White's Reality Check runs as OBSERVABILITY (p-value recorded on every
+  # champion row); the gate flag below stays off — DSR/N_eff already covers
+  # data-snooping at our trial counts, but the p-value is free evidence.
+  reality_check_enabled: true
+  reality_check_bootstrap: 500
+  reality_check_block: 10
+  reality_check_gate_enabled: false
+  reality_check_threshold: 0.05
 
 mcp:
   transport: "stdio"
 
+portfolio:
+  enabled: true
+  method: "hrp"
+  cov_method: "rmt"
+  min_obs: 20
+
+# Universe-wide cross-sectional long-short rank sleeve: daily top-vs-bottom
+# quantile on the model's bagged OOS probability, dollar-neutral, next-day
+# returns net of cost_bps per unit turnover. Promotes (or fails) through the
+# full gauntlet under the "Universe Long Short" registry key.
+long_short:
+  enabled: false
+  quantile: 0.2
+  cost_bps: 10.0
+  min_names_per_day: 20
+  sector_neutral: true
+  # ---- Champion spec (run 36a3e7abc9cb, frozen 2026-07-21): the settings
+  # below are the promoted-candidate book construction; the full official-run
+  # body (universe, feeds, features, seed) is config/champion_run_body.json.
+  rebalance_days: 5
+  score_smoothing_days: 5
+  # No-trade band (rank hysteresis): hold until rank leaves quantile*(1+band),
+  # enter from the tight core. Cuts turnover without gross decay. 0 = off.
+  rebalance_band: 0.5
+  vol_target_annual: 0.05
+  vol_lookback_days: 20
+  # Floor the sleeve's evaluation window (ISO date) so the book under test is
+  # the strategy the universe defines (Liquid-1500 census floor: 2018-09-01).
+  # null = full window.
+  eval_start: "2018-09-01"
+  # Structure variants: build every grid combo under 4 book constructions
+  # (baseline L/S, calm-state short-gated L/S, hedged long-only, + dispersion
+  # sizing) in ONE returns matrix — DSR deflation prices the selection.
+  structure_variants: false
+  # Stock-loan fee bps/yr on actual single-name short exposure (0 = legacy).
+  short_borrow_bps: 50.0
+  # Cost bps per unit |change in index-hedge notional| for hedged variants.
+  hedge_cost_bps: 2.0
+  # Calm-state cost-policy factorial: control + calm-band + calm-cadence +
+  # both, judged in one deflated returns matrix (causal vol states, 0=calm).
+  calm_cost_variants: true
+  calm_rebalance_band: 1.5
+  calm_rebalance_days: 10
+  # Causal vol-decoder percentile window (trading days; 0 = legacy expanding).
+  causal_window_days: 252
+  # Learned state->construction mixture as an extra trial column (needs
+  # calm_cost_variants). Off in the frozen champion spec.
+  moe_variants: false
+  regime_gate_enabled: false
+  regime_experts_enabled: false
+  regime_exposures: [1.0, 1.0, 0.0]
+  null_iterations: 20
+  null_quantile: 0.95
+
+# Statistical arbitrage (P5): cointegration + OU mean reversion (new family, default off).
+stat_arb:
+  enabled: false
+  adf_threshold: -2.86
+  adf_lags: 1
+  insample_frac: 0.6
+  entry_z: 2.0
+  exit_z: 0.5
+  zscore_window: 20
+  min_obs: 60
+  max_pairs_per_sector: 3
+  use_johansen: false
+  min_basket: 3
+
 rag:
-  embedder: "hashing"
+  embedder: "hashing"  # "sentence_transformer" on a fusion host (requirements-fusion.txt)
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
   top_k: 5
   chunk_size: 512
   chunk_overlap: 100
+  # When true, the trade graph retrieves evidence from the request context and
+  # feeds it to the verdict + grader (the agentic evidence loop).
+  evidence_enabled: false
+
+news:
+  providers:
+    - "gdelt"
+  fixture_path: ""  # empty -> packaged new_pipeline/data/news/headlines.csv
+  vault_dir: "./data/raw/news"
+  limit: 20
+  gdelt_endpoint: "https://api.gdeltproject.org/api/v2/doc/doc"
+  edgar_forms:
+    - "8-K"
+    - "10-Q"
+    - "10-K"
+  edgar_identity: ""
+
+# Point-in-time fundamentals for value/quality factors. Empty fixture_path -> fake.
+fundamentals:
+  fixture_path: ""
+  edgar_identity: ""
+
+# FINRA Reg SHO daily short-volume vault for the short-flow feature family
+# (features.short_flow_features). Empty vault_path -> family off.
+short_volume:
+  vault_path: ""
+
+# Minute-bar intraday stack (small/mid-cap ORB v1). Separate vault + universe
+# filters + promotion key; never touches the frozen daily champion. ORB axes
+# (range_minutes x stop_styles x target_r_multiples) form one deflation-priced
+# trial family — widening any list adds trials the DSR must pay for.
+intraday:
+  vault_dir: "./data/minute_vault"
+  bar_minutes: 1
+  history_months: 24
+  universe_segments:
+    - "Small Cap Extended"
+    - "Mid Cap Extended"
+  min_adv_dollars: 5000000.0
+  min_price: 3.0
+  scanner_top_n: 50
+  scanner_variants: ["attention", "tradable", "dislocation", "volatility", "cheap_gap"]
+  range_minutes: [5, 15, 30]
+  stop_styles: ["or_low", "or_mid"]
+  target_r_multiples: [2.0, 0.0]
+  entry_buffer_bps: 5.0
+  risk_bps: 25.0
+  max_position_pct: 5.0
+  max_concurrent: 15
+  flatten_buffer_min: 5
+  # "orb" (rejected: runs orb_v1/orb_v2) | "meanrev" (anchor reversion).
+  strategy: "meanrev"
+  mr_anchors: ["vwap", "open"]
+  mr_entry_z: [0.5, 1.0, 1.5, 2.5]
+  mr_entry_styles: ["marketable", "passive"]
+  mr_exit_targets: ["anchor", "half"]
+  min_trades: 50
+  min_active_session_frac: 0.10
+  mr_passive_ttl_min: 5
+  mr_stop_atr: 1.0
+  # Calibrated against 400 real SIP-quoted fills (median half-spread 2.4bps,
+  # p75 5.1); the old 15.0 was ~6x too conservative. Orders still ran 3.5x
+  # displayed touch depth — book-walking is the impact term's job, not this.
+  spread_floor_bps: 5.0
+  quote_vault_dir: "./data/quote_vault"
+  max_touch_participation: 1.0
+  sizing_models: ["touch_cap"]
+  volume_participation_rate: 0.10
+  exec_window_min: 5
+  allow_cs_fallback: true
 
 dashboard:
   veto_ledger_path: "./data/ledger/veto_ledger.parquet"
@@ -109,6 +346,10 @@ dashboard:
   max_drawdown_alert: 0.15
   min_sharpe_alert: 0.0
   max_veto_rate_alert: 0.5
+  # Push alert delivery at trading-session end: "console" and/or "webhook".
+  # Empty (default) = alerts are computed for the UI but not pushed anywhere.
+  alert_channels: []
+  alert_webhook_url: ""
 
 alpaca:
   # Credentials are injected via QA_ALPACA__API_KEY / QA_ALPACA__SECRET_KEY env

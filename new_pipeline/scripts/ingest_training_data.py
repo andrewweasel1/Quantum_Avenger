@@ -24,20 +24,44 @@ def main() -> None:
     parser.add_argument("--end", default="2023-12-31")
     parser.add_argument("--out", default="data/processed/training.parquet")
     parser.add_argument("--news", action="store_true", help="enrich rows with news sentiment")
+    parser.add_argument(
+        "--news-vault",
+        action="store_true",
+        help="materialize a point-in-time news vault (Parquet) before enriching",
+    )
     args = parser.parse_args()
 
     configure_logging()
     cfg = get_config()
     bundle = build_adapters(cfg)
+    start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
+
+    news_source = sentiment_engine = anonymizer = None
+    if args.news:
+        from new_pipeline.adapters.factory import build_news_source
+
+        news_source = build_news_source(cfg, bundle.universe)
+        sentiment_engine, anonymizer = bundle.sentiment_engine, bundle.anonymizer
+        if args.news_vault:
+            from pathlib import Path
+
+            from new_pipeline.adapters.news_static import VaultNewsSource
+            from new_pipeline.data.news_vault import ingest_news_vault
+
+            vault_path = Path(cfg.news.vault_dir) / f"news_{args.start}_{args.end}.parquet"
+            ingest_news_vault(news_source, bundle.universe, start, end, vault_path)
+            news_source = VaultNewsSource(vault_path)
+
     summary = build_training_database(
         args.out,
         bundle.market_data,
         bundle.universe,
-        start=date.fromisoformat(args.start),
-        end=date.fromisoformat(args.end),
+        start=start,
+        end=end,
         cfg=cfg,
-        news_source=bundle.news if args.news else None,
-        llm=bundle.llm if args.news else None,
+        news_source=news_source,
+        sentiment_engine=sentiment_engine,
+        anonymizer=anonymizer,
     )
     summary["columns"] = len(summary["columns"])
     print(json.dumps(summary, indent=2))

@@ -1,0 +1,22 @@
+{
+  "features": [
+    "returns",
+    "volatility",
+    "spread_pct",
+    "xf_reversal_21",
+    "fracdiff",
+    "corwin_schultz",
+    "garch_vol",
+    "overnight_ret",
+    "overnight_bias_21",
+    "intraday_bias_21"
+  ],
+  "metadata": {
+    "sector": "Financials",
+    "params": {
+      "max_depth": 2,
+      "learning_rate": 0.01
+    },
+    "meta_labeling": null
+  }
+}

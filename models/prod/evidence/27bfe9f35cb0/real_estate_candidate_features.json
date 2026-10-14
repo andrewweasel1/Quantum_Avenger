@@ -1,0 +1,22 @@
+{
+  "features": [
+    "returns",
+    "yang_zhang_vol",
+    "spread_pct",
+    "fracdiff",
+    "corwin_schultz",
+    "garch_vol",
+    "intraday_bias_21",
+    "resid_rev_5",
+    "ret_since_filing",
+    "mkt_trend_pctl_252"
+  ],
+  "metadata": {
+    "sector": "Real Estate",
+    "params": {
+      "max_depth": 2,
+      "learning_rate": 0.01
+    },
+    "meta_labeling": null
+  }
+}

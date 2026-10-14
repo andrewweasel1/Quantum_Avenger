@@ -1,5 +1,7 @@
 # Quantum Avenger Full System Integration Guide
 
+> **Status banner (read first).** Kept for its **phase‑to‑phase data contracts, deployment topology, and operational/testing matrix**. For current state see the source‑of‑truth trio: **`ARCHITECTURE_ROADMAP.md`**, **`quantitative_math.md`**, **`IMPLEMENTATION_STATUS.md`**. Updates since this body was written: the label is **triple‑barrier** (emitting `fwd_ret` + `label_t1_offset`); CV is **span/ticker‑aware purged CPCV** with **φ combinatorial backtest paths**; promotion adds a **path‑distribution DSR gate** + PBO/CSCV/haircut/MinBTL/per‑regime DSR on top of DSR≥0.95, recorded in an **immutable** registry; the Shield is a **single** function reused by simulator/MCP/graph; **golden‑file regression tests** (`new_pipeline/tests/golden/`) pin every quant formula. All external services (LLM, broker, market/news, sentiment, anonymizer) sit behind **adapter interfaces with deterministic fakes**, so cutover = swap fakes for live clients; **Docker/K8s/Terraform/CI deploy is deferred to Phase 7** (see IMPLEMENTATION_STATUS §5). Today the LLM is `FakeLLMClient` and RAG uses a placeholder embedder.
+
 ## Purpose
 
 This guide explains how all phases of the Quantum Avenger system connect into a single integrated production pipeline. It describes the high-level architecture, module interactions, data flow, deployment mapping, and operational handoffs between phases.
@@ -17,7 +19,7 @@ Quantum Avenger is built as a layered hybrid trading system combining determinis
 3. **Phase 3: Tournament** — CPCV backtesting, out-of-core XGBoost training, candidate model generation.
 4. **Phase 4: Evaluation** — Statistical validation via DSR, HMM generalization, promotion and champion registry.
 5. **Phase 5: Orchestration** — FastMCP bridge, entity anonymization, RAG, LangGraph verdict workflow, trade execution.
-6. **Phase 6: Monitoring** — Streamlit dashboard, KPI streaming, veto analytics, trade log exploration.
+6. **Phase 6: Monitoring** — the React + FastAPI dashboard (`frontend/` + `new_pipeline/api/`): KPIs, veto analytics, trade log, run analytics, engine control.
 7. **Phase 7: Hardening** — Deployment, observability, resilience, security, and production readiness.
 
 ---
@@ -165,7 +167,7 @@ Quantum Avenger is built as a layered hybrid trading system combining determinis
   - Risk and market tool registry
 
 - `quantum-avenger-dashboard`
-  - Streamlit monitoring UI
+  - React + FastAPI monitoring UI (`frontend/` + `new_pipeline/api/`)
   - Live metrics and export services
 
 - `quantum-avenger-worker` (optional)

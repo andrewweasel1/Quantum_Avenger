@@ -22,10 +22,10 @@ groups:
           severity: warning
         annotations:
           summary: "Champion Deflated Sharpe below the 0.95 promotion threshold"
-      - alert: HighExecutionLatency
-        expr: quantum_avenger_execution_latency_ms > 200
-        for: 5m
+      - alert: NegativeSharpe
+        expr: quantum_avenger_sharpe < 0
+        for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "Order execution latency above 200ms"
+          summary: "Book Sharpe negative for 10 minutes"

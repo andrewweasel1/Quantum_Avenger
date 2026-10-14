@@ -1,0 +1,100 @@
+"""Config-gated sentiment-fusion wiring, exercised end-to-end offline.
+
+Covers the three opt-in paths from the offline-core pass: the micro rolling-HMM
+features in the build path (``fusion.enabled``), and the per-regime DSR promotion
+gate plus N_eff deflation in the tournament (``evaluation.regime_gate_enabled`` /
+``use_effective_trials``). Defaults leave all of this off, so the rest of the
+suite is unaffected; here we turn it on and assert the chain still runs.
+"""
+
+from datetime import date
+
+from new_pipeline.adapters.factory import build_adapters, build_news_source
+from new_pipeline.adapters.universe_static import StaticUniverseProvider
+from new_pipeline.config import get_config, reload_config
+from new_pipeline.core.seeding import seed_everything
+from new_pipeline.features.markov_regime import MARKOV_FEATURE_NAMES
+from new_pipeline.tournament.pipeline import build_training_frame, run_offline_pipeline
+
+
+def test_build_training_frame_adds_markov_features_when_fusion_enabled(monkeypatch):
+    monkeypatch.setenv("QA_FUSION__ENABLED", "true")
+    reload_config()
+    seed_everything(0)
+    cfg = get_config()
+    assert cfg.fusion.enabled
+
+    frame = build_training_frame(
+        ["AAA", "BBB"],
+        {"AAA": "Tech", "BBB": "Tech"},
+        date(2021, 1, 1),
+        date(2021, 6, 30),
+        cfg=cfg,
+    )
+    for name in MARKOV_FEATURE_NAMES:
+        assert name in frame.columns
+
+
+def test_regime_gate_and_neff_pipeline_runs(tmp_path, monkeypatch):
+    monkeypatch.setenv("QA_TOURNAMENT__NUM_BOOST_ROUND", "10")
+    monkeypatch.setenv("QA_FUSION__ENABLED", "true")
+    monkeypatch.setenv("QA_EVALUATION__REGIME_GATE_ENABLED", "true")
+    reload_config()
+    seed_everything(0)
+
+    summary = run_offline_pipeline(
+        tmp_path, start=date(2021, 1, 1), end=date(2021, 6, 30), max_symbols=2
+    )
+
+    assert summary["sectors"]
+    assert set(summary["promotions"]).issubset(set(summary["sectors"]))
+    assert (tmp_path / "promotion_registry.json").exists()
+
+
+def test_fusion_attaches_nonzero_sentiment_to_features(monkeypatch):
+    monkeypatch.setenv("QA_FUSION__ENABLED", "true")
+    reload_config()
+    seed_everything(0)
+    cfg = get_config()
+    bundle = build_adapters(cfg)  # offline -> FakeSentimentEngine + gazetteer anonymizer
+
+    frame = build_training_frame(
+        ["AAPL", "MSFT"],
+        {"AAPL": "Tech", "MSFT": "Tech"},
+        date(2021, 1, 1),
+        date(2021, 3, 31),
+        source=bundle.market_data,
+        cfg=cfg,
+        news_source=bundle.news,
+        sentiment_engine=bundle.sentiment_engine,
+        anonymizer=bundle.anonymizer,
+    )
+    assert "sentiment_score" in frame.columns
+    # FakeNewsSource yields a headline per day -> real (non-neutral) sentiment lands.
+    assert frame["sentiment_score"].abs().sum() > 0.0
+    assert all(name in frame.columns for name in MARKOV_FEATURE_NAMES)
+
+
+def test_pit_news_source_feeds_sentiment(monkeypatch):
+    monkeypatch.setenv("QA_FUSION__ENABLED", "true")
+    reload_config()
+    seed_everything(0)
+    cfg = get_config()
+    universe = StaticUniverseProvider()
+    bundle = build_adapters(cfg)
+    news_source = build_news_source(cfg, universe)  # offline -> StaticNewsSource fixture
+
+    frame = build_training_frame(
+        ["AAPL", "MSFT"],
+        {"AAPL": "Tech", "MSFT": "Tech"},
+        date(2021, 1, 1),
+        date(2021, 3, 31),
+        source=bundle.market_data,
+        cfg=cfg,
+        news_source=news_source,
+        sentiment_engine=bundle.sentiment_engine,
+        anonymizer=bundle.anonymizer,
+    )
+    # The fixture carries AAPL/MSFT headlines in Q1 2021, so sentiment is non-zero.
+    assert frame["sentiment_score"].abs().sum() > 0.0
+    assert all(name in frame.columns for name in MARKOV_FEATURE_NAMES)

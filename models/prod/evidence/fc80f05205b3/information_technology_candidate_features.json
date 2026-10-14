@@ -1,0 +1,18 @@
+{
+  "features": [
+    "intraday_ret",
+    "volatility",
+    "fracdiff",
+    "overnight_ret",
+    "overnight_bias_21",
+    "intraday_bias_21"
+  ],
+  "metadata": {
+    "sector": "Information Technology",
+    "params": {
+      "max_depth": 1,
+      "learning_rate": 0.05
+    },
+    "meta_labeling": null
+  }
+}

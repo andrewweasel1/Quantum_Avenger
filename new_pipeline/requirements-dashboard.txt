@@ -1,4 +1,0 @@
-# Dashboard tooling (Phase 6). Deliberately NOT installed by the SessionStart
-# hook so remote-session startup stays lean. Install for the dashboard with:
-#   pip install -r new_pipeline/requirements-dashboard.txt
-streamlit>=1.36

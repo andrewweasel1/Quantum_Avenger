@@ -26,6 +26,19 @@ if [ -f new_pipeline/requirements-dev.txt ]; then
   python3 -m pip install -r new_pipeline/requirements-dev.txt
 fi
 
+# Dashboard API layer (fastapi/uvicorn): the test suite imports fastapi
+# directly (new_pipeline/tests/unit/test_api_*.py), so sessions need it for
+# `pytest` to even collect.
+if [ -f new_pipeline/requirements-api.txt ]; then
+  python3 -m pip install -r new_pipeline/requirements-api.txt
+fi
+
+# React dashboard dependencies so `npm run build` (tsc + vite) works out of
+# the box. npm reuses node_modules/ + its cache on container-snapshot reruns.
+if [ -f frontend/package.json ] && command -v npm >/dev/null 2>&1; then
+  (cd frontend && npm install --no-audit --no-fund)
+fi
+
 # Session environment.
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   # Make the repo root importable so `import new_pipeline...` resolves the same

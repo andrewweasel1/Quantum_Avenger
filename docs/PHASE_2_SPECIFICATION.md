@@ -1,5 +1,7 @@
 # Phase 2: Vectorized Quant Engine & Numba Shields - Detailed Specification
 
+> **Implementation status: ✅ DONE (grew past spec).** The Polars feature engine, Numba `@njit` Shield (5 veto gates) and hydrodynamic slippage are implemented in `new_pipeline/features/`. **Beyond the spec:** an asymmetric `sentiment_volatility_gate` was added beside the 5 gates, and triple‑barrier labels replaced the original target. The `@cuda.jit` kernels exist but the **CPU fallback is the CI default** (GPU‑box validation deferred — see IMPLEMENTATION_STATUS §6). *Original build spec; current state in `ARCHITECTURE_ROADMAP.md` + `quantitative_math.md`.*
+
 **Duration**: 2 weeks  
 **Target Date**: Complete by mid-June (after Phase 1)  
 **Success Criteria**: All features vectorized; GPU kernels passing benchmarks; Shield Agent <100µs latency; 85%+ test coverage

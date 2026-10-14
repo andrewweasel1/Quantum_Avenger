@@ -1,5 +1,7 @@
 # Quantum Avenger: Integrated Development Roadmap 2026
 
+> **Status banner (read first).** This roadmap predates much of the implementation; keep it for its **function‑interaction matrices, system‑topology diagrams, backtesting‑hygiene checklist, and risk‑veto tables**, which remain useful references. For definitive current state use the source‑of‑truth trio: **`ARCHITECTURE_ROADMAP.md`** (architecture), **`quantitative_math.md`** (rigor), **`IMPLEMENTATION_STATUS.md`** (status + remaining work). Notable items this body predates and that are **now implemented**: triple‑barrier labels; span/ticker‑aware purged CPCV with combinatorial backtest paths; **causal** (Granger + purged‑CPCV‑MDA) feature selection as default; sample‑uniqueness weighting; the full evaluation stack (DSR/N_eff/PSR/MinTRL, PBO/CSCV, haircut, MinBTL, per‑regime DSR, **path‑distribution DSR gate**); the stationary‑block‑bootstrap HMM gauntlet; the **React + FastAPI dashboard** (the Streamlit UI this body describes was built, then replaced — its data layer survives under `monitoring/dashboard/`); and the GDELT/EDGAR/static news adapters. Still deferred: live Ollama LLM (fake today), the real RAG embedder + agentic evidence loop, monitoring/alert backends, and the deploy half of Phase‑7 hardening (CI is live).
+
 ## Executive Summary
 
 The Quantum Avenger is a **hybrid fusion trading system** that combines:
@@ -464,7 +466,7 @@ Train:    [1|3|4|5] minus temporal boundaries
 ### 2.6 **Module: dashboard.py** 
 **Responsibility**: Streamlit telemetry dashboard for live monitoring.
 
-#### Planned Architecture (currently stub):
+#### Dashboard Architecture (✅ implemented in `new_pipeline/monitoring/dashboard/`; alert delivery still stubbed):
 - **KPI Cards**: Win rate, Sharpe, Max drawdown, DSR
 - **Equity Curve**: Interactive Plotly chart
 - **Veto Ledger**: Table of rejected trades with reasons
@@ -716,7 +718,7 @@ Train:    [1|3|4|5] minus temporal boundaries
 - [ ] Model registry dashboard
 - [ ] Risk metrics heatmap by sector
 
-**Reference Integration**: Build upon `/reference_code/dashboard.py` stub
+**Reference Integration**: ✅ implemented — first as a Streamlit multipage app, since replaced by the **React + FastAPI dashboard** (`frontend/` + `new_pipeline/api/`); the pure data layer (`monitoring/dashboard/{realtime,views,alerts}.py`, reading the veto‑ledger / trade‑log Parquet) survives and serves the API's monitor routes, superseding the `/reference_code/dashboard.py` stub.
 
 ---
 

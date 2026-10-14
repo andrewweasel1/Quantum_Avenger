@@ -29,6 +29,8 @@ from new_pipeline.execution.orchestrator import TradeOrchestrator, TradeRequest
 from new_pipeline.execution.trade_log import TradeLog, TradeRecord
 from new_pipeline.execution.veto_ledger import VetoLedger
 from new_pipeline.features.polars_engine import compile_features
+from new_pipeline.monitoring.alerting import dispatch_current_alerts
+from new_pipeline.monitoring.metrics import get_metrics
 from new_pipeline.tournament.simulator import simulate_t1_returns
 from new_pipeline.tournament.trainer import load_booster, predict_proba
 
@@ -66,27 +68,40 @@ def run_trading_session(
     ledger_dir = Path(cfg.execution.ledger_dir)
     ledger = VetoLedger(ledger_dir / "veto_ledger.parquet")
     trade_log = TradeLog(ledger_dir / "trade_log.parquet")
+    rag = None
+    if cfg.rag.evidence_enabled:
+        from new_pipeline.execution.rag_engine import build_rag_engine
+
+        rag = build_rag_engine(cfg)
     orchestrator = TradeOrchestrator(
         adapters.llm,
         adapters.broker,
         ledger,
         max_retries=cfg.execution.max_retries,
         tif=cfg.execution.tif,
+        rag=rag,
     )
     dsr_by_sector = _champion_dsr(registry)
     sector_of = adapters.universe.sectors()
 
     counters = {"decisions": 0, "executed": 0, "vetoed": 0, "pnl": 0.0}
     for sector, model_path in champions.items():
+        symbols = [ticker for ticker, sec in sector_of.items() if sec == sector]
+        if not symbols:
+            # Portfolio-level champions (e.g. "Universe Long Short") have no
+            # per-name replay here and their candidate.json is a manifest, not
+            # a booster — loading it would crash the session.
+            continue
         booster = load_booster(model_path)
         selected = _selected_features(model_path)
-        symbols = [ticker for ticker, sec in sector_of.items() if sec == sector]
         for symbol in symbols:
             _replay_symbol(
                 symbol, dsr_by_sector.get(sector, 0.0), booster, selected,
                 adapters, orchestrator, trade_log, start, end, cfg, counters,
             )
 
+    get_metrics().increment("trading_sessions_total")
+    dispatch_current_alerts(cfg)
     return SessionSummary(
         sectors=list(champions),
         decisions=counters["decisions"],

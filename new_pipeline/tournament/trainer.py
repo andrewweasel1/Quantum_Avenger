@@ -46,12 +46,15 @@ def train_booster(
     eval_features=None,
     eval_labels=None,
     early_stopping_rounds=None,
+    sample_weight=None,
 ):
     cfg = get_config().tournament
     if params is None:
         params = default_params(device=cfg.device, tree_method=cfg.tree_method)
     dtrain = xgb.DMatrix(
-        np.asarray(features, dtype=np.float64), label=np.asarray(labels, dtype=np.float64)
+        np.asarray(features, dtype=np.float64),
+        label=np.asarray(labels, dtype=np.float64),
+        weight=None if sample_weight is None else np.asarray(sample_weight, dtype=np.float64),
     )
     objective = asymmetric_loss_factory(penalty_fp, penalty_fn)
 

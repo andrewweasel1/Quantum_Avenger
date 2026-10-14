@@ -1,0 +1,71 @@
+"""Point-in-time join of fundamentals onto a per-(ticker, date) feature frame.
+
+A backward as-of join attaches, for each (ticker, date) row, the most recent
+fundamental snapshot whose filing date (``as_of``) is on or before that date —
+strictly causal, no look-ahead. Feeds the value/quality cross-sectional factors.
+"""
+
+import warnings
+from datetime import datetime
+
+import polars as pl
+
+FUNDAMENTAL_COLUMNS = ("book_value_per_share", "earnings_per_share", "return_on_equity")
+# Optional quality/growth extensions (None where the issuer's XBRL lacked the
+# concept); joined alongside the core columns and neutral-filled by the factors.
+FUNDAMENTAL_EXTENDED_COLUMNS = (
+    "return_on_assets", "gross_margin", "accruals", "ocf_per_share",
+    "revenue_growth", "earnings_growth",
+)
+ALL_FUNDAMENTAL_COLUMNS = FUNDAMENTAL_COLUMNS + FUNDAMENTAL_EXTENDED_COLUMNS
+
+
+def _as_date(value):
+    """Normalize a polars temporal bound to a python ``date``.
+
+    ``frame["date"].max()`` returns ``datetime`` when the column is Datetime
+    (e.g. after an upstream pandas round-trip) and ``date`` when it is Date;
+    the fundamentals sources compare against date-typed snapshot ``as_of``, so
+    a datetime bound would raise ``can't compare datetime to date``."""
+    return value.date() if isinstance(value, datetime) else value
+
+
+def attach_fundamentals(frame: pl.DataFrame, source, keep_as_of: bool = False) -> pl.DataFrame:
+    """Join the latest-known fundamentals as-of each (ticker, date) row.
+
+    Requires ``ticker`` and ``date`` columns. Always returns the three fundamental
+    columns (null where no snapshot is yet knowable, so downstream factors drop
+    those rows rather than raising). ``keep_as_of`` retains the joined filing
+    date column for the event-time features (default drop keeps the frame
+    schema bit-stable for existing consumers)."""
+    symbols = frame["ticker"].unique().to_list()
+    # Snapshots carry a date-typed as_of; a Datetime `date` column would break
+    # both the python bound comparison (below) and the join_asof key match, so
+    # normalize the join key to Date up front (no-op in the normal path).
+    if frame.schema["date"] != pl.Date:
+        frame = frame.with_columns(pl.col("date").cast(pl.Date))
+    start, end = _as_date(frame["date"].min()), _as_date(frame["date"].max())
+    rows = [
+        {
+            "ticker": symbol, "as_of": snap.as_of,
+            **{column: getattr(snap, column) for column in ALL_FUNDAMENTAL_COLUMNS},
+        }
+        for symbol in symbols
+        for snap in source.history(symbol, start, end)
+    ]
+    if not rows:
+        out = frame.with_columns(
+            [pl.lit(None, dtype=pl.Float64).alias(column) for column in ALL_FUNDAMENTAL_COLUMNS]
+        )
+        if keep_as_of:
+            out = out.with_columns(pl.lit(None, dtype=pl.Date).alias("as_of"))
+        return out
+    fundamentals = (
+        pl.DataFrame(rows).with_columns(pl.col("as_of").cast(pl.Date)).sort(["ticker", "as_of"])
+    )
+    with warnings.catch_warnings():  # both frames are sorted; polars can't verify with `by`
+        warnings.filterwarnings("ignore", message="Sortedness of columns")
+        joined = frame.sort(["ticker", "date"]).join_asof(
+            fundamentals, left_on="date", right_on="as_of", by="ticker", strategy="backward"
+        )
+    return joined if keep_as_of else joined.drop("as_of")

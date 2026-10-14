@@ -10,11 +10,15 @@ from datetime import date, datetime, timedelta
 
 from new_pipeline.adapters.base import (
     Bar,
+    FundamentalSnapshot,
+    FundamentalsSource,
     LLMClient,
     MarketDataSource,
     NewsItem,
     NewsSource,
+    SentimentEngine,
     SentimentResult,
+    SentimentScore,
     Verdict,
 )
 from new_pipeline.execution.broker import BrokerAdapter
@@ -89,6 +93,103 @@ class FakeNewsSource(NewsSource):
         ]
 
 
+class FakeSentimentEngine(SentimentEngine):
+    """Deterministic sentiment sensor: a signed score in [-1, 1] (same hash as
+    FakeLLMClient) plus a coherent 3-class distribution (signed = p_pos - p_neg,
+    probabilities sum to 1)."""
+
+    def score_headlines(self, texts, batch_size: int = 64) -> list[SentimentScore]:
+        scores: list[SentimentScore] = []
+        for text in texts:
+            signed = _stable_unit(text)
+            p_pos = max(signed, 0.0)
+            p_neg = max(-signed, 0.0)
+            p_neutral = 1.0 - abs(signed)
+            scores.append(
+                SentimentScore(
+                    signed=signed,
+                    confidence=max(p_pos, p_neg, p_neutral),
+                    p_pos=p_pos,
+                    p_neg=p_neg,
+                    p_neutral=p_neutral,
+                )
+            )
+        return scores
+
+
+def _quarter_dates(start_year: int, end_year: int) -> list[date]:
+    return [date(y, m, 1) for y in range(start_year, end_year + 1) for m in (1, 4, 7, 10)]
+
+
+class FakeFundamentalsSource(FundamentalsSource):
+    """Deterministic synthetic fundamentals: quarterly snapshots whose values are a
+    pure function of the symbol and quarter (no RNG)."""
+
+    def history(self, symbol: str, start: date, end: date) -> list[FundamentalSnapshot]:
+        if end < start:
+            return []
+        seed = sum(ord(char) for char in symbol)
+        bvps0 = 10.0 + (seed % 40)  # book value per share, 10..50
+        eps0 = 1.0 + (seed % 8)  # earnings per share, 1..9
+        roe0 = 0.05 + (seed % 25) / 100.0  # return on equity, 0.05..0.30
+        roa0 = 0.02 + (seed % 15) / 100.0  # return on assets, 0.02..0.17
+        gm0 = 0.20 + (seed % 50) / 100.0  # gross margin, 0.20..0.70
+        acc0 = -0.05 + (seed % 10) / 100.0  # accruals, -0.05..0.05
+        ocfps0 = eps0 * (1.1 + (seed % 5) / 10.0)  # ocf/share tracks eps
+        snapshots: list[FundamentalSnapshot] = []
+        for i, as_of in enumerate(_quarter_dates(start.year - 1, end.year)):
+            if as_of > end:
+                break
+            snapshots.append(
+                FundamentalSnapshot(
+                    as_of=as_of,
+                    book_value_per_share=round(bvps0 * (1.0 + 0.01 * i), 4),
+                    earnings_per_share=round(eps0 * (1.0 + 0.005 * i), 4),
+                    return_on_equity=round(roe0, 4),
+                    return_on_assets=round(roa0, 4),
+                    gross_margin=round(gm0, 4),
+                    accruals=round(acc0, 4),
+                    ocf_per_share=round(ocfps0 * (1.0 + 0.005 * i), 4),
+                    # growth appears once a year of history exists (>= 4 quarters).
+                    revenue_growth=round(0.02 + (seed % 12) / 100.0, 4) if i >= 4 else None,
+                    earnings_growth=round(0.005 * 4, 4) if i >= 4 else None,
+                )
+            )
+        return snapshots
+
+
+class FakeShortVolumeSource:
+    """Deterministic daily short-volume panel for the given symbols (no RNG):
+    the short fraction is a bounded sinusoid per symbol so trailing z-scores and
+    changes have real, testable structure."""
+
+    def __init__(self, symbols) -> None:
+        self._symbols = list(symbols)
+
+    def panel(self, start: date, end: date):
+        import polars as pl
+
+        rows = []
+        for symbol in self._symbols:
+            seed = sum(ord(c) for c in symbol)
+            day, i = start, 0
+            while day <= end:
+                if day.weekday() < 5:  # weekday tape only
+                    frac = 0.45 + 0.15 * math.sin((i + seed) / 9.0)  # short fraction 0.30..0.60
+                    total = 100_000 + (seed % 50) * 1000 + 500 * (i % 20)
+                    rows.append({
+                        "date": day, "ticker": symbol,
+                        "short_volume": int(total * frac), "total_volume": int(total),
+                    })
+                    i += 1
+                day += timedelta(days=1)
+        return pl.DataFrame(
+            rows,
+            schema={"date": pl.Date, "ticker": pl.Utf8,
+                    "short_volume": pl.Int64, "total_volume": pl.Int64},
+        )
+
+
 class FakeBroker(BrokerAdapter):
     """In-memory broker: records orders and tracks net positions."""
 
@@ -109,6 +210,12 @@ class FakeBroker(BrokerAdapter):
         }
         self._orders.append(receipt)
         return receipt
+
+    def order_status(self, order_id: str) -> str:
+        for receipt in self._orders:
+            if receipt.get("order_id") == order_id:
+                return str(receipt.get("status", "unknown"))
+        return "unknown"
 
     def get_positions(self) -> dict[str, float]:
         return dict(self._positions)

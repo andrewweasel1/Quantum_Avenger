@@ -39,15 +39,30 @@ def build_training_database(
     cfg=None,
     news_source=None,
     llm=None,
+    sentiment_engine=None,
+    anonymizer=None,
 ) -> dict:
-    """Materialize a labeled feature parquet for the universe over the date range."""
+    """Materialize a labeled feature parquet for the universe over the date range.
+
+    Sentiment enrichment has two modes: pass ``sentiment_engine`` + ``anonymizer``
+    (+ ``news_source``) for the causal FinBERT-style daily-sentiment join, or the
+    simpler ``llm`` + ``news_source`` per-headline averaging.
+    """
     cfg = cfg or get_config()
     universe = universe or StaticUniverseProvider()
     sectors = universe.sectors()
     symbols = list(sectors)
 
-    frame = build_training_frame(symbols, sectors, start, end, source, cfg)
-    if news_source is not None and llm is not None:
+    use_engine = (
+        sentiment_engine is not None and anonymizer is not None and news_source is not None
+    )
+    frame = build_training_frame(
+        symbols, sectors, start, end, source, cfg,
+        news_source=news_source if use_engine else None,
+        sentiment_engine=sentiment_engine if use_engine else None,
+        anonymizer=anonymizer if use_engine else None,
+    )
+    if not use_engine and news_source is not None and llm is not None:
         frame = add_news_sentiment(frame, news_source, llm)
 
     out = Path(output_path)

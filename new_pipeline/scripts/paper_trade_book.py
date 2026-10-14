@@ -1,0 +1,751 @@
+"""Daily paper-trading executor for the Universe Long Short champion book.
+
+The gauntlet's book is built from OUT-OF-SAMPLE bagged probabilities that only
+exist inside a backtest; live, each name is scored by its sector's deployed
+candidate booster (the standard train/serve approximation — documented, not
+hidden). The book mechanics mirror the frozen champion spec exactly: per-ticker
+5-day score smoothing, within-(date, sector) z-scores, one global top/bottom
+``quantile`` cliff with the rank-hysteresis exit band, the calm-state policy on
+the rolling-252 causal vol decoder, causal 5%% vol targeting, and the same
+5-trading-day rebalance grid — carried across days by a small state file.
+
+Safety: PAPER ONLY. The tool refuses to run unless the Alpaca key pair looks
+like a paper key (``PK…``) and always constructs the broker with
+``paper=True``. Dry-run is the default; pass ``--execute`` to submit orders.
+
+    # after promoting the book + sector boosters:
+    python -m new_pipeline.scripts.promote_candidates --run-dir <run>/output \
+        --key "Universe Long Short" --all-sectors
+    # then daily (cron ~30 min before the close):
+    python -m new_pipeline.scripts.paper_trade_book --execute
+
+RUNTIME: ~14 minutes end to end (measured 2026-08-05: 13m52s), almost all of
+it in ``build_training_frame`` over the 420-day lookback for ~2,000 tickers.
+Orders are submitted only AFTER that frame is built, so START BY 15:30 ET at
+the latest for a 16:00 close, and run it detached — a 10-minute foreground
+timeout kills it mid-frame, before it writes state or submits anything (that
+failure is clean, but it costs the session's window).
+
+Do NOT shorten --lookback-days to make it fit: under 252 trading days the
+momentum/seasonality features starve and the scored universe collapses.
+"""
+
+import argparse
+import csv
+import json
+import logging
+import os
+import subprocess
+import time
+from datetime import date, timedelta
+from pathlib import Path
+
+import numpy as np
+import polars as pl
+from new_pipeline.evaluation.promotion import PromotionRegistry
+from new_pipeline.tournament.long_short import (
+    LONG_SHORT_KEY,
+    _band_leg,
+    sector_neutral_scores,
+    smooth_scores,
+)
+from new_pipeline.tournament.regime_state import causal_states_from_series
+from new_pipeline.tournament.trainer import load_booster, predict_proba
+
+_logger = logging.getLogger(__name__)
+
+# Unit-return history retained in the state file: enough for the vol
+# lookback many times over, bounded so the file cannot grow forever.
+_UNIT_RETURN_HISTORY = 260
+
+# Calendar span of per-session returns handed to compute_targets so a gap
+# between runs can be caught up. Comfortably longer than any realistic
+# outage, and bounded so the frame scan stays cheap.
+_BACKFILL_WINDOW_DAYS = 120
+
+# A flip submits a close then an open on the SAME symbol. Alpaca reserves the
+# position against the pending close (held_for_orders == existing_qty), so an
+# open fired immediately behind it sees available: 0 and is rejected — 22 of
+# the 31 skips on the 2026-08-17 rebalance, every one of them a short leg that
+# failed to open, which biases a dollar-neutral book long. Wait for the close
+# to leave the pending states before releasing its open.
+_FLIP_FILL_TIMEOUT_S = 20.0
+_FLIP_POLL_S = 0.4
+_TERMINAL_ORDER_STATES = {"filled", "canceled", "cancelled", "expired", "rejected"}
+
+
+def await_close_fill(broker, order_id: str, timeout_s: float = _FLIP_FILL_TIMEOUT_S,
+                     poll_s: float = _FLIP_POLL_S, now=time.monotonic,
+                     sleep=time.sleep) -> str:
+    """Block until ``order_id`` reaches a terminal state; returns that state.
+
+    Returns "timeout" if it never settles — the caller must treat anything
+    other than "filled" as "the shares are still reserved", because releasing
+    the paired open then would simply be rejected again."""
+    if not order_id:
+        return "unknown"
+    deadline = now() + timeout_s
+    status = broker.order_status(order_id)
+    while status not in _TERMINAL_ORDER_STATES:
+        if now() >= deadline:
+            return "timeout"
+        sleep(poll_s)
+        status = broker.order_status(order_id)
+    return status
+
+
+def select_price_date(frame, min_coverage: float = 0.8):
+    """Latest frame date whose cross-section is COMPLETE enough to price from.
+
+    ``frame["date"].max()`` is the current session, and intraday that bar
+    exists for only a fraction of the universe — 499 of 1,420 names at 12:43
+    ET on 2026-10-01 against 1,420 the day before. ``diff_orders`` skips any
+    symbol absent from ``prices``, so pricing off a partial day silently
+    reduces the book to whatever happens to have printed: 122 of a 637-name
+    target-plus-position union, 19%. Every live run to date fired midday and
+    acted on roughly a third of its own book, which is the bulk of the 36%
+    tracking error and the reason orphan positions accumulate.
+
+    Walks back to the newest date holding at least ``min_coverage`` of the
+    median recent cross-section."""
+    counts = (frame.group_by("date").agg(pl.col("ticker").n_unique().alias("n"))
+              .sort("date"))
+    if counts.is_empty():
+        return None
+    recent = counts.tail(20)
+    floor = float(recent["n"].median() or 0) * min_coverage
+    ok = counts.filter(pl.col("n") >= floor)
+    return (ok["date"][-1] if not ok.is_empty() else counts["date"][-1])
+
+
+def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
+                    market_by_date: dict, causal_span: int | None = 252,
+                    returns_by_date: dict | None = None) -> tuple[dict, dict]:
+    """Target weights for the LAST date in ``panel`` under the champion
+    mechanics, plus the evolved state file content.
+
+    ``panel``: (date, ticker, sector, score, next-day scoring rows may carry
+    null next_ret — realization is not needed to WEIGH). ``state`` carries
+    ``held`` weights, ``unit_held`` (the UNSCALED shadow book), ``unit_returns``
+    (trailing unit-book realized returns for the causal vol target),
+    ``prev_longs``/``prev_shorts`` (band hysteresis) and
+    ``last_rebalance_date``. Pure function — no I/O, no broker.
+
+    ``returns_by_date`` maps session date -> {ticker: realized return}. Every
+    session after ``last_return_date`` up to today is appended, one unit
+    observation each, which is what the vol target measures. The backtest
+    appends on EVERY day using the forward ``next_ret`` of the book it just
+    set; live we cannot see forward, so the causal translation appends what
+    the PREVIOUS book earned, before re-targeting — the same series shifted
+    one period.
+
+    Backfilling the gap is sound precisely because the book is STATIC between
+    runs: no trades happen unless this script runs, so the weights held on a
+    skipped session are the ones still in ``unit_held``. Without the backfill
+    the estimator advances once per RUN rather than once per session — on
+    2026-08-17 six sessions had elapsed and the series held two observations,
+    so a 20-observation lookback would have taken months of calendar time and
+    sampled the tape irregularly."""
+    quantile = params["quantile"]
+    band = params.get("rebalance_band", 0.0)
+    calm_band = params.get("calm_rebalance_band")
+    calm_days = params.get("calm_rebalance_days")
+    rebalance_days = params.get("rebalance_days", 5)
+    vol_target = params.get("vol_target_annual", 0.0)
+    vol_lookback = params.get("vol_lookback_days", 20)
+    min_names = params.get("min_names_per_day", 20)
+
+    panel = smooth_scores(panel, params.get("score_smoothing_days", 5))
+    panel = sector_neutral_scores(panel.drop_nulls(["score"]))
+    day = panel.filter(pl.col("date") == panel["date"].max())
+    today = day["date"][0]
+
+    # Advance the unscaled shadow book BEFORE deciding today's action, so the
+    # vol estimator gets one observation per session rather than one per
+    # rebalance. Names with no return today are forced exits, mirroring
+    # long_short.build_long_short_book.
+    unit_held = dict(state.get("unit_held", {}))
+    unit_returns = list(state.get("unit_returns", []))
+    if not unit_held and state.get("held"):
+        # Migration: a state file written before the shadow book existed has
+        # `held` but no `unit_held`. Without this the shadow book stays empty
+        # until the next rebalance and every hold day until then appends a
+        # spurious 0.0, understating trailing vol exactly when the estimator
+        # is filling. Renormalizing `held` to unit gross recovers the unscaled
+        # book whatever scalar was in force when it was written.
+        gross = sum(abs(w) for w in state["held"].values())
+        if gross > 0:
+            unit_held = {t: w / gross for t, w in state["held"].items()}
+    last_ret_date = state.get("last_return_date")
+    if returns_by_date:
+        sessions = sorted(d for d in returns_by_date if str(d) <= str(today))
+        # No recorded cursor means no history to reconstruct: take only the
+        # latest session rather than inventing returns for a book whose
+        # holdings on those days are unknown.
+        pending = ([d for d in sessions if str(d) > str(last_ret_date)]
+                   if last_ret_date else sessions[-1:])
+        for session in pending:
+            rets = returns_by_date[session]
+            for name in [t for t in unit_held if t not in rets]:
+                unit_held.pop(name)
+            unit_returns.append(
+                float(sum(w * rets[t] for t, w in unit_held.items())))
+            last_ret_date = str(session)
+        unit_returns = unit_returns[-_UNIT_RETURN_HISTORY:]
+    state = {**state, "unit_held": unit_held, "unit_returns": unit_returns,
+             "last_return_date": last_ret_date}
+
+    all_days = sorted(market_by_date)
+    states = causal_states_from_series(
+        all_days, [market_by_date[d] for d in all_days], span=causal_span
+    )
+    is_calm = states.get(today, 0) == 0
+
+    last_reb = state.get("last_rebalance_date")
+    days_since = (
+        np.busday_count(np.datetime64(last_reb, "D"), np.datetime64(today, "D"))
+        if last_reb else 10**6
+    )
+    spacing = calm_days if (is_calm and calm_days) else rebalance_days
+    if days_since < spacing:
+        _logger.info("hold day (%sd since rebalance < %sd spacing%s)",
+                     days_since, spacing, ", calm" if is_calm else "")
+        return dict(state.get("held", {})), state
+
+    n = day.height
+    if n < min_names:
+        _logger.warning("thin day (%d names < %d) -> flat", n, min_names)
+        new_state = {**state, "held": {}, "unit_held": {}, "prev_longs": [],
+                     "prev_shorts": [], "last_rebalance_date": str(today)}
+        return {}, new_state
+
+    ranked = day.sort("score", descending=True)["ticker"].to_list()
+    k = max(1, int(n * quantile))
+    effective_band = calm_band if (is_calm and calm_band is not None) else band
+    if effective_band > 0.0:
+        k_exit = max(k, int(n * quantile * (1.0 + effective_band)))
+        rank = {t: i for i, t in enumerate(ranked)}
+        longs = _band_leg(state.get("prev_longs", []), ranked, rank, k, k_exit, n, False)
+        shorts = _band_leg(state.get("prev_shorts", []), ranked, rank, k, k_exit, n, True)
+    else:
+        longs, shorts = ranked[:k], ranked[n - k:]
+
+    scalar = 1.0
+    if vol_target > 0.0 and len(unit_returns) >= vol_lookback:
+        trailing = float(np.std(unit_returns[-vol_lookback:], ddof=1)) * np.sqrt(252.0)
+        if trailing > 0.0:
+            scalar = min(1.0, vol_target / trailing)
+
+    base = {t: 1.0 / (2 * k) for t in longs}
+    for t in shorts:
+        base[t] = base.get(t, 0.0) - 1.0 / (2 * k)
+    weights = {t: w * scalar for t, w in base.items()}
+    # unit_held is the shadow book at scalar 1: what the vol target measures.
+    new_state = {**state, "held": weights, "unit_held": base,
+                 "prev_longs": longs, "prev_shorts": shorts,
+                 "last_rebalance_date": str(today)}
+    return weights, new_state
+
+
+def solve_short_share_targets(targets: dict, prices: dict, capital: float) -> tuple[dict, dict]:
+    """Integer-share short targets whose NOTIONAL hits the leg's target gross.
+
+    Alpaca forbids fractional short opens, so every short is sized in whole
+    shares. Two failures follow from that, and the first fix traded one for
+    the other:
+
+    * Sizing each short independently and rounding to nearest DROPS names
+      priced above ~2x the position budget — 66 of 592 targets on 2026-10-02,
+      every one a short (MELI $1,692, LLY $1,146 against a $158 position). The
+      leg landed at 0.389 of 0.500 and the book ran net LONG by the shortfall.
+    * Redistributing the lost WEIGHT over the survivors restored the target
+      weights, but rounding a larger per-name weight overshoots more often
+      than it undershoots: the realized leg hit 0.5644 (2026-10-05) and 0.5557
+      (2026-10-12) against 0.500, so the book ran net SHORT instead. Two clean
+      rebalances reproduced it, which is what ruled out a transition artifact.
+
+    Solve the share counts directly instead. Floor every name to whole shares
+    (deliberately under-filling), then spend the remaining notional one share
+    at a time on the largest fractional remainders, skipping any share that
+    would not fit. The leg therefore approaches its target FROM BELOW and can
+    never overshoot. Cheap names carry the fine adjustment because a $10 share
+    is a smaller increment than a $1,692 one, so the fit is tight.
+
+    Returned weights are ``shares * price / capital``, which round-trips
+    exactly: ``int(round(w * capital / price)) == shares``. So ``diff_orders``
+    needs no change and derives precisely the share counts solved here."""
+    import math
+
+    leg_notional = abs(sum(w for w in targets.values() if w < 0.0)) * capital
+    shorts = {s: w for s, w in targets.items() if w < 0.0}
+    if not shorts or leg_notional <= 0.0:
+        return dict(targets), {"sized": 0, "dropped": 0, "fill": 1.0}
+
+    # PASS 1 — breadth first. Floor each name at its OWN target weight, then
+    # hand out one extra share by largest fractional remainder while it fits.
+    # Most names floor to zero (a $160 budget against a $300 share) and pick up
+    # their single share here, so the leg spreads across as many names as the
+    # budget allows. An earlier attempt re-spread the budget over only the
+    # names that could hold a full share first; it filled identically (0.99997)
+    # but collapsed the leg from 243 names to 121, and breadth is the sleeve's
+    # whole thesis — so weight-first, not budget-first.
+    plan, frac, spent = {}, [], 0.0
+    for sym, weight in shorts.items():
+        price = prices.get(sym)
+        if not price or price <= 0:
+            continue
+        ideal = abs(weight) * capital / price
+        whole = int(math.floor(ideal))
+        plan[sym] = whole
+        spent += whole * price
+        frac.append((ideal - whole, sym))
+    for _, sym in sorted(frac, reverse=True):
+        price = prices[sym]
+        if spent + price <= leg_notional:
+            plan[sym] += 1
+            spent += price
+
+    # PASS 2 — top up toward an equal split WITHOUT dropping anyone. Pass 1
+    # underfills when few names carry a large leg (3 names at $50 against a
+    # $50k leg stop at 251 shares each, 0.753 of target), because its cap is
+    # one share above each name's ORIGINAL weight rather than its fair share
+    # of the leg. Give the shortest-funded name a share at a time, capped at
+    # its fair budget, while the leg has room.
+    held = [s for s, n in plan.items() if n > 0]
+    if held and spent < leg_notional:
+        fair = leg_notional / len(held)
+        for _ in range(10_000):
+            gaps = [(fair - plan[s] * prices[s], s) for s in held
+                    if (plan[s] + 1) * prices[s] <= fair
+                    and spent + prices[s] <= leg_notional]
+            if not gaps:
+                break
+            _, sym = max(gaps)
+            plan[sym] += 1
+            spent += prices[sym]
+
+    out = {s: w for s, w in targets.items() if w >= 0.0}
+    sized = 0
+    for sym, shares in plan.items():
+        if shares > 0:
+            out[sym] = -(shares * prices[sym]) / capital
+            sized += 1
+    return out, {"sized": sized,
+                 "dropped": len(shorts) - sized,
+                 "notional": round(spent, 2),
+                 "target_notional": round(leg_notional, 2),
+                 "fill": round(spent / leg_notional, 6)}
+
+
+def diff_orders(targets: dict, positions: dict, prices: dict, capital: float,
+                min_order_notional: float = 25.0,
+                fractionable: set | None = None) -> list[dict]:
+    """Market orders that move current positions to target dollar weights.
+
+    Integer share rounding at ~$185/name mis-sized the first live fill: the
+    long leg's names average ~$300 (winners are expensive), so 1-share
+    rounding overshot it to $83k vs the $50k target (+$34k net-long tilt).
+    Long-side targets on ``fractionable`` names therefore trade in fractional
+    quantities (3 decimals); Alpaca forbids fractional SHORT opens, so
+    short-side targets stay integer (cheap losers round finely anyway).
+    Sub-``min_order_notional`` diffs are skipped (churn guard).
+
+    Side flips (long->short or short->long) split into a close order followed
+    by an open order: Alpaca rejects a single order crossing through zero, and
+    a fractional held long can only cross via an exact fractional close."""
+    fractionable = fractionable or set()
+    orders = []
+    for symbol in sorted(set(targets) | set(positions)):
+        price = prices.get(symbol)
+        if not price or price <= 0:
+            continue
+        target_w = targets.get(symbol, 0.0)
+        held = positions.get(symbol, 0.0)
+        raw_shares = target_w * capital / price
+        can_fraction = symbol in fractionable and target_w >= 0.0
+        target_shares = round(raw_shares, 3) if can_fraction else int(round(raw_shares))
+        if held and target_shares and (held > 0) != (target_shares > 0):
+            close_qty = round(abs(held), 3) if held > 0 else int(round(abs(held)))
+            if close_qty > 0:
+                orders.append({"symbol": symbol, "qty": close_qty,
+                               "side": "sell" if held > 0 else "buy",
+                               "tif": "day", "flip": "close"})
+            open_qty = (round(abs(target_shares), 3) if can_fraction
+                        else int(abs(target_shares)))
+            if open_qty > 0 and abs(target_shares) * price >= min_order_notional:
+                orders.append({"symbol": symbol, "qty": open_qty,
+                               "side": "buy" if target_shares > 0 else "sell",
+                               "tif": "day", "flip": "open"})
+            continue
+        delta = round(target_shares - held, 3)
+        if abs(delta) * price < min_order_notional:
+            continue
+        # Executable units: fractional only while the whole move stays on the
+        # fractionable long side; otherwise whole shares, and a diff that
+        # rounds to zero shares is unfillable dust — suppress, don't submit.
+        frac_ok = can_fraction and held >= 0
+        qty = round(abs(delta), 3) if frac_ok else int(round(abs(delta)))
+        # A REDUCING order can never ask for more than the position holds.
+        # int-rounding a fractional 1.732-share holding UP to 2 is rejected
+        # outright ("insufficient qty available for order"), and because the
+        # rejection is only logged the position silently survives the
+        # rebalance — 31 of 38 skips on 2026-08-07 were exactly this. A full
+        # exit therefore sells the EXACT holding (closing a fractional
+        # position is always permitted, even on a non-fractionable symbol);
+        # a partial reduce is clamped to what is there.
+        reducing = held != 0.0 and (delta > 0.0) != (held > 0.0)
+        if reducing:
+            available = round(abs(held), 3)
+            qty = available if target_shares == 0 else min(qty, available)
+        if qty <= 0:
+            continue
+        orders.append({"symbol": symbol, "qty": qty,
+                       "side": "buy" if delta > 0 else "sell", "tif": "day"})
+    return orders
+
+
+def universe_health(universe_path: str, today: date, horizon: int = 90) -> dict:
+    """Live PIT membership today, and the date coverage falls off.
+
+    The fixture stamps its build horizon as ``end_date`` on every still-active
+    name, so when that horizon passes the investable universe drops to the
+    handful of open-ended external rows. It has happened twice: 1,472 -> 502 on
+    2026-09-02 (undetected for eight sessions, and the 2026-09-14 book spent
+    255 orders re-targeting onto it) and 1,508 -> 503 on 2026-10-01.
+
+    ``max(end_date)`` is NOT the horizon — one outlier row pushed it a month
+    past the real cliff both times, which is how the collapse hid. Count live
+    membership per day instead, end-EXCLUSIVE, and call it collapsed when it
+    falls to within 20% of the open-ended count."""
+    rows = list(csv.DictReader(open(universe_path, encoding="utf-8")))
+    spans = [(date.fromisoformat(r["start_date"]),
+              date.fromisoformat(r["end_date"]) if r["end_date"] else None)
+             for r in rows]
+    open_n = sum(1 for _, e in spans if e is None)
+
+    def live(day: date) -> int:
+        return sum(1 for s, e in spans if s <= day and (e is None or e > day))
+
+    live_today = live(today)
+    collapsed = live_today <= open_n * 1.2
+    cliff = None
+    for offset in range(horizon + 1):
+        day = today + timedelta(days=offset)
+        if live(day) <= open_n * 1.2:
+            cliff = day
+            break
+    return {"live": live_today, "open_ended": open_n,
+            "collapsed": collapsed, "cliff": cliff}
+
+
+def assert_universe_live(universe_path: str, today: date, warn_days: int = 10) -> dict:
+    """Refuse to trade a collapsed universe; warn when the cliff is near.
+
+    A scheduled, unattended run is exactly where this matters: the 2026-09-14
+    book re-targeted to 99/99 on an expired fixture with nobody watching the
+    membership count."""
+    h = universe_health(universe_path, today)
+    if h["collapsed"]:
+        raise SystemExit(
+            f"refusing to trade: PIT universe has only {h['live']} live names "
+            f"({h['open_ended']} of them open-ended rows) — the fixture's rule "
+            f"coverage has lapsed. Refresh it with "
+            f"scripts.extend_liquid_universe before trading.")
+    if h["cliff"] is not None and (h["cliff"] - today).days <= warn_days:
+        _logger.warning("universe coverage ends %s (%d days) — refresh soon",
+                        h["cliff"], (h["cliff"] - today).days)
+    else:
+        _logger.info("universe: %d live names, coverage to %s", h["live"], h["cliff"])
+    return h
+
+
+_BOOK_BRANCH = "claude/zen-davinci-sH7mS"
+
+
+def current_branch(repo_root: str = ".") -> str | None:
+    """HEAD's branch name; None when git is unavailable or HEAD is detached."""
+    try:
+        done = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                              cwd=repo_root, capture_output=True, text=True,
+                              timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    name = done.stdout.strip()
+    return name if done.returncode == 0 and name and name != "HEAD" else None
+
+
+def assert_book_branch(expected: str = _BOOK_BRANCH,
+                       branch: str | None = None) -> str | None:
+    """Refuse to trade from any branch but the book's own.
+
+    models/prod/book_state.json is TRACKED, so every branch carries its own
+    snapshot of the ledger. A sibling branch cut for other work keeps a valid
+    promotion registry beside a ledger frozen on the day it was cut, and the
+    state read is a silent ``{} if not exists`` — so the book would diff the
+    live account against a stale baseline and trade the difference. That fails
+    OPEN. A missing registry fails CLOSED (the champion check exits), which is
+    why `main` is harmless and a sibling branch is not; the checked-out branch
+    is the only thing separating the two.
+    """
+    name = current_branch() if branch is None else branch
+    if name is None:
+        _logger.warning("cannot determine the git branch — book-branch guard "
+                        "skipped; confirm the ledger matches this account")
+        return None
+    if name != expected:
+        raise SystemExit(
+            f"refusing to trade: on branch {name!r}, but the book's ledger "
+            f"lives on {expected!r}. models/prod/book_state.json is tracked, "
+            f"so this branch holds a stale copy and the book would diff the "
+            f"live account against it. Run `git checkout {expected}` first, or "
+            f"pass --ignore-branch-guard if this branch really does carry the "
+            f"current ledger.")
+    return name
+
+
+def _assert_paper(cfg) -> None:
+    key = os.environ.get("QA_ALPACA__API_KEY", "")
+    if not key.startswith("PK"):
+        raise SystemExit(
+            "refusing to run: QA_ALPACA__API_KEY does not look like a PAPER key "
+            "(PK…). This tool only ever trades the paper account."
+        )
+
+
+def main() -> None:  # pragma: no cover - operational I/O around tested core
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--registry", default="./models/prod/promotion_registry.json")
+    parser.add_argument("--state-file", default="./models/prod/book_state.json")
+    parser.add_argument("--capital", type=float, default=None,
+                        help="book notional (default execution.account_capital)")
+    parser.add_argument("--lookback-days", type=int, default=420,
+                        help="calendar warmup for features/smoothing/decoder history "
+                             "(must cover the 252-trading-day momentum/seasonality "
+                             "warmup; 90d starves them on real data and collapses "
+                             "the scored universe)")
+    parser.add_argument("--execute", action="store_true",
+                        help="actually submit orders (default: dry-run print)")
+    parser.add_argument("--ignore-branch-guard", action="store_true",
+                        help="trade even when HEAD is not the book's branch "
+                             "(recovery tool; the ledger is tracked, so the "
+                             "wrong branch means a stale baseline)")
+    parser.add_argument("--force-rebalance", action="store_true",
+                        help="ignore the grid spacing and re-target the full book "
+                             "today (recovery tool, e.g. after a mis-scored book)")
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    # Score under the FROZEN CHAMPION's config (feature families, factors,
+    # events, fundamentals fixture, universe) — library defaults would build a
+    # frame missing the columns the deployed boosters select. News/sentiment
+    # features are not in any deployed manifest (causal screen dropped them),
+    # so fusion stays off here: the neutral sentiment_score column suffices.
+    from new_pipeline.api.overrides import build_overridden_config
+
+    body = json.loads(Path("new_pipeline/config/champion_run_body.json").read_text())
+    overrides = body["overrides"]
+    overrides.pop("news", None)
+    overrides.setdefault("fusion", {})["enabled"] = False
+    overrides.setdefault("system", {})["run_mode"] = "paper"
+    cfg = build_overridden_config(overrides)
+    _assert_paper(cfg)
+    if not args.ignore_branch_guard:
+        assert_book_branch()
+    assert_universe_live(cfg.data.universe_path or
+                         "new_pipeline/data/universe/liquid1500_pit.csv",
+                         date.today())
+    registry = PromotionRegistry(args.registry)
+    champions = registry.active_champions()
+    if LONG_SHORT_KEY not in champions:
+        raise SystemExit(f"{LONG_SHORT_KEY!r} is not promoted in {args.registry}; "
+                         "run scripts.promote_candidates first")
+    manifest = json.loads(Path(champions[LONG_SHORT_KEY]).read_text())
+    params = manifest["best_params"]
+
+    # Sector boosters are the book's SCORERS, loaded from the book's own
+    # deployed directory — independent of champion status, so retiring the
+    # sector champions from standalone trading does not blind the book.
+    book_dir = Path(champions[LONG_SHORT_KEY]).parent
+    boosters = {}
+    for candidate in sorted(book_dir.glob("*_candidate.json")):
+        if candidate.name.startswith("universe_long_short"):
+            continue
+        selected = candidate.with_name(candidate.name.replace(
+            "_candidate.json", "_candidate_features.json"))
+        manifest_features = json.loads(selected.read_text())
+        key = manifest_features.get("metadata", {}).get("sector", candidate.stem)
+        boosters[key] = (load_booster(candidate), manifest_features["features"])
+    if not boosters:
+        raise SystemExit("no sector boosters promoted; the book needs per-name "
+                         "scores (promote with --all-sectors)")
+
+    from new_pipeline.adapters import StaticUniverseProvider
+    from new_pipeline.adapters.broker_alpaca import AlpacaBroker
+    from new_pipeline.tournament.pipeline import build_training_frame
+
+    universe = StaticUniverseProvider(
+        Path(cfg.data.universe_path) if cfg.data.universe_path else None
+    )
+    from new_pipeline.adapters.factory import build_fundamentals_source
+
+    fundamentals_source = build_fundamentals_source(cfg, universe)
+    sectors = universe.sectors()
+    start = date.today() - timedelta(days=args.lookback_days)
+    frame = build_training_frame(
+        list(sectors), sectors, start, date.today(), cfg=cfg,
+        fundamentals_source=fundamentals_source,
+        membership=universe.members(),
+    )
+    market_by_date = dict(
+        frame.select("date", "market_next_ret").drop_nulls().unique(subset=["date"])
+        .sort("date").iter_rows()
+    )
+    rows = []
+    for key, (booster, selected) in boosters.items():
+        sub = frame.filter(pl.col("sector") == key).with_columns(
+            pl.col(selected).fill_nan(None)).drop_nulls(subset=selected)
+        if sub.is_empty():
+            continue
+        proba = predict_proba(booster, sub.select(selected).to_numpy())
+        rows.append(sub.select("date", "ticker", "sector").with_columns(
+            pl.Series("score", proba)))
+    panel = pl.concat(rows)
+
+    state = (json.loads(Path(args.state_file).read_text())
+             if Path(args.state_file).exists() else {})
+    if args.force_rebalance:
+        _logger.warning("--force-rebalance: ignoring grid spacing, full re-target")
+        state.pop("last_rebalance_date", None)
+    # Per-name returns for every recent session, so the shadow book can catch
+    # up on sessions where this script did not run (it advances per SESSION,
+    # not per run). Bounded to the trailing window the vol target can use.
+    latest_date = frame["date"].max()
+    recent = (
+        frame.select("date", "ticker", "close").sort(["ticker", "date"])
+        .with_columns((pl.col("close") / pl.col("close").shift(1).over("ticker") - 1.0)
+                      .alias("ret"))
+        .drop_nulls("ret")
+        .filter(pl.col("date") > latest_date - timedelta(days=_BACKFILL_WINDOW_DAYS))
+    )
+    returns_by_date: dict = {}
+    for row in recent.select("date", "ticker", "ret").iter_rows():
+        returns_by_date.setdefault(row[0], {})[row[1]] = row[2]
+    targets, new_state = compute_targets(panel, params, state, market_by_date,
+                                         causal_span=params.get("causal_window_days", 252),
+                                         returns_by_date=returns_by_date)
+    _logger.info("shadow book: %d unit names, %d unit returns through %s (vol target needs %d)",
+                 len(new_state.get("unit_held", {})), len(new_state.get("unit_returns", [])),
+                 new_state.get("last_return_date"), params.get("vol_lookback_days", 20))
+
+    price_date = select_price_date(frame)
+    latest = frame.filter(pl.col("date") == price_date)
+    prices = dict(latest.select("ticker", "close").iter_rows())
+    if price_date != latest_date:
+        _logger.warning("pricing off %s, not the partial current session %s "
+                        "(%d names vs %d)", price_date, latest_date, len(prices),
+                        frame.filter(pl.col("date") == latest_date).height)
+    capital = args.capital or cfg.execution.account_capital
+    broker = AlpacaBroker(os.environ["QA_ALPACA__API_KEY"],
+                         os.environ["QA_ALPACA__SECRET_KEY"], paper=True)
+    positions = broker.get_positions()
+    # Sizing-price sanity gate: the frame's closes size every order, so a feed
+    # regression (the fake-source fallback priced ASML at $107 vs $1,655 live
+    # and silently mis-sized the book 15x) must abort, not trade. Held names
+    # carry a live mark from the broker — compare where both sides exist.
+    marks = {p.symbol: float(p.current_price)
+             for p in broker._client.get_all_positions() if float(p.current_price) > 0}
+    checked = [(s, prices[s] / marks[s]) for s in marks if prices.get(s)]
+    bad = [(s, r) for s, r in checked if not 0.5 <= r <= 2.0]
+    # STRANDED POSITIONS. diff_orders skips any symbol with no price, so a
+    # holding whose name has left the scored universe (delisted, dropped from
+    # PIT membership, an ETF that is no longer a candidate) can never be
+    # exited: the frame has no close for it, no order is emitted, and it sits
+    # in the book forever with no target and no risk control. On 2026-10-02
+    # that was 69 positions, $12,090 — 12.84% of capital and +5.67% net, i.e.
+    # 91% of the book's entire net-long tilt. The broker always knows what it
+    # holds, so fall its mark in for names we hold but cannot price; targets
+    # still require a frame price, so this only ever enables EXITS.
+    stranded = {s: m for s, m in marks.items() if s not in prices}
+    if stranded:
+        prices.update(stranded)
+        gross = sum(abs(positions.get(s, 0.0)) * m for s, m in stranded.items())
+        _logger.warning("%d held names have no frame price; using broker marks so "
+                        "they can be exited (~$%.0f gross)", len(stranded), gross)
+    if checked and len(bad) > max(2, 0.02 * len(checked)):
+        worst = sorted(bad, key=lambda x: abs(x[1] - 1.0), reverse=True)[:5]
+        raise SystemExit(
+            f"refusing to trade: {len(bad)}/{len(checked)} sizing prices diverge "
+            f">2x from live marks (worst: {worst}) — data feed regression?")
+    try:
+        from alpaca.trading.enums import AssetClass, AssetStatus
+        from alpaca.trading.requests import GetAssetsRequest
+        assets = broker._client.get_all_assets(
+            GetAssetsRequest(status=AssetStatus.ACTIVE, asset_class=AssetClass.US_EQUITY))
+        fractionable = {a.symbol for a in assets if getattr(a, "fractionable", False)}
+    except Exception as exc:
+        _logger.warning("fractionable lookup failed (%s); integer sizing", exc)
+        fractionable = set()
+    # Whole-share short sizing silently drops expensive names (66 of 592 on
+    # 2026-10-02, every one a short), so the short leg lands under target and
+    # the book runs net long by the shortfall. Move that weight onto shorts
+    # that can be expressed, keeping gross and neutrality at spec.
+    targets, shortfix = solve_short_share_targets(targets, prices, capital)
+    if shortfix["dropped"] or shortfix["fill"] < 0.999:
+        _logger.warning("short leg: solved %d names in whole shares, %d unsizeable; "
+                        "notional $%.0f of $%.0f target (fill %.4f)",
+                        shortfix["sized"], shortfix["dropped"], shortfix["notional"],
+                        shortfix["target_notional"], shortfix["fill"])
+    orders = diff_orders(targets, positions, prices, capital, fractionable=fractionable)
+
+    print(f"book: {len([w for w in targets.values() if w > 0])} longs / "
+          f"{len([w for w in targets.values() if w < 0])} shorts, "
+          f"gross {sum(abs(w) for w in targets.values()):.2f}, "
+          f"{len(orders)} orders vs {len(positions)} open positions")
+    for order in orders[:20]:
+        print(" ", order)
+    if len(orders) > 20:
+        print(f"  ... {len(orders) - 20} more")
+    if not args.execute:
+        print("DRY RUN — pass --execute to submit to the paper account")
+        return
+    # Persist the new anchors BEFORE submitting: new_state depends only on the
+    # targets (not the fills), and a mid-loop crash previously lost the state
+    # write, leaving the next run diffing against stale anchors.
+    Path(args.state_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.state_file).write_text(json.dumps(new_state, indent=1))
+    print(f"state saved -> {args.state_file}")
+    submitted, skipped = 0, []
+    failed_closes = set()
+    for order in orders:
+        if order.get("flip") == "open" and order["symbol"] in failed_closes:
+            # the paired close didn't fill-submit; the open would be an
+            # illegal zero-crossing order — hold the position until it can.
+            skipped.append((order["symbol"], order["side"], "flip close failed"))
+            _logger.warning("SKIPPED %s %s: flip close failed", order['side'], order['symbol'])
+            continue
+        try:
+            receipt = broker.submit_order(order)
+            submitted += 1
+            _logger.info("submitted %s %s x%s -> %s", order['side'], order['symbol'],
+                         order['qty'], receipt['status'])
+            if order.get("flip") == "close" and receipt.get("status") not in ("filled",):
+                # Hold the paired open until the close actually settles.
+                state_ = await_close_fill(broker, receipt.get("order_id"))
+                if state_ != "filled":
+                    failed_closes.add(order["symbol"])
+                    _logger.warning("flip close %s ended %s; holding its open leg",
+                                    order["symbol"], state_)
+        except Exception as exc:  # not-shortable / halted / rejected: skip, keep going
+            if order.get("flip") == "close":
+                failed_closes.add(order["symbol"])
+            skipped.append((order["symbol"], order["side"], str(exc)[:90]))
+            _logger.warning("SKIPPED %s %s: %s", order['side'], order['symbol'], exc)
+    print(f"submitted {submitted}/{len(orders)} orders; skipped {len(skipped)}")
+    if skipped:
+        from collections import Counter
+        reasons = Counter(m.split('"message":')[-1][:40] for _, _, m in skipped)
+        print("  top skip reasons:", dict(reasons.most_common(3)))
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

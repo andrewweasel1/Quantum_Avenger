@@ -1,0 +1,23 @@
+{
+  "promotions": [
+    {
+      "sector": "Intraday ORB",
+      "dsr": 0.5362871476195123,
+      "synthetic_sharpe": 0.18921962817057209,
+      "pbo": 0.23809523809523808,
+      "psr": 0.9998349384537415,
+      "haircut_sharpe": null,
+      "cpcv_path_pass_fraction": null,
+      "cpcv_path_dsr_median": null,
+      "reality_check_pvalue": null,
+      "n_trades": 275,
+      "n_obs": 478,
+      "regime_breakdown": null,
+      "promoted": false,
+      "reason": "low DSR",
+      "timestamp": "2026-08-04T15:56:33.915441+00:00",
+      "model_path": null
+    }
+  ],
+  "active_champions": {}
+}

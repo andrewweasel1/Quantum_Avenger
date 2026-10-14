@@ -6,6 +6,16 @@
 - Never committed: no keys in the repo, configmaps, or images. Dev/test use the
   deterministic fakes, so no real credentials are needed offline.
 
+## Dashboard API auth
+- The FastAPI control plane (launch/cancel backtests, read config, monitor
+  ledgers) ships with config-gated bearer-token auth: set
+  `dashboard.auth_enabled: true` (or `QA_DASHBOARD__AUTH_ENABLED=true`) and
+  provide `QA_API_TOKEN` in the environment. Comparison is constant-time and
+  the gate **fails closed** — enabled with no token configured rejects all
+  requests. `/api/health` and static assets stay open for probes/browsers.
+- The server binds `127.0.0.1` by default (`QA_API_HOST`); never expose it
+  beyond localhost without enabling auth.
+
 ## Containers
 - All images run as a non-root user (uid 10001).
 - Minimal `python:3.11-slim` base; `.dockerignore` excludes tests, docs, and

@@ -8,8 +8,13 @@ receipt shape the orchestrator/trade-log expect. Loaded lazily for a live
 """
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce
-from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
+from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
+from alpaca.trading.requests import (
+    LimitOrderRequest,
+    MarketOrderRequest,
+    StopLossRequest,
+    TakeProfitRequest,
+)
 
 from new_pipeline.execution.broker import BrokerAdapter
 
@@ -30,17 +35,35 @@ class AlpacaBroker(BrokerAdapter):
 
     def submit_order(self, order: dict) -> dict:
         symbol = str(order["symbol"])
-        qty = int(order.get("qty", 0))
+        # Fractional quantities must survive to the API: int()-flooring here
+        # turned the book's sub-share rebalance trims into qty-0 rejects and
+        # silently re-introduced the long-leg rounding tilt the sizing fix
+        # was meant to kill. Whole counts stay int for exact API formatting.
+        qty_raw = float(order.get("qty", 0))
+        qty = int(qty_raw) if qty_raw.is_integer() else round(qty_raw, 3)
         side = _SIDE[str(order.get("side", "buy")).lower()]
         tif = _TIF.get(str(order.get("tif", "day")).lower(), TimeInForce.DAY)
         limit_price = order.get("limit_price")
+        # Bracket legs (intraday runner): server-side stop/target protection
+        # attached to the entry — one order, no client-side stop polling.
+        # Absent both keys, behavior is byte-identical to the daily path.
+        extra = {}
+        if order.get("stop_loss") is not None or order.get("take_profit") is not None:
+            extra["order_class"] = OrderClass.BRACKET
+            if order.get("stop_loss") is not None:
+                extra["stop_loss"] = StopLossRequest(
+                    stop_price=round(float(order["stop_loss"]), 2))
+            if order.get("take_profit") is not None:
+                extra["take_profit"] = TakeProfitRequest(
+                    limit_price=round(float(order["take_profit"]), 2))
         if limit_price is not None:
             request = LimitOrderRequest(
                 symbol=symbol, qty=qty, side=side, time_in_force=tif,
-                limit_price=round(float(limit_price), 2),
+                limit_price=round(float(limit_price), 2), **extra,
             )
         else:
-            request = MarketOrderRequest(symbol=symbol, qty=qty, side=side, time_in_force=tif)
+            request = MarketOrderRequest(symbol=symbol, qty=qty, side=side,
+                                         time_in_force=tif, **extra)
 
         placed = self._client.submit_order(order_data=request)
         return {
@@ -53,11 +76,19 @@ class AlpacaBroker(BrokerAdapter):
             "filled_avg_price": float(placed.filled_avg_price) if placed.filled_avg_price else 0.0,
         }
 
+    def order_status(self, order_id: str) -> str:
+        try:
+            return _value(self._client.get_order_by_id(order_id).status)
+        except Exception:  # transient lookup failure must not read as filled
+            return "unknown"
+
     def get_positions(self) -> dict[str, float]:
         positions: dict[str, float] = {}
         for pos in self._client.get_all_positions():
-            qty = float(pos.qty)
-            positions[pos.symbol] = qty if _value(pos.side).lower() == "long" else -qty
+            # Alpaca already signs qty (shorts are negative); negating again on
+            # side=="short" double-negated and reported shorts as longs — which
+            # would poison the next rebalance's order diff.
+            positions[pos.symbol] = float(pos.qty)
         return positions
 
     def account(self) -> dict:

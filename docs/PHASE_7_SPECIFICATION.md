@@ -1,5 +1,7 @@
 # Phase 7: Production Hardening & Deployment - Detailed Specification
 
+> **Implementation status: ○ NOT STARTED.** Only a chaos/load test exists (`new_pipeline/hardening/chaos/load_test.py`). Remaining: Dockerfiles (app/dashboard/mcp), K8s manifests + GPU/CPU node selectors, Terraform, a CI pipeline enforcing **ruff + golden tests + ≥85 % coverage**, Prometheus/Grafana observability, secrets via a manager, chaos/recovery playbooks, and a **nightly GPU↔CPU reconciliation** job. See IMPLEMENTATION_STATUS §5. *This phase is a forward‑looking spec; current state in `ARCHITECTURE_ROADMAP.md`.*
+
 **Duration**: 2 weeks  
 **Target Date**: Complete by late August (after Phase 6)  
 **Success Criteria**: System production-ready; deployment automated; monitoring and disaster recovery validated; 100% critical path tests green

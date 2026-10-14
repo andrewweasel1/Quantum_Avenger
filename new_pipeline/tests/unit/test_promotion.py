@@ -15,6 +15,40 @@ def test_reject_low_dsr():
     assert decision.reason == "low DSR"
 
 
+def test_zero_trades_named_ahead_of_low_dsr():
+    # An all-zero OOS series scores DSR 0.0 by construction; the reason must say
+    # the strategy never traded, not that its (vacuous) DSR was low.
+    decision = assess_promotion("Energy", 0.0, 0.0, n_trades=0)
+    assert decision.promoted is False
+    assert decision.reason == "zero trades (entry threshold never fired)"
+    assert decision.n_trades == 0
+
+
+def test_n_trades_recorded_and_nonzero_does_not_trip_gate():
+    # With trades present the zero-trade gate stays silent; other gates decide.
+    decision = assess_promotion("Energy", 0.97, 0.2, n_trades=137)
+    assert decision.promoted is True
+    assert decision.n_trades == 137
+    # Omitted n_trades (legacy callers) leaves the gate disabled entirely.
+    assert assess_promotion("Energy", 0.0, 0.0).reason == "low DSR"
+
+
+def test_reality_check_gate_opt_in():
+    # gate off (default): a high RC p-value is recorded but ignored.
+    assert assess_promotion("Energy", 0.97, 0.2, reality_check_pvalue=0.8).promoted is True
+    # gate on + high p (best trial indistinguishable from luck) -> rejected.
+    snooped = assess_promotion(
+        "Energy", 0.97, 0.2, reality_check_pvalue=0.8,
+        reality_check_gate_enabled=True, reality_check_threshold=0.05,
+    )
+    assert snooped.promoted is False and "reality check" in snooped.reason
+    # gate on + low p -> passes.
+    assert assess_promotion(
+        "Energy", 0.97, 0.2, reality_check_pvalue=0.01,
+        reality_check_gate_enabled=True, reality_check_threshold=0.05,
+    ).promoted is True
+
+
 def test_reject_failed_gauntlet():
     decision = assess_promotion("Energy", 0.97, -0.1)
     assert decision.promoted is False
@@ -76,3 +110,36 @@ def test_diagnostics_are_recorded(tmp_path):
     assert entry["pbo"] == 0.1
     assert entry["psr"] == 0.99
     assert entry["haircut_sharpe"] == 1.1
+
+
+def test_cpcv_path_gate_blocks_unstable_paths():
+    decision = assess_promotion(
+        "Energy", 0.97, 0.2,
+        path_pass_fraction=0.2, path_fraction_threshold=0.5, path_gate_enabled=True,
+    )
+    assert decision.promoted is False
+    assert decision.reason == "unstable across CPCV paths"
+    assert decision.cpcv_path_pass_fraction == 0.2
+
+
+def test_cpcv_path_gate_passes_when_enough_paths_clear():
+    decision = assess_promotion(
+        "Energy", 0.97, 0.2,
+        path_pass_fraction=0.8, path_fraction_threshold=0.5, path_gate_enabled=True,
+    )
+    assert decision.promoted is True
+
+
+def test_cpcv_path_gate_inert_when_disabled():
+    # Default path_gate_enabled=False: the fraction is recorded but never gates.
+    decision = assess_promotion("Energy", 0.97, 0.2, path_pass_fraction=0.0)
+    assert decision.promoted is True
+    assert decision.cpcv_path_pass_fraction == 0.0
+
+
+def test_cpcv_path_diagnostics_recorded(tmp_path):
+    registry = PromotionRegistry(tmp_path / "reg.json")
+    decision = assess_promotion("Energy", 0.97, 0.2, path_pass_fraction=0.6, path_dsr_median=0.93)
+    entry = registry.record(decision, model_path="/m/e.json")
+    assert entry["cpcv_path_pass_fraction"] == 0.6
+    assert entry["cpcv_path_dsr_median"] == 0.93

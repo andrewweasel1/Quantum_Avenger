@@ -19,6 +19,7 @@ from new_pipeline.execution.grader import Grader
 from new_pipeline.execution.verdict_engine import VerdictEngine
 from new_pipeline.execution.veto_ledger import VetoLedger, VetoRecord
 from new_pipeline.features.shields import evaluate_risk_veto_gates
+from new_pipeline.monitoring.metrics import get_metrics
 
 
 @dataclass
@@ -40,6 +41,7 @@ class TradeRequest:
 
 class _State(TypedDict, total=False):
     request: TradeRequest
+    evidence: list[str]
     verdict: str
     grader_approved: bool
     grader_feedback: str
@@ -58,6 +60,7 @@ class TradeOrchestrator:
         ledger: VetoLedger,
         max_retries: int = 3,
         tif: str = "day",
+        rag=None,
     ):
         self._verdict_engine = VerdictEngine(llm)
         self._grader = Grader(llm)
@@ -65,6 +68,7 @@ class TradeOrchestrator:
         self._ledger = ledger
         self._max_retries = max_retries
         self._tif = tif
+        self._rag = rag  # RagEngine | None — None keeps the graph evidence-free
         self._app = self._build_graph()
 
     def run(self, request: TradeRequest) -> _State:
@@ -72,12 +76,14 @@ class TradeOrchestrator:
 
     def _build_graph(self):
         graph = StateGraph(_State)
+        graph.add_node("evidence", self._evidence_node)
         graph.add_node("verdict", self._verdict_node)
         graph.add_node("grader", self._grader_node)
         graph.add_node("risk_veto", self._risk_veto_node)
         graph.add_node("execute", self._execute_node)
         graph.add_node("fallback", self._fallback_node)
-        graph.add_edge(START, "verdict")
+        graph.add_edge(START, "evidence")
+        graph.add_edge("evidence", "verdict")
         graph.add_edge("verdict", "grader")
         graph.add_conditional_edges(
             "grader",
@@ -94,14 +100,29 @@ class TradeOrchestrator:
         return graph.compile()
 
     # --- nodes -------------------------------------------------------------
+    def _evidence_node(self, state: _State) -> dict:
+        """Retrieve the passages most relevant to this signal from the request's
+        context corpus (the agentic evidence step). With no RAG engine wired or
+        nothing to index, the graph degrades to the plain verdict->grader path."""
+        request = state["request"]
+        if self._rag is None or not request.context:
+            return {"evidence": []}
+        self._rag.index(list(request.context))
+        hits = self._rag.retrieve(f"{request.signal} {request.symbol}")
+        return {"evidence": [hit.text for hit in hits]}
+
     def _verdict_node(self, state: _State) -> dict:
         request = state["request"]
-        verdict = self._verdict_engine.generate(request.signal, request.symbol, request.context)
+        verdict = self._verdict_engine.generate(
+            request.signal, request.symbol, request.context, evidence=state.get("evidence")
+        )
         return {"verdict": verdict.stance, "attempts": state.get("attempts", 0) + 1}
 
     def _grader_node(self, state: _State) -> dict:
         request = state["request"]
-        result = self._grader.grade(Verdict(state["verdict"], ""), request.context)
+        result = self._grader.grade(
+            Verdict(state["verdict"], ""), request.context, evidence=state.get("evidence")
+        )
         return {"grader_approved": result.approved, "grader_feedback": result.feedback}
 
     def _risk_veto_node(self, state: _State) -> dict:
@@ -144,6 +165,9 @@ class TradeOrchestrator:
                 execution_id=execution_id,
             )
         )
+        metrics = get_metrics()
+        metrics.increment("decisions_total")
+        metrics.increment("executed_total")
         return {"execution_id": execution_id, "outcome": "executed"}
 
     def _fallback_node(self, state: _State) -> dict:
@@ -164,6 +188,10 @@ class TradeOrchestrator:
                 execution_id="",
             )
         )
+        metrics = get_metrics()
+        metrics.increment("decisions_total")
+        metrics.increment("vetoed_total")
+        metrics.increment(f"vetoed_{gate}_total")
         return {"outcome": "vetoed"}
 
     # --- routers -----------------------------------------------------------

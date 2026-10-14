@@ -1,0 +1,343 @@
+"""Session-return gauntlet + full ORB run integration on a synthetic vault."""
+
+import json
+from datetime import UTC, date, datetime, timedelta
+
+import numpy as np
+import polars as pl
+from new_pipeline.config import base, reload_config
+from new_pipeline.intraday.calendar import Session, write_fixture
+from new_pipeline.intraday.evaluate import evaluate_orb, market_series, record
+from new_pipeline.intraday.orb import Combo
+from new_pipeline.scripts.ingest_minute_vault import _write_symbol_month
+
+
+def _sessions(n, start=date(2026, 1, 5)):
+    out, d = {}, start
+    while len(out) < n:
+        if d.weekday() < 5:
+            out[d] = Session(d, datetime(d.year, d.month, d.day, 14, 30, tzinfo=UTC),
+                             datetime(d.year, d.month, d.day, 21, 0, tzinfo=UTC))
+        d += timedelta(days=1)
+    return out
+
+
+def _session_minutes(day, ticker, drift):
+    """Deterministic winning ORB session: breakout after a 5-min range, close
+    drifting up by ``drift`` — hand-checkable and HMM-decodable across days."""
+    o = datetime(day.year, day.month, day.day, 14, 30, tzinfo=UTC)
+    rows = [(0, 10.0, 10.5, 9.8, 10.2), (4, 10.2, 10.7, 10.0, 10.4),
+            (6, 10.5, 10.9, 10.4, 10.8), (7, 10.85, 11.0, 10.8, 10.9),
+            (200, 10.9, 11.1, 10.85, 10.95 + drift),
+            (380, 11.0 + drift, 11.1 + drift, 10.9, 11.0 + drift)]
+    return pl.DataFrame({
+        "ticker": [ticker] * len(rows),
+        "ts": [o + timedelta(minutes=m) for m, *_ in rows],
+        "open": [r[1] for r in rows], "high": [r[2] for r in rows],
+        "low": [r[3] for r in rows], "close": [float(r[4]) for r in rows],
+        "volume": [500_000] * len(rows),
+        "session_date": [day] * len(rows),
+    })
+
+
+def _daily_from(minutes_by_day, ticker="AAA"):
+    rows = []
+    for day, frame in sorted(minutes_by_day.items()):
+        sub = frame.filter(pl.col("ticker") == ticker).sort("ts")
+        rows.append((day, ticker, sub["open"][0], sub["high"].max(), sub["low"].min(),
+                     sub["close"][-1], int(sub["volume"].sum()),
+                     float(sub["close"][-1] * sub["volume"].sum())))
+    return pl.DataFrame(rows, schema=["date", "ticker", "open", "high", "low",
+                                      "close", "volume", "dollar_vol"], orient="row")
+
+
+def test_market_series_aligns_to_days():
+    daily = pl.DataFrame({
+        "date": [date(2026, 1, 5), date(2026, 1, 6), date(2026, 1, 7)] * 2,
+        "ticker": ["A"] * 3 + ["B"] * 3,
+        "close": [10.0, 11.0, 11.0, 20.0, 18.0, 18.0],
+    })
+    rets, vol = market_series(daily, [date(2026, 1, 6), date(2026, 1, 7)])
+    assert abs(rets[0] - ((0.1 + (-0.1)) / 2)) < 1e-12  # equal-weight mean
+    assert rets[1] == 0.0 and len(vol) == 2
+
+
+def test_evaluate_orb_planted_edge_and_registry_row(tmp_path):
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.entry_buffer_bps = 0.0
+    cfg.evaluation.min_regime_obs = 10
+    cfg.long_short.null_iterations = 4
+    sessions = _sessions(90)
+    rng = np.random.default_rng(0)
+    minutes_by_day = {d: _session_minutes(d, "AAA", drift=float(rng.normal(0.05, 0.02)))
+                      for d in sessions}
+    daily = _daily_from(minutes_by_day)
+    picks = {d: ["AAA"] for d in sessions}
+    stats = pl.DataFrame({"date": list(sessions), "ticker": ["AAA"] * len(sessions),
+                          "spread_bps": [30.0] * len(sessions),
+                          "vol_minute": [0.0] * len(sessions)})
+    combos = [Combo(5, "or_low", 0.0), Combo(30, "or_low", 0.0)]
+    from new_pipeline.intraday.simulate import run_backtest
+    matrix, days, ledger = run_backtest(minutes_by_day, sessions, picks, combos,
+                                        stats, cfg, equity=100_000.0)
+    assert matrix.shape == (90, 2) and (matrix[:, 0] > 0).mean() > 0.9
+
+    result = evaluate_orb(matrix, days, combos, ledger, daily, minutes_by_day,
+                          sessions, picks, stats, cfg, equity=100_000.0, seed=0)
+    assert result["report"].dsr > 0.9  # planted edge survives deflation
+    # a bare combo list rides the compat path as a single "default" variant
+    assert result["champion"].key == "default|uncapped|k5|or_low|none"
+    assert result["champion"].combo.k_minutes == 5
+    diag = result["diagnostics"]
+    assert diag["n_trades"] == 90 and 0 < diag["cost_share_of_gross"] < 1
+    assert len(diag["timing_null_sharpes"]) == 4
+    row = record(tmp_path / "registry.json", result,
+                 model_path=str(tmp_path / "cand.json"))
+    assert row["sector"] == "Intraday ORB"
+    saved = json.loads((tmp_path / "registry.json").read_text())
+    assert saved["promotions"][0]["synthetic_sharpe"] == row["synthetic_sharpe"]
+
+
+def test_full_run_cli_on_synthetic_vault(tmp_path, monkeypatch):
+    """End-to-end: vault files -> run() -> artifacts + registry, deterministic."""
+    reload_config()
+    cfg = base.get_config()
+    vault = tmp_path / "vault"
+    fixture = tmp_path / "sessions.csv"
+    sessions = _sessions(40, start=date(2026, 3, 2))
+    write_fixture(list(sessions.values()), fixture)
+    monkeypatch.setattr("new_pipeline.intraday.run.load_sessions",
+                        lambda: dict(sessions))
+    monkeypatch.setattr("new_pipeline.intraday.run.segment_symbols",
+                        lambda _cfg: ["AAA", "BBB"])
+    cfg.intraday.vault_dir = str(vault)
+    cfg.intraday.entry_buffer_bps = 0.0
+    cfg.intraday.min_adv_dollars = 1000.0
+    cfg.intraday.min_price = 1.0
+    cfg.evaluation.min_regime_obs = 10
+    cfg.long_short.null_iterations = 2
+
+    from new_pipeline.adapters.base import MinuteBar
+    rng = np.random.default_rng(1)
+    for sym in ("AAA", "BBB"):
+        by_month: dict[tuple[int, int], list] = {}
+        for day in sessions:
+            frame = _session_minutes(day, sym, drift=float(rng.normal(0.03, 0.03)))
+            bars = [MinuteBar(r["ts"], r["open"], r["high"], r["low"], r["close"],
+                              r["volume"], r["close"]) for r in frame.iter_rows(named=True)]
+            by_month.setdefault((day.year, day.month), []).extend(bars)
+        for (y, m), bars in by_month.items():
+            _write_symbol_month(vault, sym, y, m, bars)
+
+    from new_pipeline.intraday.run import run
+    out = tmp_path / "run_out"
+    days = sorted(sessions)
+    res = run(days[0], days[-1], out, equity=100_000.0, seed=0)
+    assert (out / "intraday_orb_returns_matrix.parquet").exists()
+    assert (out / "intraday_orb_candidate.json").exists()
+    assert (out / "promotion_registry.json").exists()
+    assert res["row"]["sector"] == "Intraday ORB"
+    matrix1 = pl.read_parquet(out / "intraday_orb_returns_matrix.parquet")
+    assert matrix1.height == len(sessions)
+    # determinism: identical rerun reproduces the matrix bit-for-bit
+    out2 = tmp_path / "run_out2"
+    run(days[0], days[-1], out2, equity=100_000.0, seed=0)
+    matrix2 = pl.read_parquet(out2 / "intraday_orb_returns_matrix.parquet")
+    assert matrix1.equals(matrix2)
+
+
+def test_trial_family_crosses_scanners_and_constructions():
+    """The scanner weighting is a real experimental axis: each variant trades
+    its OWN pick list, every (variant x construction) pair is a priced column,
+    and the ledger tags trades with the variant that generated them."""
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.entry_buffer_bps = 0.0
+    cfg.intraday.scanner_variants = ["attention", "tradable"]
+    from new_pipeline.intraday.orb import Trial, trials_from_config
+    from new_pipeline.intraday.simulate import run_backtest_trials
+
+    sessions = _sessions(6)
+    minutes_by_day = {}
+    for d in sessions:
+        minutes_by_day[d] = pl.concat([_session_minutes(d, "AAA", 0.05),
+                                       _session_minutes(d, "BBB", 0.02)])
+    # attention picks AAA only, tradable picks BBB only -> different books
+    picks_by_variant = {"attention": {d: ["AAA"] for d in sessions},
+                        "tradable": {d: ["BBB"] for d in sessions}}
+    stats = pl.DataFrame({"date": list(sessions) * 2,
+                          "ticker": ["AAA"] * len(sessions) + ["BBB"] * len(sessions),
+                          "spread_bps": [30.0] * (2 * len(sessions)),
+                          "vol_minute": [0.0] * (2 * len(sessions))})
+    trials = [Trial("attention", Combo(5, "or_low", 0.0)),
+              Trial("tradable", Combo(5, "or_low", 0.0))]
+    matrix, days, ledger = run_backtest_trials(minutes_by_day, sessions,
+                                               picks_by_variant, trials, stats,
+                                               cfg, equity=100_000.0)
+    assert matrix.shape == (6, 2)
+    assert not np.allclose(matrix[:, 0], matrix[:, 1])  # different picks, different P&L
+    tagged = {t.combo_key for t in ledger}
+    assert tagged == {"attention|uncapped|k5|or_low|none", "tradable|uncapped|k5|or_low|none"}
+    assert {t.ticker for t in ledger if t.combo_key.startswith("attention")} == {"AAA"}
+    # the config cross is the full family, and it follows the strategy family
+    cfg.intraday.scanner_variants = ["attention", "tradable"]
+    # Trial count is the product of every priced axis, computed from config so
+    # this pins the multiplication rather than a snapshot of today's defaults.
+    cfg.intraday.sizing_models = ["uncapped"]
+    cfg.intraday.strategy = "orb"
+    n_orb = (len(cfg.intraday.range_minutes) * len(cfg.intraday.stop_styles)
+             * len(cfg.intraday.target_r_multiples))
+    assert len(trials_from_config(cfg)) == 2 * n_orb
+    cfg.intraday.strategy = "meanrev"
+    n_mr = (len(cfg.intraday.mr_anchors) * len(cfg.intraday.mr_entry_z)
+            * len(cfg.intraday.mr_entry_styles) * len(cfg.intraday.mr_exit_targets))
+    assert len(trials_from_config(cfg)) == 2 * n_mr
+    # the sizing axis multiplies whatever family it is crossed with
+    cfg.intraday.sizing_models = ["volume_part", "touch_cap", "uncapped"]
+    assert len(trials_from_config(cfg)) == 2 * 3 * n_mr
+    assert all(t.combo.key.count("|") == 3 for t in trials_from_config(cfg))
+
+
+def test_activity_floor_blocks_a_thin_trial_from_being_champion():
+    """An argmax over trials favours the THINNEST trial — a handful of wins in
+    a sea of zero-return sessions posts a spectacular Sharpe. meanrev_v1
+    crowned a 3-trade trial at +1.16 annualized while every trial that really
+    traded was negative, so trials below the activity floor cannot win."""
+    from new_pipeline.intraday.orb import Trial
+    from new_pipeline.intraday.simulate import Trade
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.min_trades = 50
+    cfg.intraday.min_active_session_frac = 0.10
+    cfg.evaluation.min_regime_obs = 10
+    cfg.long_short.null_iterations = 2
+    sessions = _sessions(120)
+    days = sorted(sessions)
+    minutes_by_day = {d: _session_minutes(d, "AAA", 0.05) for d in sessions}
+    daily = _daily_from(minutes_by_day)
+    picks = {d: ["AAA"] for d in sessions}
+    stats = pl.DataFrame({"date": days, "ticker": ["AAA"] * len(days),
+                          "spread_bps": [30.0] * len(days),
+                          "vol_minute": [0.0] * len(days),
+                          "atr_pct": [0.02] * len(days)})
+    trials = [Trial("thin", Combo(5, "or_low", 0.0), "uncapped"),
+              Trial("busy", Combo(15, "or_low", 0.0), "uncapped")]
+    # thin: 3 huge wins, otherwise flat -> a spectacular but meaningless Sharpe
+    matrix = np.zeros((len(days), 2))
+    matrix[:3, 0] = 0.02
+    # busy: trades most sessions, modestly negative
+    rng = np.random.default_rng(0)
+    matrix[:, 1] = rng.normal(-0.0002, 0.004, len(days))
+    ledger = [Trade(days[i], "AAA", "thin|uncapped|k5|or_low|none", None, None, 10.0, 10.2,
+                    10, "target", 2.0, 0.1, 1.9) for i in range(3)]
+    ledger += [Trade(days[i], "AAA", "busy|uncapped|k15|or_low|none", None, None, 10.0, 9.9,
+                     10, "close", -1.0, 0.1, -1.1) for i in range(len(days))]
+    result = evaluate_orb(matrix, days, trials, ledger, daily, minutes_by_day,
+                          sessions, {"thin": picks, "busy": picks}, stats, cfg,
+                          equity=100_000.0, seed=0)
+    # the thin trial has the higher Sharpe but cannot be champion
+    assert _sr(matrix[:, 0]) > _sr(matrix[:, 1])
+    assert result["champion"].variant == "busy"
+    diag = result["diagnostics"]
+    assert diag["n_eligible_trials"] == 1
+    assert diag["trial_activity"]["thin|uncapped|k5|or_low|none"]["n_trades"] == 3
+    # with NO eligible trial the run is vetoed outright, not crowned
+    cfg.intraday.min_trades = 500
+    none_ok = evaluate_orb(matrix, days, trials, ledger, daily, minutes_by_day,
+                           sessions, {"thin": picks, "busy": picks}, stats, cfg,
+                           equity=100_000.0, seed=0)
+    assert none_ok["decision"].promoted is False
+    assert "activity floor" in none_ok["decision"].reason
+
+
+def _sr(a):
+    return float(a.mean() / a.std(ddof=1))
+
+
+def _gauntlet_fixture(n_sessions=120):
+    """Shared setup for the multiple-testing gates: a small trial matrix with a
+    clearly-best column, plus enough ledger activity to clear the floor."""
+    from new_pipeline.intraday.orb import Trial
+    from new_pipeline.intraday.simulate import Trade
+
+    reload_config()
+    cfg = base.get_config()
+    cfg.intraday.min_trades = 10
+    cfg.intraday.min_active_session_frac = 0.10
+    cfg.evaluation.min_regime_obs = 10
+    cfg.long_short.null_iterations = 2
+    cfg.evaluation.reality_check_bootstrap = 40
+    sessions = _sessions(n_sessions)
+    days = sorted(sessions)
+    minutes_by_day = {d: _session_minutes(d, "AAA", 0.05) for d in sessions}
+    daily = _daily_from(minutes_by_day)
+    picks = {d: ["AAA"] for d in sessions}
+    stats = pl.DataFrame({"date": days, "ticker": ["AAA"] * len(days),
+                          "spread_bps": [30.0] * len(days),
+                          "vol_minute": [0.0] * len(days),
+                          "atr_pct": [0.02] * len(days)})
+    trials = [Trial("a", Combo(5, "or_low", 0.0), "uncapped"),
+              Trial("b", Combo(15, "or_low", 0.0), "uncapped")]
+    rng = np.random.default_rng(0)
+    matrix = np.column_stack([rng.normal(0.0012, 0.004, len(days)),
+                              rng.normal(-0.0002, 0.004, len(days))])
+    ledger = [Trade(days[i], "AAA", t.key, None, None, 10.0, 10.2, 10,
+                    "target", 2.0, 0.1, 1.9)
+              for t in trials for i in range(len(days))]
+    return (cfg, matrix, days, trials, ledger, daily, minutes_by_day, sessions,
+            {"a": picks, "b": picks}, stats)
+
+
+def test_haircut_and_reality_check_are_computed_and_recorded():
+    """Both were silently absent (haircut hardcoded None, RC never called), so
+    intraday runs reported a gauntlet they were not actually running."""
+    cfg, matrix, days, trials, ledger, daily, mins, sess, picks, stats = _gauntlet_fixture()
+    r = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks, stats,
+                     cfg, equity=100_000.0, seed=0)
+    d = r["diagnostics"]
+    assert d["haircut_sharpe"] is not None and d["haircut_sharpe"] >= 0.0
+    assert 0.0 <= d["haircut_fraction"] <= 1.0
+    assert 0.0 < d["reality_check_pvalue"] <= 1.0
+    # the haircut can only discount, never inflate
+    assert d["haircut_sharpe"] <= max(d["sr_annual_display"], 0.0) + 1e-9
+    # and both reach the registry row rather than staying in diagnostics
+    assert r["decision"].haircut_sharpe == d["haircut_sharpe"]
+
+
+def test_prior_trials_searched_deepens_the_haircut():
+    """A run deflates only its OWN trials, but the champion inherits axes fixed
+    by earlier runs. Declaring that prior search must discount MORE, never less
+    — v7 priced 32 trials against 776 actually searched."""
+    cfg, matrix, days, trials, ledger, daily, mins, sess, picks, stats = _gauntlet_fixture()
+    cfg.intraday.prior_trials_searched = 0
+    base_r = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks,
+                          stats, cfg, equity=100_000.0, seed=0)["diagnostics"]
+    cfg.intraday.prior_trials_searched = 744
+    deep = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks,
+                        stats, cfg, equity=100_000.0, seed=0)["diagnostics"]
+    assert base_r["trials_priced_for_haircut"] == len(trials)
+    assert deep["trials_priced_for_haircut"] == len(trials) + 744
+    assert deep["prior_trials_searched"] == 744
+    assert deep["haircut_sharpe"] < base_r["haircut_sharpe"]
+    assert deep["haircut_fraction"] > base_r["haircut_fraction"]
+    # the underlying observed t-stat is a property of the returns, not the search
+    assert deep["haircut_observed_tstat"] == base_r["haircut_observed_tstat"]
+
+
+def test_reality_check_gates_only_when_enabled():
+    """RC is always COMPUTED for intraday (its absence was a reporting gap) but
+    gating stays opt-in, exactly as in the daily stack: recording a number must
+    not silently change what gets promoted."""
+    cfg, matrix, days, trials, ledger, daily, mins, sess, picks, stats = _gauntlet_fixture()
+    cfg.evaluation.reality_check_gate_enabled = False
+    off = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks,
+                       stats, cfg, equity=100_000.0, seed=0)
+    assert off["diagnostics"]["reality_check_pvalue"] > 0.0
+    cfg.evaluation.reality_check_gate_enabled = True
+    cfg.evaluation.reality_check_threshold = 0.0  # nothing can clear this
+    on = evaluate_orb(matrix, days, trials, ledger, daily, mins, sess, picks,
+                      stats, cfg, equity=100_000.0, seed=0)
+    assert on["decision"].promoted is False
+    assert on["diagnostics"]["reality_check_pvalue"] == off["diagnostics"]["reality_check_pvalue"]

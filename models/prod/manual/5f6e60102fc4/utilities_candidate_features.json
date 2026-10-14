@@ -1,0 +1,18 @@
+{
+  "features": [
+    "returns",
+    "fracdiff",
+    "overnight_ret",
+    "intraday_bias_21",
+    "resid_rev_5",
+    "ret_since_filing"
+  ],
+  "metadata": {
+    "sector": "Utilities",
+    "params": {
+      "max_depth": 2,
+      "learning_rate": 0.01
+    },
+    "meta_labeling": null
+  }
+}

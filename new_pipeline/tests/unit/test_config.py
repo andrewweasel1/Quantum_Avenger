@@ -9,6 +9,14 @@ def test_config_loads_defaults():
     assert config.logging.level == "INFO"
 
 
+def test_feature_selection_defaults_to_causal():
+    tournament = reload_config().tournament
+    # Causal (Granger + purged-CPCV MDA) is the default selector; knobs round-trip.
+    assert tournament.feature_selection_method == "causal"
+    assert tournament.causal_alpha == 0.10
+    assert tournament.causal_granger_lags == 3
+
+
 def test_config_environment_override(monkeypatch):
     monkeypatch.setenv("QA_DATA__RAW_VAULT_DIR", "/tmp/test_raw")
     monkeypatch.setenv("QA_EXECUTION__MAX_RISK_PER_TRADE", "0.05")
@@ -16,3 +24,14 @@ def test_config_environment_override(monkeypatch):
 
     assert config.data.raw_vault_dir == "/tmp/test_raw"
     assert config.execution.max_risk_per_trade == 0.05
+
+
+def test_regime_gate_enabled_by_default():
+    """The per-regime DSR gate defaults ON (schema and YAML in sync) now that it
+    runs on the calendar-daily champion series."""
+    from new_pipeline.config import base
+
+    cfg = base.get_config()
+    assert cfg.evaluation.regime_gate_enabled is True
+    assert cfg.evaluation.min_regime_obs == 60
+    assert cfg.evaluation.thin_regime_policy == "skip"

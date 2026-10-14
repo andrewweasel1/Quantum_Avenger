@@ -25,6 +25,16 @@ class PromotionDecision:
     pbo: float | None = None
     psr: float | None = None
     haircut_sharpe: float | None = None
+    cpcv_path_pass_fraction: float | None = None
+    cpcv_path_dsr_median: float | None = None
+    reality_check_pvalue: float | None = None
+    n_trades: int | None = None
+    # Observation count behind the gate statistics (calendar days when the
+    # evaluation ran on the daily axis; pooled samples on legacy artifacts).
+    n_obs: int | None = None
+    # Per-decoded-regime gate detail ({state: {dsr, sr_annual, n_obs, ...}});
+    # recorded when evaluation.regime_breakdown_enabled - pure observability.
+    regime_breakdown: dict | None = None
 
 
 def assess_promotion(
@@ -38,13 +48,46 @@ def assess_promotion(
     psr=None,
     haircut_sharpe=None,
     minbtl_satisfied=None,
+    path_pass_fraction=None,
+    path_fraction_threshold=0.5,
+    path_dsr_median=None,
+    path_gate_enabled=False,
+    reality_check_pvalue=None,  # recorded; gates only when reality_check_gate_enabled
+    reality_check_gate_enabled=False,
+    reality_check_threshold=0.05,
+    n_trades=None,
+    n_obs=None,
 ) -> PromotionDecision:
-    """Apply every promotion gate; the first failure names the rejection reason."""
+    """Apply every promotion gate; the first failure names the rejection reason.
+
+    ``n_trades`` (when supplied) is the count of realized OOS trades behind the
+    champion's return series. Zero trades means the entry threshold never fired —
+    every statistic downstream is 0.0 *by construction*, so the zero-trade gate is
+    checked first: "low DSR" on an all-zero series would misread a dead strategy
+    as a weak one.
+
+    The CPCV path gate (when enabled and supplied) requires at least
+    ``path_fraction_threshold`` of the reconstructed backtest paths to clear the
+    Deflated-Sharpe threshold individually — robustness beyond the single mean
+    path's DSR.
+    """
+    path_gate = (
+        path_gate_enabled
+        and path_pass_fraction is not None
+        and path_pass_fraction < path_fraction_threshold
+    )
     gates = {
+        "zero trades (entry threshold never fired)": n_trades is not None and n_trades == 0,
         "low DSR": dsr < dsr_threshold,
         "failed synthetic gauntlet": synthetic_sharpe <= synthetic_min,
         "overfit (high PBO)": pbo is not None and pbo > pbo_threshold,
         "backtest shorter than MinBTL": minbtl_satisfied is False,
+        "unstable across CPCV paths": path_gate,
+        "data-snooped (reality check)": (
+            reality_check_gate_enabled
+            and reality_check_pvalue is not None
+            and reality_check_pvalue > reality_check_threshold
+        ),
     }
     failed = [reason for reason, tripped in gates.items() if tripped]
     promoted = not failed
@@ -57,6 +100,11 @@ def assess_promotion(
         pbo=pbo,
         psr=psr,
         haircut_sharpe=haircut_sharpe,
+        cpcv_path_pass_fraction=path_pass_fraction,
+        cpcv_path_dsr_median=path_dsr_median,
+        reality_check_pvalue=reality_check_pvalue,
+        n_trades=n_trades,
+        n_obs=n_obs,
     )
 
 
@@ -80,6 +128,12 @@ class PromotionRegistry:
             "pbo": decision.pbo,
             "psr": decision.psr,
             "haircut_sharpe": decision.haircut_sharpe,
+            "cpcv_path_pass_fraction": decision.cpcv_path_pass_fraction,
+            "cpcv_path_dsr_median": decision.cpcv_path_dsr_median,
+            "reality_check_pvalue": decision.reality_check_pvalue,
+            "n_trades": decision.n_trades,
+            "n_obs": decision.n_obs,
+            "regime_breakdown": decision.regime_breakdown,
             "promoted": decision.promoted,
             "reason": decision.reason,
             "timestamp": datetime.now(UTC).isoformat(),
@@ -88,6 +142,22 @@ class PromotionRegistry:
         self._data["promotions"].append(entry)  # append-only audit trail
         if decision.promoted:
             self._data["active_champions"][decision.sector] = model_path
+        self._save()
+        return entry
+
+    def retire(self, sector: str, reason: str = "MANUAL RETIREMENT") -> dict:
+        """Remove a champion from active trading, keeping the audit trail:
+        appends a non-promoted row recording the retirement and drops the
+        active_champions entry. The model artifacts are untouched."""
+        entry = {
+            "sector": sector,
+            "promoted": False,
+            "reason": reason,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "model_path": None,
+        }
+        self._data["promotions"].append(entry)
+        self._data["active_champions"].pop(sector, None)
         self._save()
         return entry
 

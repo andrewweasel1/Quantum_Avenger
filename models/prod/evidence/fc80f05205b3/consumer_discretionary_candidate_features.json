@@ -1,0 +1,20 @@
+{
+  "features": [
+    "returns",
+    "yang_zhang_vol",
+    "spread_pct",
+    "fracdiff",
+    "garch_vol",
+    "overnight_ret",
+    "intraday_bias_21",
+    "ret_since_filing"
+  ],
+  "metadata": {
+    "sector": "Consumer Discretionary",
+    "params": {
+      "max_depth": 1,
+      "learning_rate": 0.01
+    },
+    "meta_labeling": null
+  }
+}

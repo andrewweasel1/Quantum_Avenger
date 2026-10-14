@@ -1,0 +1,21 @@
+{
+  "features": [
+    "returns",
+    "corwin_schultz",
+    "ncskew",
+    "fracdiff",
+    "overnight_ret",
+    "resid_mom_21",
+    "resid_rev_5",
+    "ret_since_filing",
+    "mkt_trend_pctl_252"
+  ],
+  "metadata": {
+    "sector": "Energy",
+    "params": {
+      "max_depth": 2,
+      "learning_rate": 0.05
+    },
+    "meta_labeling": null
+  }
+}

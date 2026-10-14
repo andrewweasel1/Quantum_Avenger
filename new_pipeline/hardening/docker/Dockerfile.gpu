@@ -1,0 +1,35 @@
+# Quantum Avenger — GPU trainer/feature image (TEMPLATE — needs a CUDA host).
+# Build from the repo root on a machine with the NVIDIA container toolkit:
+#   docker build -f new_pipeline/hardening/docker/Dockerfile.gpu -t quantum-avenger-gpu .
+# Run with:  docker run --gpus all quantum-avenger-gpu pipeline
+#
+# CUDA 12 runtime + the cupy/numba-CUDA extras; XGBoost picks up the GPU via
+# tournament.device=cuda (config). Kernel parity vs CPU is asserted by the
+# GPU-marked tests (.github/workflows/nightly-gpu.yml).
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app \
+    QA_GPU__CUDA_ENABLED=true \
+    QA_TOURNAMENT__DEVICE=cuda
+
+RUN apt-get update && apt-get install -y --no-install-recommends python3.11 python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python
+
+WORKDIR /app
+
+COPY new_pipeline/requirements.txt new_pipeline/requirements-gpu.txt ./
+RUN python -m pip install --no-cache-dir -r requirements.txt -r requirements-gpu.txt
+
+COPY new_pipeline ./new_pipeline
+
+RUN useradd --create-home --uid 10001 quant \
+    && mkdir -p data models logs \
+    && chown -R quant /app
+USER quant
+
+ENTRYPOINT ["python", "-m", "new_pipeline.main"]
+CMD ["pipeline"]

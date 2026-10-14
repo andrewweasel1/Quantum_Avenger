@@ -1,0 +1,25 @@
+{
+  "features": [
+    "intraday_ret",
+    "garman_klass_vol",
+    "spread_pct",
+    "xf_reversal_21",
+    "fracdiff",
+    "corwin_schultz",
+    "overnight_ret",
+    "overnight_bias_21",
+    "intraday_bias_21",
+    "resid_rev_5",
+    "turnover_z_21",
+    "ret_since_filing",
+    "mkt_trend_pctl_252"
+  ],
+  "metadata": {
+    "sector": "Information Technology",
+    "params": {
+      "max_depth": 2,
+      "learning_rate": 0.05
+    },
+    "meta_labeling": null
+  }
+}
