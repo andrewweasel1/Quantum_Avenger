@@ -247,6 +247,52 @@ def compute_targets(panel: pl.DataFrame, params: dict, state: dict,
     return weights, new_state
 
 
+def restate_anchors(new_state: dict, targets: dict, today: date) -> dict:
+    """Re-anchor the vol target's shadow book on the one that actually trades.
+
+    ``compute_targets`` sets ``unit_held`` to the SELECTED book, but
+    ``solve_short_share_targets`` then drops every short no whole share can
+    express (48 of 295 on 2026-10-19 — ASML, META, V, LIN, SEB: each a share
+    price above its own weight budget). Those drops are deterministic and
+    known before an order is sent. ``unit_held`` is precisely what the vol
+    estimator measures, so leaving the dropped names in it feeds the
+    estimator the returns of a book that is not trading — a phantom short leg
+    worth 16.3% of that day's short side.
+
+    THREE things are deliberately left alone.
+
+    ``held`` stays the SELECTED book, because the hold-day branch of
+    ``compute_targets`` returns it as that day's targets. Stripping the
+    unsizeable shorts out of it would stop the book re-attempting them for
+    the rest of the rebalance cycle, while the frozen spec holds all 295
+    throughout. Leaving them costs nothing: the solver re-drops them each
+    day, so they generate no orders, and a name whose price falls back inside
+    its budget gets expressed without waiting for the next rebalance.
+
+    ``prev_longs``/``prev_shorts`` drive the rank-hysteresis band, which the
+    spec runs on the SELECTED legs — the backtest
+    (tournament/long_short.py) sets prev_* from the selected legs and has no
+    share sizing anywhere. Narrowing them would make live selection diverge
+    from the spec the book was promoted under.
+
+    And on a HOLD day this is a no-op: ``unit_held`` is then the shadow book
+    ADVANCED by each session's returns, not an equal-weight book, so
+    renormalizing it would discard the drift the estimator is built on.
+
+    Runs BEFORE submission, so the crash-safety of the state write is
+    unchanged: it re-anchors on intent-after-sizing, never on fills.
+    """
+    if new_state.get("last_rebalance_date") != str(today):
+        return new_state
+    traded = {t: w for t, w in targets.items() if w != 0.0}
+    gross = sum(abs(w) for w in traded.values())
+    if gross <= 0:
+        return {**new_state, "unit_held": {}}
+    # Same normalization the pre-unit_held migration uses, so a restated
+    # shadow book and a migrated one carry the same meaning.
+    return {**new_state, "unit_held": {t: w / gross for t, w in traded.items()}}
+
+
 def solve_short_share_targets(targets: dict, prices: dict, capital: float) -> tuple[dict, dict]:
     """Integer-share short targets whose NOTIONAL hits the leg's target gross.
 
@@ -695,6 +741,9 @@ def main() -> None:  # pragma: no cover - operational I/O around tested core
                         "notional $%.0f of $%.0f target (fill %.4f)",
                         shortfix["sized"], shortfix["dropped"], shortfix["notional"],
                         shortfix["target_notional"], shortfix["fill"])
+    # The solver's drops are known pre-submission, so the ledger must record
+    # the solved book, not the selected one (no-op on a hold day).
+    new_state = restate_anchors(new_state, targets, date.today())
     orders = diff_orders(targets, positions, prices, capital, fractionable=fractionable)
 
     print(f"book: {len([w for w in targets.values() if w > 0])} longs / "

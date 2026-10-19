@@ -13,6 +13,7 @@ from new_pipeline.scripts.paper_trade_book import (
     assert_book_branch,
     compute_targets,
     diff_orders,
+    restate_anchors,
 )
 from new_pipeline.scripts.promote_candidates import manual_promote
 
@@ -630,3 +631,88 @@ def test_current_branch_survives_a_missing_git_binary(monkeypatch):
 
     monkeypatch.setattr(ptb.subprocess, "run", _boom)
     assert ptb.current_branch() is None
+
+
+def test_restate_anchors_drops_unsizeable_shorts_from_the_vol_targets_book():
+    """unit_held is what the vol estimator measures, so a short the solver
+    could not express must not appear in it."""
+    today = date(2026, 10, 19)
+    selected = {"L1": 0.25, "L2": 0.25, "CHEAP": -0.25, "PRICEY": -0.25}
+    state = {"last_rebalance_date": str(today), "held": dict(selected),
+             "unit_held": dict(selected), "prev_longs": ["L1", "L2"],
+             "prev_shorts": ["CHEAP", "PRICEY"]}
+    solved = {"L1": 0.25, "L2": 0.25, "CHEAP": -0.25}  # PRICEY unsizeable
+
+    out = restate_anchors(state, solved, today)
+
+    assert "PRICEY" not in out["unit_held"], "phantom short must leave the shadow book"
+    assert set(out["unit_held"]) == set(solved)
+    assert abs(sum(abs(w) for w in out["unit_held"].values()) - 1.0) < 1e-12, \
+        "unit_held is the shadow book at unit gross"
+
+
+def test_restate_anchors_keeps_held_as_the_selected_book():
+    """compute_targets' hold-day branch returns `held` as that day's targets.
+    Stripping the unsizeable shorts would stop the book re-attempting them
+    for the rest of the cycle, while the spec holds all of them throughout."""
+    today = date(2026, 10, 19)
+    selected = {"L1": 0.25, "L2": 0.25, "CHEAP": -0.25, "PRICEY": -0.25}
+    state = {"last_rebalance_date": str(today), "held": dict(selected),
+             "unit_held": dict(selected), "prev_longs": ["L1", "L2"],
+             "prev_shorts": ["CHEAP", "PRICEY"]}
+
+    out = restate_anchors(state, {"L1": 0.25, "L2": 0.25, "CHEAP": -0.25}, today)
+
+    assert out["held"] == selected, "an unsizeable short stays a target"
+    assert "PRICEY" in out["held"] and "PRICEY" not in out["unit_held"], \
+        "the two anchors answer different questions and must diverge here"
+
+
+def test_restate_anchors_keeps_the_selected_legs_for_hysteresis():
+    """prev_* drive the rank band, which the frozen spec runs on the SELECTED
+    legs (the backtest has no share sizing anywhere)."""
+    today = date(2026, 10, 19)
+    state = {"last_rebalance_date": str(today), "held": {}, "unit_held": {},
+             "prev_longs": ["L1", "L2"], "prev_shorts": ["CHEAP", "PRICEY"]}
+
+    out = restate_anchors(state, {"L1": 0.5, "CHEAP": -0.5}, today)
+
+    assert out["prev_shorts"] == ["CHEAP", "PRICEY"], \
+        "an unsizeable short is still a SELECTED short"
+    assert out["prev_longs"] == ["L1", "L2"]
+
+
+def test_restate_anchors_never_touches_an_advanced_shadow_book_on_a_hold_day():
+    """On a hold day unit_held is the shadow book ADVANCED by each session's
+    returns. Renormalizing it would discard the drift the vol estimator is
+    built on and silently reset its input."""
+    today = date(2026, 10, 19)
+    drifted = {"L1": 0.31, "L2": 0.19, "CHEAP": -0.28}  # drifted; gross != 1
+    state = {"last_rebalance_date": "2026-10-12",  # NOT today -> hold day
+             "held": {"L1": 0.3, "L2": 0.2, "CHEAP": -0.3},
+             "unit_held": drifted, "unit_returns": [0.001, -0.002],
+             "prev_longs": ["L1", "L2"], "prev_shorts": ["CHEAP"]}
+
+    out = restate_anchors(state, {"L1": 0.5}, today)
+
+    assert out["unit_held"] == drifted, "the advanced shadow book must survive"
+    assert out == state, "a hold day restates nothing at all"
+
+
+def test_restate_anchors_round_trips_the_live_shape_of_2026_10_19():
+    """295 selected shorts, 247 sizeable: the shadow book records 247, while
+    the targets and the hysteresis band still carry all 295."""
+    today = date(2026, 10, 19)
+    longs = {f"L{i}": 0.5 / 295 for i in range(295)}
+    shorts = {f"S{i}": -0.5 / 295 for i in range(295)}
+    state = {"last_rebalance_date": str(today), "held": {**longs, **shorts},
+             "unit_held": {**longs, **shorts},
+             "prev_longs": sorted(longs), "prev_shorts": sorted(shorts)}
+    solved = {**longs, **{k: v for k, v in list(shorts.items())[:247]}}
+
+    out = restate_anchors(state, solved, today)
+
+    assert sum(1 for w in out["unit_held"].values() if w < 0) == 247
+    assert sum(1 for w in out["unit_held"].values() if w > 0) == 295
+    assert sum(1 for w in out["held"].values() if w < 0) == 295, "targets unchanged"
+    assert len(out["prev_shorts"]) == 295, "selection unchanged by sizing"
