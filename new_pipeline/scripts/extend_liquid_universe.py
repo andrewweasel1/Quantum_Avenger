@@ -172,7 +172,19 @@ def main() -> None:  # pragma: no cover - I/O shell around tested helpers
         census = census.filter(~pl.col("ticker").is_in(list(excluded)))
     members = monthly_membership(bars, census, top_n=args.top_n,
                                  min_price=args.min_price)
-    intervals = apply_gap_guard(membership_intervals(members, floor=floor), bars)
+    raw_intervals = membership_intervals(members, floor=floor)
+    intervals = apply_gap_guard(raw_intervals, bars)
+    # A silent no-op is the failure mode that has cost the most here: last
+    # month the floor bug reported 0 rows with no hint why. Say what the rule
+    # produced and what the guard kept, so "0" always comes with a reason.
+    print(f"members {members.height} rows -> {len(raw_intervals)} tickers at/after "
+          f"the floor -> {len(intervals)} after the bar-continuity guard")
+    if raw_intervals and not intervals:
+        inside = bars.filter(pl.col("date") >= floor)["date"].n_unique()
+        print(f"  NO-OP: apply_gap_guard dropped every interval. It needs >=2 bar "
+              f"days inside an interval and the window holds {inside} at/after "
+              f"{floor}. If that month has only just begun, re-run once it has "
+              f"a second session — do NOT relax the guard to force it through.")
     med = dict(members.group_by("ticker").agg(pl.col("adv_rank").median()).iter_rows())
     labels = {t: (EXTENDED_MID if r <= args.mid_cutoff else EXTENDED_SMALL)
               for t, r in med.items()}
@@ -185,7 +197,13 @@ def main() -> None:  # pragma: no cover - I/O shell around tested helpers
         writer.writeheader()
         writer.writerows(merged)
     # keep the alias file total: new tickers alias to themselves
+    # Derived from --out, so staging the fixture to a temp path for review used
+    # to crash here on a missing sibling. Fall back to the fixture's own alias
+    # file, which is the one that actually needs to stay total.
     alias_path = out.with_name(out.stem + "_aliases.csv")
+    if not alias_path.exists():
+        alias_path = Path(args.fixture).with_name(
+            Path(args.fixture).stem + "_aliases.csv")
     alias_rows = list(csv.DictReader(open(alias_path, encoding="utf-8")))
     covered = {r["ticker"] for r in alias_rows}
     for ticker in sorted({r["ticker"] for r in merged} - covered):

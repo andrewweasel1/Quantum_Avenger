@@ -145,6 +145,15 @@ def main() -> None:  # pragma: no cover - egress orchestration around tested hel
     parser.add_argument("--vault-dir", default="data/liquid_vault")
     parser.add_argument("--chunk-size", type=int, default=100)
     parser.add_argument("--sleep", type=float, default=0.35)  # ~170 req/min headroom
+    parser.add_argument("--census", default="",
+                        help="census CSV; candidates are intersected with its "
+                             "tickers before any fetch. Alpaca's registry "
+                             "carries CUSIP/CVR-shaped junk (0029900E0, "
+                             "004CVR049) that 400s the bars endpoint, and "
+                             "_get_json retries 5x before fetch_chunk_bars "
+                             "bisects the batch — 30 minutes for zero chunks "
+                             "on 2026-10-01. Outcome-equivalent to filtering "
+                             "later, since the rule needs >=10 census days.")
     args = parser.parse_args()
 
     vault = Path(args.vault_dir)
@@ -160,6 +169,13 @@ def main() -> None:  # pragma: no cover - egress orchestration around tested hel
             payload = _get_json(ASSETS_URL.format(status=status))
             assets.extend(payload or [])
         symbols = filter_candidates(assets)
+        if args.census and Path(args.census).exists():
+            keep = set(pl.read_csv(args.census, columns=["ticker"])["ticker"].unique())
+            before = len(symbols)
+            symbols = sorted(set(symbols) & keep)
+            print(f"census intersect: {before} -> {len(symbols)} candidates "
+                  f"({before - len(symbols)} never traded in the window)",
+                  flush=True)
         candidates_path.write_text(json.dumps(symbols))
     print(f"candidates: {len(symbols)} symbols", flush=True)
 

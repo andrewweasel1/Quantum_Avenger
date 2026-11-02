@@ -84,3 +84,42 @@ def test_finra_parser_accepts_2026_fractional_volume_format():
     assert by["A"]["total_volume"] == 968523 and by["A"]["short_volume"] == 669512
     assert "AAPL" in by and by["OLDSTYLE"]["total_volume"] == 406
     assert len(rows) == 3
+
+
+def test_gap_guard_needs_two_sessions_so_a_fresh_month_cannot_extend_yet():
+    """Why 2026-11-02's rebuild correctly produced nothing.
+
+    apply_gap_guard is what makes membership mean "backed by continuous bar
+    coverage": with one bar inside an interval it cannot evidence a gap, so it
+    drops the interval. On the 1st trading day of a month that is the whole
+    month, and the extension legitimately no-ops (1500 intervals built, 0
+    survived). The fix is to re-run on the 2nd session — NOT to relax this
+    bound, which would let a single print of data mint a month of membership.
+    """
+    import polars as pl
+    from new_pipeline.scripts.build_liquid_universe import apply_gap_guard
+
+    nov = (date(2026, 11, 1), date(2026, 12, 1))
+    one_session = pl.DataFrame({"ticker": ["A"], "date": [date(2026, 11, 2)]})
+    assert apply_gap_guard({"A": [nov]}, one_session) == {}, \
+        "a single session must not mint a month of membership"
+
+    two_sessions = pl.DataFrame({"ticker": ["A", "A"],
+                                 "date": [date(2026, 11, 2), date(2026, 11, 3)]})
+    assert apply_gap_guard({"A": [nov]}, two_sessions) == {"A": [nov]}, \
+        "the 2nd session is what unblocks the monthly extension"
+
+
+def test_gap_guard_still_truncates_a_real_coverage_hole():
+    """The >=2 bound must not be confused for the guard's actual job: a long
+    bar gap inside an interval truncates it at the hole."""
+    import polars as pl
+    from new_pipeline.scripts.build_liquid_universe import apply_gap_guard
+
+    span = (date(2026, 6, 1), date(2026, 12, 1))
+    holed = pl.DataFrame({"ticker": ["A", "A", "A"],
+                          "date": [date(2026, 6, 2), date(2026, 6, 3),
+                                   date(2026, 11, 2)]})  # ~5 month hole
+    out = apply_gap_guard({"A": [span]}, holed)
+    assert out["A"][0][0] == date(2026, 6, 1)
+    assert out["A"][0][1] < date(2026, 12, 1), "must truncate at the hole"
