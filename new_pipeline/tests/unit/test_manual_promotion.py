@@ -682,10 +682,13 @@ def test_restate_anchors_keeps_the_selected_legs_for_hysteresis():
     assert out["prev_longs"] == ["L1", "L2"]
 
 
-def test_restate_anchors_never_touches_an_advanced_shadow_book_on_a_hold_day():
-    """On a hold day unit_held is the shadow book ADVANCED by each session's
-    returns. Renormalizing it would discard the drift the vol estimator is
-    built on and silently reset its input."""
+def test_restate_anchors_never_touches_a_mid_series_shadow_book_on_a_hold_day():
+    """On a hold day unit_held is mid-series: the session advance holds its
+    weights fixed and only pops names with no return (forced exits). The
+    targets handed in are the full SELECTED book re-solved, so restating would
+    re-add every pruned name and swap the basket underneath a running return
+    series. Asserted on a weight set that is both pruned AND off unit gross,
+    so neither a renormalize nor a re-add can pass."""
     today = date(2026, 10, 19)
     drifted = {"L1": 0.31, "L2": 0.19, "CHEAP": -0.28}  # drifted; gross != 1
     state = {"last_rebalance_date": "2026-10-12",  # NOT today -> hold day

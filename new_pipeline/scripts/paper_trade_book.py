@@ -275,9 +275,15 @@ def restate_anchors(new_state: dict, targets: dict, today: date) -> dict:
     share sizing anywhere. Narrowing them would make live selection diverge
     from the spec the book was promoted under.
 
-    And on a HOLD day this is a no-op: ``unit_held`` is then the shadow book
-    ADVANCED by each session's returns, not an equal-weight book, so
-    renormalizing it would discard the drift the estimator is built on.
+    And on a HOLD day this is a no-op, because ``unit_held`` is then mid-series.
+    The session advance does NOT rescale its weights (verified against the
+    2026-11-05 hold day: it holds them fixed at unit gross and only POPS names
+    with no return that session, as forced exits). On a hold day the targets
+    handed here are ``state['held']`` — the full SELECTED book — re-solved at
+    today's prices, so restating from them would re-add every name the advance
+    had pruned and swap the basket underneath a running return series.
+    ``unit_returns`` would stop being one book's return path, which is exactly
+    what the vol estimator assumes it is.
 
     Runs BEFORE submission, so the crash-safety of the state write is
     unchanged: it re-anchors on intent-after-sizing, never on fills.
