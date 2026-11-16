@@ -71,7 +71,7 @@ not — see "Known seams".
 | `frontend/` | 151 MB dashboard for the daily book. |
 | the parent's roadmap and phase specifications, `codebase_bundle.md` | They describe the daily system; this project starts from the handover instead. |
 | `config/champion_run_body.json`, `config/CHAMPION.md` | The frozen daily champion's configuration. |
-| the parent's `claude.md`, `README.md`, `Makefile`, CI workflow, session hook, `.claude/settings.json`, `mcp.json` | Replaced by this project's own. |
+| the parent's `claude.md`, `README.md`, `Makefile`, CI workflow, Dependabot config, session hook, `.claude/settings.json`, `mcp.json` | Replaced by this project's own. Dependabot keeps the weekly pip and GitHub Actions updates and drops the parent's `npm` entry for a `/frontend` that is not here. |
 
 **What the plan's Phase 3 can and cannot reuse.** The primitives it names
 travel with their tests: the purged CPCV splitter, the causal Granger screen

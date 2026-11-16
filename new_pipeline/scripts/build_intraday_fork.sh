@@ -161,6 +161,10 @@ install -m 644 "$DEST/$TPL/claude.md"      "$DEST/claude.md"
 install -m 644 "$DEST/$TPL/README.md"      "$DEST/README.md"
 install -m 644 "$DEST/$TPL/Makefile"       "$DEST/Makefile"
 install -m 644 "$DEST/$TPL/ci.yml"         "$DEST/.github/workflows/ci.yml"
+# The parent's Dependabot config has an npm entry for /frontend, which does not
+# travel. It was left in on the first publish and Dependabot started a job for
+# a directory that does not exist.
+install -m 644 "$DEST/$TPL/dependabot.yml" "$DEST/.github/dependabot.yml"
 install -m 755 "$DEST/$TPL/session-start.sh" "$DEST/.claude/hooks/session-start.sh"
 install -m 644 "$DEST/$TPL/settings.json"  "$DEST/.claude/settings.json"
 install -m 644 "$DEST/$TPL/KICKOFF.md"     "$DEST/docs/fork/KICKOFF.md"
