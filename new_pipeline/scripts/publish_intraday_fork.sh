@@ -50,7 +50,13 @@ $TRAILER}"
   for t in data/minute_archives/*.tar; do
     label="$(basename "$t" .tar)"
     git add "$t"
-    git commit -q -m "Minute vault archive ${label#minute_} ($(( $(stat -c %s "$t") / 1000000 ))MB)${TRAILER:+
+    # [skip ci]: the workflow runs on every push to main, and these are pushed
+    # one at a time. Without it 63 data-only pushes trigger 63 CI runs, billed
+    # against the owner's Actions minutes on a private repository, to re-test
+    # code that did not change. CI runs once, on the import commit.
+    git commit -q -m "Minute vault archive ${label#minute_} ($(( $(stat -c %s "$t") / 1000000 ))MB)
+
+Data only: no code changed, so CI is skipped for this push. [skip ci]${TRAILER:+
 
 $TRAILER}"
   done
