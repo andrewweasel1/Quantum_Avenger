@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The minute-vault archives are 4.2 GB and no test reads them: a full
+          # checkout cost ~7 minutes per job in the parent repository. Cone
+          # mode keeps the root files plus the directories listed here.
+          sparse-checkout: |
+            .github
+            new_pipeline
+            docs
+            evidence
+            data/quote_vault
+            data/metadata
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: new_pipeline/requirements*.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r new_pipeline/requirements.txt -r new_pipeline/requirements-dev.txt "alpaca-py>=0.33"
+      - name: Lint (ruff)
+        run: ruff check new_pipeline
+      - name: Tests + coverage gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          NUMBA_DISABLE_JIT: "1"  # let coverage trace the @njit kernels
+        run: >-
+          pytest new_pipeline/tests
+          --cov=new_pipeline --cov-report=term-missing --cov-fail-under=85

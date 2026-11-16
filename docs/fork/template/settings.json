@@ -1,0 +1,32 @@
+{
+  "sandbox": {
+    "network": {
+      "allowedDomains": [
+        "paper-api.alpaca.markets",
+        "data.alpaca.markets",
+        "stream.data.alpaca.markets",
+        "cdn.finra.org"
+      ]
+    }
+  },
+  "permissions": {
+    "deny": [
+      "Edit(./new_pipeline/evaluation/**)",
+      "Write(./new_pipeline/evaluation/**)",
+      "Edit(./docs/fork/GAUNTLET.sha256)",
+      "Write(./docs/fork/GAUNTLET.sha256)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -9,11 +9,17 @@
 #
 # Usage: SC=<scratchpad dir> bash new_pipeline/scripts/minute_ingest_checkpointed_v2.sh
 #   Backfill a different span:  SC=... START_YM=2021-09 END_YM=2024-07 bash ...
+#   BRANCH defaults to the checked-out branch; COMMIT_TRAILER (optional) is
+#   appended to each checkpoint commit. Both were hardcoded to one repo's
+#   branch and one session's attribution, which made every push fail from any
+#   other checkout — after the month had already been ingested.
 set -euo pipefail
 SC="${SC:?set SC to the scratchpad dir}"
 START_YM="${START_YM:-2024-08}"
 END_YM="${END_YM:-2026-08}"
 REPO="$(pwd)"
+BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
+COMMIT_TRAILER="${COMMIT_TRAILER:-}"
 VAULT="$SC/minute_vault/by_symbol_month"
 ARCH="data/minute_archives"
 mkdir -p "$VAULT" "$REPO/$ARCH"
@@ -34,11 +40,10 @@ commit_tar() {
   local bytes
   bytes=$(stat -c %s "$tarball")
   git add "$tarball"
-  git commit -q -m "Minute vault checkpoint $label ($((bytes / 1000000))MB)
+  git commit -q -m "Minute vault checkpoint $label ($((bytes / 1000000))MB)${COMMIT_TRAILER:+
 
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01JCz1zKeRPyutPbqiAMDFQ6"
-  git push -q -u origin claude/zen-davinci-sH7mS
+$COMMIT_TRAILER}"
+  git push -q -u origin "$BRANCH"
 }
 
 for YM in $MONTHS; do
@@ -50,7 +55,7 @@ for YM in $MONTHS; do
     continue
   fi
   Y=${YM:0:4}; M=${YM:4:2}
-  QA_DATA__UNIVERSE_PATH=new_pipeline/data/universe/liquid1500_pit.csv \
+  QA_DATA__UNIVERSE_PATH="${QA_DATA__UNIVERSE_PATH:-new_pipeline/data/universe/liquid1500_pit.csv}" \
     python -m new_pipeline.scripts.ingest_minute_vault \
     --start "$Y-$M" --end "$Y-$M" --sleep 0.25 --vault-dir "$SC/minute_vault"
   TOTAL=$(cd "$SC" && du -cb minute_vault/by_symbol_month/*_"$YM".parquet | tail -1 | cut -f1)

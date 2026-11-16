@@ -71,3 +71,28 @@ def test_scanner_is_causal_to_the_open():
         .then(pl.lit(None, dtype=pl.Float64)).otherwise(pl.col("dollar_vol")).alias("dollar_vol"),
     )
     assert scan_day(full, day, 4, 5_000_000, 3.0) == scan_day(masked, day, 4, 5_000_000, 3.0)
+
+
+def test_assert_symbols_blames_the_universe_path_not_the_vault():
+    """Zero symbols used to surface later as "no minute data in the window",
+    which sends you to the vault. The cause is the universe path: unset, it
+    falls back to a packaged fixture with none of the extended-cap segments."""
+    from types import SimpleNamespace
+
+    import pytest
+    from new_pipeline.intraday.universe import assert_symbols
+
+    cfg = SimpleNamespace(
+        data=SimpleNamespace(universe_path=""),
+        intraday=SimpleNamespace(universe_segments=["Small Cap Extended",
+                                                    "Mid Cap Extended"]))
+    with pytest.raises(SystemExit) as err:
+        assert_symbols([], cfg)
+    msg = str(err.value)
+    assert "0 symbols" in msg and "Small Cap Extended" in msg
+    assert "QA_DATA__UNIVERSE_PATH" in msg and "liquid1500_pit.csv" in msg, \
+        "the refusal must name the fix, not just the symptom"
+    assert "packaged" in msg, "an unset path must be reported as the default fixture"
+
+    assert assert_symbols(["AAA", "BBB"], cfg) == ["AAA", "BBB"], \
+        "a resolved universe passes straight through"

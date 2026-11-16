@@ -26,6 +26,13 @@ if [ -f new_pipeline/requirements-dev.txt ]; then
   python3 -m pip install -r new_pipeline/requirements-dev.txt
 fi
 
+# This base image can ship a system Pillow built for a different Python, and
+# pip treats it as satisfying matplotlib's requirement. Importing matplotlib
+# then dies on PIL._imaging — and pytest 9 FAILS rather than skips an
+# importorskip on that kind of ImportError (seen 2026-11-16). Install a real
+# wheel ahead of the system package.
+python3 -m pip install --ignore-installed pillow
+
 # Dashboard API layer (fastapi/uvicorn): the test suite imports fastapi
 # directly (new_pipeline/tests/unit/test_api_*.py), so sessions need it for
 # `pytest` to even collect.

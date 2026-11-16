@@ -27,7 +27,7 @@ from new_pipeline.config import get_config
 from new_pipeline.intraday.calendar import load_sessions
 from new_pipeline.intraday.data import months_between
 from new_pipeline.intraday.quotes import cell_file, summarize_quotes
-from new_pipeline.intraday.universe import segment_symbols
+from new_pipeline.intraday.universe import assert_symbols, segment_symbols
 
 # Minutes after the session open at which to sample: early, mid-morning,
 # lunch, and the close-adjacent stretch, so a monthly median is not just a
@@ -115,7 +115,8 @@ def main() -> None:
     client = StockHistoricalDataClient(api_key, secret)
 
     vault = Path(args.vault_dir or cfg.intraday.quote_vault_dir)
-    symbols = args.symbols.split(",") if args.symbols else segment_symbols(cfg)
+    symbols = (args.symbols.split(",") if args.symbols
+               else assert_symbols(segment_symbols(cfg), cfg))
     sessions = load_sessions()
     sy, sm = map(int, args.start.split("-"))
     ey, em = map(int, args.end.split("-"))

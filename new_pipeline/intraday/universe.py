@@ -26,6 +26,25 @@ def segment_symbols(cfg) -> list[str]:
     return sorted(t for t, sector in universe.sectors().items() if sector in segments)
 
 
+def assert_symbols(symbols: list[str], cfg) -> list[str]:
+    """Fail loudly when the configured segments resolve to nothing.
+
+    An unset ``data.universe_path`` falls back to the packaged 41-name fixture,
+    which carries none of the extended-cap segments. The run then proceeds on
+    zero symbols and dies later on "no minute data in the window" — blaming
+    the vault for what is a universe-path problem. meanrev_v5 lost a run to
+    exactly this, and the intraday fork was first specified WITHOUT the
+    fixture on the strength of a unit suite that runs on fakes and could not
+    see it. Name the real cause and its fix at the point it happens."""
+    if symbols:
+        return symbols
+    raise SystemExit(
+        f"0 symbols in segments {sorted(cfg.intraday.universe_segments)} from "
+        f"universe fixture {cfg.data.universe_path or '<packaged 41-name default>'} "
+        "— set data.universe_path (env QA_DATA__UNIVERSE_PATH) to the Liquid "
+        "fixture: new_pipeline/data/universe/liquid1500_pit.csv")
+
+
 def eligibility(daily: pl.DataFrame, min_adv_dollars: float,
                 min_price: float, window: int = 20) -> pl.DataFrame:
     """(date, ticker, eligible) — session-T eligibility from STRICTLY PRIOR

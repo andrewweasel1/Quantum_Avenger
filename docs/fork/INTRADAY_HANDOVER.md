@@ -17,7 +17,9 @@ candidate manifest, so every figure here is re-derivable rather than asserted.
 
 ## 1. Opening-range breakout: no directional information
 
-Two runs, 78 priced trials, 262k simulated trades. Both rejected.
+Two runs, 72 priced trials by the committed returns matrices (12 + 60; the
+original run note says 78, which its own matrices do not support), 262k
+simulated trades. Both rejected.
 
 The decisive number is the **zero-cost counterfactual**: with trading costs set
 to **zero**, the gross session Sharpe of the best of 60 trials was **+0.024**
@@ -114,12 +116,16 @@ Going from 32 trials to 2,000 raises the required annualized Sharpe only
 
 Concretely, on the final mean-reversion run:
 
-| gate | value | verdict |
+| statistic | value | reading |
 |---|---|---|
 | observed t-stat | 2.019 | — |
-| Harvey-Liu haircut, 32 trials | **0.0000** (100% discount) | fails |
-| Harvey-Liu haircut, 776 trials | **0.0000** (100% discount) | fails |
-| White's Reality Check p | **0.6248** | fails (needs < 0.05) |
+| Harvey-Liu haircut, 32 trials | **0.0000** (100% discount) | nothing survives adjustment |
+| Harvey-Liu haircut, 776 trials | **0.0000** (100% discount) | the same |
+| White's Reality Check p | **0.6248** | consistent with no trial beating zero |
+
+Neither statistic is a promotion gate in this codebase (see "What actually
+blocks a promotion" below). The run was rejected by DSR — 0.4349 against 0.95
+— and by the per-regime bar. These two are the plainer explanation of why.
 
 A t of 2.02 does not survive BHY adjustment for even a 32-way search, so
 cross-run multiplicity never became binding. **Searching more carefully will
@@ -146,12 +152,32 @@ gate exists, has one very cheap path to success. It would not look like
 cheating — it would look like reasonable engineering by someone who did not
 know the history.
 
-Two gates were missing from the intraday evaluator for most of its life
+### What actually blocks a promotion, and what is only recorded
+
+Read `assess_promotion` rather than trusting a summary. An earlier draft of
+this document called the haircut and the Reality Check "gates that reject".
+That was wrong, and it is the kind of error that leaves a reader believing in
+a protection that is not switched on.
+
+| | computed | blocks promotion |
+|---|---|---|
+| zero trades · DSR below 0.95 · per-regime family-wise bar · timing-null margin at or below 0 · PBO above 0.5 | yes | **yes** |
+| CPCV path gate | when a model produces paths | yes when applicable (it was N/A for the rule-based books) |
+| White's Reality Check p-value | yes | **no** — only if `evaluation.reality_check_gate_enabled`, which is `false` |
+| Harvey-Liu haircut Sharpe | yes | **no** — recorded only; no gate exists for it |
+| PSR | yes | no — recorded only |
+
+The activity floors (`min_trades`, `min_active_session_frac`) are not a
+promotion gate either: they decide which trial is ELIGIBLE to be champion,
+because an argmax over trials otherwise crowns the thinnest one.
+
+The owner decided on 2026-11-16 to leave the Reality Check a diagnostic here,
+so the judge is byte-identical AND config-identical to the one behind every
+verdict in `evidence/`. Report both statistics on every run regardless. For
+most of the intraday evaluator's life they were not computed at all
 (`haircut_sharpe` was hardcoded `None`; `whites_reality_check` was never
-called), so intraday registry rows carried null where the daily stack carried
-values. They are wired now. **Both reject the final mean-reversion run
-independently of the sample-size work** — which is the argument for wiring
-gates before a result, not after.
+called), and on the final mean-reversion run they were the plainest statement
+of the result.
 
 If a gate genuinely looks wrong, the honest move is to write down the argument
 and the counter-evidence, not to change the number.
@@ -161,16 +187,27 @@ and the counter-evidence, not to change the number.
 The framework comes from a daily long/short book. These parts encode its
 horizon and will mislead at intraday scale:
 
-- **PIT universe** (`liquid1500_pit.csv`) — monthly, **end-exclusive**
-  membership intervals, built for daily rebalancing. The intraday stack
-  deliberately bypasses it via `segment_symbols`. Do not reach for it.
+- **The universe fixture is REQUIRED — but only as a static list.**
+  `liquid1500_pit.csv` was built for daily rebalancing: monthly,
+  **end-exclusive** membership intervals. The intraday stack ignores those
+  intervals. `intraday.universe.segment_symbols` takes every ticker that ever
+  carried a `Small Cap Extended` or `Mid Cap Extended` label — 2,634 names —
+  as the base set, and per-session eligibility is then computed causally
+  (trailing ADV and prior close, each shifted one session). So each day's
+  eligible set is causal, but the base set is NOT point-in-time. That is an
+  inherited approximation, disclosed here for the first time; decide
+  deliberately whether new work keeps it.
+  Without the fixture every run resolves zero symbols. An earlier draft of
+  this document said the stack "bypasses" it and told you not to reach for
+  it. That was wrong: the fork would not have run.
 - `score_smoothing_days`, `rebalance_days`, `vol_lookback_days`, the 252-day
   momentum/seasonality warmup — all daily-bar constructs.
 - HMM regime tagging on **daily** returns. The regime concept may transfer; the
   series it is fitted on does not.
-- `claude.md`'s promotion threshold of DSR > 0.95 is stated for the daily
-  stack. The intraday gauntlet adds a family-wise per-regime bar (T^K: 0.9025
-  for K=2, 0.857375 for K=3). Write the fork's own `claude.md`.
+- The parent's ruleset states one promotion threshold, DSR > 0.95. The
+  gauntlet as implemented also applies a family-wise per-regime bar (T^K:
+  0.9025 for K=2, 0.857375 for K=3) and the other gates tabulated above. This
+  repository ships its own `claude.md`.
 
 ## What is genuinely reusable
 
@@ -179,6 +216,8 @@ From the rejection notes, stated there rather than claimed here:
 - **The minute vault** (63 archives, 4.2 GB, 2021-09..2026-08) and the
   **measured quote vault** (60 monthly cells, 94.4% name-day coverage). Months
   of ingest. This is data, not assumptions — it carries no horizon bias.
+  Both cover the Small Cap Extended and Mid Cap Extended segments ONLY: there
+  is no large-cap minute data here.
 - **Measured NBBO spreads.** The old `spread_floor_bps: 15`/side guess was
   **~6× too conservative**: real quoted half-spread is p50 **2.4 bps**, mean
   4.6 (400 sampled fills, 400/400 returned quotes). Use the measured vault.
@@ -192,14 +231,46 @@ From the rejection notes, stated there rather than claimed here:
 
 ## Operational constraints that must carry over
 
-- **Dedicated Alpaca keys.** The intraday runner requires
-  `QA_ALPACA_INTRADAY__*` and refuses keys identical to the daily book's. The
-  daily book's keys should be **absent** from this environment, so touching
-  that account is structurally impossible rather than merely guarded.
+- **One dedicated paper account, under the generic names.** Every data path
+  reads `QA_ALPACA__API_KEY` / `QA_ALPACA__SECRET_KEY`; they must hold the
+  intraday paper account's pair. The daily book's keys must never be present
+  in this project's environment. Nothing in code can tell two paper accounts
+  apart, so the isolation IS the environment: this project runs in a cloud
+  environment of its own, one that has never held another project's keys. The
+  kickoff's first check is the account's position count for exactly this
+  reason.
+- **Known seam: `intraday_paper_session._intraday_keys`.** It demands a second
+  pair under `QA_ALPACA_INTRADAY__*` that DIFFERS from the generic pair — a
+  guard written for the parent repository, where two books shared one
+  environment. Here there is one book and one account. When a promoted
+  strategy first needs the paper session, collapse this to the single pair and
+  update `test_intraday_key_guards`; never satisfy it by bringing in another
+  account's keys. (An earlier draft of this document said to set only the
+  `QA_ALPACA_INTRADAY__*` names, which would have broken every data script.)
+- **Before any order-capable code runs**, add an account-identity guard:
+  record the intraday account number in config and assert it at startup.
 - Credentials live only in environment variables, never in files or commits;
   secret-scan the staged diff before every commit.
 - Paper only: hard-refuse any key that is not a `PK…` paper key, and always
   construct the broker with `paper=True`.
+
+## What changed in this document, and why to trust it less than the code
+
+The first version of this handover contained three errors that would each
+have cost a fresh session real time, and all three were written confidently:
+
+1. It said the intraday stack "bypasses" the universe fixture. It reads it;
+   without it every run resolves zero symbols.
+2. It said to set only `QA_ALPACA_INTRADAY__*`. Every data script reads the
+   generic names.
+3. It called the haircut and the Reality Check "gates that reject". Neither
+   blocks a promotion under the default configuration.
+
+All three survived a 437-test green suite, because the suite runs on fakes.
+They were found by reading the code paths end to end and by running the real
+pipeline in the stripped tree. Take that as the standing instruction for this
+document: where it and the code disagree, the code is right, and a claim here
+that matters to you is worth one direct check before you build on it.
 
 ## The honest summary
 

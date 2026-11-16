@@ -133,7 +133,10 @@ def main() -> None:
         if start_m < 1:
             start_y, start_m = start_y - 1, start_m + 12
 
-    symbols = (args.symbols.split(",") if args.symbols else _segment_symbols(cfg))
+    from new_pipeline.intraday.universe import assert_symbols
+
+    symbols = (args.symbols.split(",") if args.symbols
+               else assert_symbols(_segment_symbols(cfg), cfg))
     source = AlpacaIntradayDataSource(
         api_key, secret, feed=cfg.alpaca.data_feed,
         minutes=args.bar_minutes or cfg.intraday.bar_minutes)

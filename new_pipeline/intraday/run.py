@@ -36,7 +36,7 @@ from new_pipeline.intraday.orb import trials_from_config
 from new_pipeline.intraday.quotes import load_quote_vault, quote_stats_for
 from new_pipeline.intraday.scanner import apply_floors, build_signal_frame, scan_day
 from new_pipeline.intraday.simulate import run_backtest_trials, trailing_stats
-from new_pipeline.intraday.universe import segment_symbols
+from new_pipeline.intraday.universe import assert_symbols, segment_symbols
 
 SLUG = "intraday_orb"
 
@@ -53,7 +53,7 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
     seed_everything(seed)
     sessions_all = load_sessions()
     sessions = {d: s for d, s in sessions_all.items() if start <= d <= end}
-    symbols = segment_symbols(cfg)
+    symbols = assert_symbols(segment_symbols(cfg), cfg)
     vault = Path(cfg.intraday.vault_dir)
     print(f"{SLUG}: {len(symbols)} symbols, {len(sessions)} sessions, vault={vault}")
 
@@ -175,6 +175,11 @@ def run(start: date, end: date, output_dir: Path, equity: float, seed: int = 0) 
                            for s, r in verdict.per_regime.items()},
         },
         "window": {"start": str(start), "end": str(end), "equity": equity, "seed": seed},
+        # The EFFECTIVE gate settings this verdict was reached under. Defaults
+        # are pinned in the repository, but a QA_EVALUATION__* variable set at
+        # run time overrides them invisibly — recording them here is what
+        # makes a softened run show up in its own evidence.
+        "evaluation_config": cfg.evaluation.model_dump(),
         "cost_model": {"measured_spread_coverage": round(covered, 4),
                        "quote_vault_cells": quote_vault.height,
                        "max_touch_participation": cfg.intraday.max_touch_participation,
