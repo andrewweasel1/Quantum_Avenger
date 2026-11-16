@@ -112,6 +112,7 @@ EXCLUDE=(
   new_pipeline/scripts/ingest_training_data.py
   new_pipeline/scripts/rebuild_universe_forward.sh   # verifies via paper_trade_book
   new_pipeline/scripts/build_intraday_fork.sh        # this script
+  new_pipeline/scripts/publish_intraday_fork.sh      # and its publisher
   new_pipeline/config/champion_run_body.json
   new_pipeline/config/CHAMPION.md
   new_pipeline/requirements-api.txt            # nothing outside api/ imports fastapi
