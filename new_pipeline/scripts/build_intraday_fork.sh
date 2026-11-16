@@ -82,6 +82,10 @@ EXCLUDE=(
   mcp.json                                     # points at ./Quantum_Avenger paths
   .dockerignore
   .github/workflows/nightly-gpu.yml
+  .github/dependabot.yml                       # owner's call, 2026-11-16: no automated
+                                               # dependency PRs in the fork. It travelled
+                                               # unexamined on the first publish and opened
+                                               # 7 PRs (7 billed CI runs) within 3 minutes.
   docs/ARCHITECTURE_ROADMAP.md                 # the daily system's roadmap and specs
   docs/FULL_SYSTEM_INTEGRATION_GUIDE.md
   docs/IMPLEMENTATION_STATUS.md
@@ -161,10 +165,6 @@ install -m 644 "$DEST/$TPL/claude.md"      "$DEST/claude.md"
 install -m 644 "$DEST/$TPL/README.md"      "$DEST/README.md"
 install -m 644 "$DEST/$TPL/Makefile"       "$DEST/Makefile"
 install -m 644 "$DEST/$TPL/ci.yml"         "$DEST/.github/workflows/ci.yml"
-# The parent's Dependabot config has an npm entry for /frontend, which does not
-# travel. It was left in on the first publish and Dependabot started a job for
-# a directory that does not exist.
-install -m 644 "$DEST/$TPL/dependabot.yml" "$DEST/.github/dependabot.yml"
 install -m 755 "$DEST/$TPL/session-start.sh" "$DEST/.claude/hooks/session-start.sh"
 install -m 644 "$DEST/$TPL/settings.json"  "$DEST/.claude/settings.json"
 install -m 644 "$DEST/$TPL/KICKOFF.md"     "$DEST/docs/fork/KICKOFF.md"
